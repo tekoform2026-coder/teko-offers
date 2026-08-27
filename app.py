@@ -12,24 +12,29 @@ from docx import Document
 from docx.shared import Pt, RGBColor, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 
 st.set_page_config(page_title="TEKO Offers - Генератор на Оферти", layout="wide")
 
 st.title("🏗️ TEKO Offers — Генератор на Оферти за Кофраж")
-st.write("Попълнете данните за клиента, качете чертеж и системата ще генерира оферта.")
+st.write("Попълнете данните за клиента, изберете тип оферта и качете чертеж за генериране на документ.")
 
 # --- ВЗЕМАНЕ НА API KEY СКРИТО ОТ SECRETS ---
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 
-# --- ВХОДНИ ПОЛЕТА ЗА КЛИЕНТ И ОБЕКТ ---
-col1, col2, col3 = st.columns([2, 2, 1])
+# --- ВХОДНИ ПОЛЕТА ЗА КЛИЕНТ, ОБЕКТ И ТИП ОФЕРТА ---
+col1, col2, col3, col4 = st.columns([2, 2, 1.2, 1.2])
 
 with col1:
     client_name = st.text_input("Клиент / Фирма (До:)", value="Име на клиент / Фирма")
 with col2:
     project_name_user = st.text_input("Име на обект (Относно:)", value="Кофриране на стоманобетонови елементи")
 with col3:
-    unit_price = st.number_input("Ед. цена (€/m²)", value=100.0, step=5.0)
+    offer_type = st.selectbox("Тип оферта", ["Закупуване", "Наем"])
+with col4:
+    default_price = 100.0 if offer_type == "Закупуване" else 15.0
+    unit_price = st.number_input("Ед. цена (€/m²)", value=default_price, step=1.0)
 
 # --- ОБРАБОТКА НА ИЗОБРАЖЕНИЕ ---
 def process_uploaded_file(uploaded_file):
@@ -79,50 +84,67 @@ def extract_drawing_data(image_pil, api_key):
     )
     return json.loads(response.text)
 
-# --- ГЕНЕРИРАНЕ НА ТОЧНА TEKO WORD ОФЕРТА (.DOCX) ---
-def create_teko_word_docx(client_name, project_name, table_data, total_formwork, unit_price):
+# Функция за фонов цвят на клетки в Word
+def set_cell_background(cell, fill_hex):
+    tcPr = cell._tc.get_or_add_tcPr()
+    shd = OxmlElement('w:shd')
+    shd.set(qn('w:val'), 'clear')
+    shd.set(qn('w:color'), 'auto')
+    shd.set(qn('w:fill'), fill_hex)
+    tcPr.append(shd)
+
+# --- ГЕНЕРИРАНЕ НА ОФЕРТА В WORD ПО ОРИГИНАЛНИЯ ШАБЛОН ---
+def create_teko_word_docx(client_name, project_name, offer_type, table_data, total_formwork, unit_price):
     doc = Document()
     
-    # Задаване на полета на страницата
-    sections = doc.sections
-    for section in sections:
+    # Полета на страницата
+    for section in doc.sections:
         section.top_margin = Inches(0.6)
         section.bottom_margin = Inches(0.6)
         section.left_margin = Inches(0.8)
         section.right_margin = Inches(0.8)
 
-    # 1. Шапка / Брандинг
+    # 1. Шапка (Лого TEKO в Зелено + Фирмени данни в Синьо)
     p_header = doc.add_paragraph()
-    r_company = p_header.add_run("ПЛАСПАНЕЛ ООД | ЕИК 208141542\n")
-    r_company.bold = True
-    r_company.font.size = Pt(12)
-    r_company.font.color.rgb = RGBColor(0, 51, 102)
+    
+    r_logo = p_header.add_run("TEKO ")
+    r_logo.bold = True
+    r_logo.font.size = Pt(14)
+    r_logo.font.color.rgb = RGBColor(0, 168, 89)  # TEKO Зелено
+    
+    r_comp = p_header.add_run("ПЛАСПАНЕЛ ООД | ЕИК 208141542\n")
+    r_comp.bold = True
+    r_comp.font.size = Pt(12)
+    r_comp.font.color.rgb = RGBColor(0, 51, 102)  # Тъмно синьо
     
     r_sub = p_header.add_run("2700 Благоевград, ул. „Ал. Стамболийски” №9, ет. 1\nwww.tekoform.com | e-mail: bulgaria@tekoform.com | тел: +359 879 044 188\n")
     r_sub.font.size = Pt(9.5)
     r_sub.font.color.rgb = RGBColor(100, 100, 100)
     
-    doc.add_paragraph("―" * 55)
+    p_div = doc.add_paragraph()
+    r_div = p_div.add_run("―" * 58)
+    r_div.font.color.rgb = RGBColor(0, 168, 89)
 
     # 2. Заглавие на офертата
     p_title = doc.add_paragraph()
-    p_title.alignment = WD_ALIGN_PARAGRAPH.LEFT
     r_title = p_title.add_run("ОФЕРТА\n")
     r_title.bold = True
     r_title.font.size = Pt(16)
     r_title.font.color.rgb = RGBColor(0, 51, 102)
     
-    r_subtitle = p_title.add_run("За закупуване на пластмасова кофражна система TEKO\n")
+    action_word = "закупуване" if offer_type == "Закупуване" else "наемане"
+    r_subtitle = p_title.add_run(f"За {action_word} на пластмасова кофражна система TEKO\n")
     r_subtitle.bold = True
     r_subtitle.font.size = Pt(11)
+    r_subtitle.font.color.rgb = RGBColor(0, 51, 102)
 
-    # 3. Данни за офертата (До, Относно, Дата)
+    # 3. Метаданни (До, Относно, Дата)
     p_meta = doc.add_paragraph()
-    p_meta.add_run(f"До: ").bold = True
+    p_meta.add_run("До: ").bold = True
     p_meta.add_run(f"{client_name}\n")
-    p_meta.add_run(f"Относно: ").bold = True
+    p_meta.add_run("Относно: ").bold = True
     p_meta.add_run(f"Кофриране на стоманобетонови елементи за обект: „{project_name}“\n")
-    p_meta.add_run(f"Дата: ").bold = True
+    p_meta.add_run("Дата: ").bold = True
     p_meta.add_run(f"{datetime.now().strftime('%d.%m.%Y г.')}\n")
 
     # 4. Таблица
@@ -135,10 +157,12 @@ def create_teko_word_docx(client_name, project_name, table_data, total_formwork,
     
     for i, header_text in enumerate(headers):
         hdr_cells[i].text = header_text
+        set_cell_background(hdr_cells[i], "003366")  # Синьо за заглавната лента
         for paragraph in hdr_cells[i].paragraphs:
             for run in paragraph.runs:
                 run.bold = True
                 run.font.size = Pt(9.5)
+                run.font.color.rgb = RGBColor(255, 255, 255)  # Бял текст
 
     for row in table_data:
         row_cells = table.add_row().cells
@@ -156,19 +180,21 @@ def create_teko_word_docx(client_name, project_name, table_data, total_formwork,
 
     doc.add_paragraph("")
 
-    # 5. Калкулация на тотали и ДДС
+    # 5. Калкулация и Тотали
     total_no_vat = total_formwork * unit_price
     vat_amount = total_no_vat * 0.20
     grand_total = total_no_vat + vat_amount
 
+    label_type = "покупка" if offer_type == "Закупуване" else "наем"
+
     p_totals = doc.add_paragraph()
-    p_totals.add_run(f"Обща кофражна площ: ").bold = True
+    p_totals.add_run("Обща кофражна площ: ").bold = True
     p_totals.add_run(f"{total_formwork:.2f} m²\n")
     
-    p_totals.add_run(f"Обща стойност за покупка (без ДДС): ").bold = True
+    p_totals.add_run(f"Обща стойност за {label_type} (без ДДС): ").bold = True
     p_totals.add_run(f"{total_no_vat:.2f} €\n")
     
-    p_totals.add_run(f"ДДС (20%): ").bold = True
+    p_totals.add_run("ДДС (20%): ").bold = True
     p_totals.add_run(f"{vat_amount:.2f} €\n")
     
     r_grand = p_totals.add_run(f"ОБЩО ЗА ПЛАЩАНЕ: {grand_total:.2f} €")
@@ -178,7 +204,7 @@ def create_teko_word_docx(client_name, project_name, table_data, total_formwork,
 
     doc.add_paragraph("")
 
-    # 6. Стандартни Условия на офертата
+    # 6. Условия на офертата
     p_terms = doc.add_paragraph()
     p_terms.add_run("Условия на офертата:\n").bold = True
     terms_list = [
@@ -218,7 +244,7 @@ if uploaded_file:
                     data = extract_drawing_data(processed_img, api_key)
                     final_project_name = project_name_user if project_name_user else data.get('project_name', 'Обект')
 
-                    st.subheader(f"📋 Обект: {final_project_name}")
+                    st.subheader(f"📋 Обект: {final_project_name} ({offer_type})")
 
                     table_data = []
                     total_formwork = 0.0
@@ -261,16 +287,16 @@ if uploaded_file:
 
                     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
                     col_m1.metric("Общо кофраж", f"{total_formwork:.2f} m²")
-                    col_m2.metric("Сума без ДДС", f"{total_no_vat:.2f} €")
+                    col_m2.metric(f"Сума {offer_type} (без ДДС)", f"{total_no_vat:.2f} €")
                     col_m3.metric("ДДС (20%)", f"{vat_amount:.2f} €")
                     col_m4.metric("ОБЩО С ДДС", f"{grand_total:.2f} €")
 
                     # Бутон за изтегляне на Word файл
-                    word_stream = create_teko_word_docx(client_name, final_project_name, table_data, total_formwork, unit_price)
+                    word_stream = create_teko_word_docx(client_name, final_project_name, offer_type, table_data, total_formwork, unit_price)
                     st.download_button(
                         label="📄 Изтегли фирмена оферта в Word (.docx)",
                         data=word_stream,
-                        file_name=f"Oferta_TEKO_{client_name.replace(' ', '_')}.docx",
+                        file_name=f"Oferta_TEKO_{offer_type}_{client_name.replace(' ', '_')}.docx",
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     )
                 except Exception as e:
