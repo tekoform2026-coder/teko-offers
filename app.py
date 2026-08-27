@@ -1,81 +1,123 @@
 import streamlit as st
-import os
-import tempfile
-from pdf_parser import parse_pdf_elements
-from offer_generator import generate_word_offer
+import fitz  # PyMuPDF
+import cv2
+import numpy as np
+from PIL import Image
+from google import genai
+import json
+import pandas as pd
 
-st.set_page_config(page_title="TEKO - Генератор на Оферти", page_icon="🏗️", layout="centered")
+st.set_page_config(page_title="TEKO Offers - Кофражни Сметки", layout="wide")
 
-st.title("🏗️ TEKO AI - Генератор на Оферти")
-st.write("**ПЛАСПАНЕЛ ООД** | Автоматично генериране на търговски оферти")
+st.title("🏗️ TEKO Offers — Автоматично Изчисление на Кофраж")
+st.write("Качете конструктивен чертеж (PDF или снимка), за да получите пълна кофражна оферта.")
 
-st.divider()
+# --- СТРАНИЧЕН ПАНЕЛ ЗА НАСТРОЙКИ ---
+st.sidebar.header("⚙️ Настройки")
+# Позволява ползване на Secrets или ръчно въвеждане на API Key
+default_api_key = st.secrets.get("GEMINI_API_KEY", "")
+api_key = st.sidebar.text_input("Gemini API Key", value=default_api_key, type="password")
 
-# 1. Качване на PDF файл
-st.subheader("1. Качване на чертеж / спецификация")
-uploaded_file = st.file_uploader("Плъзнете или изберете PDF файл:", type=["pdf"])
-
-st.divider()
-
-# 2. Попълване на данни
-st.subheader("2. Данни за офертата")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    client_name = st.text_input("Име на клиента / фирмата:", value="", placeholder="Въведете име на фирма / клиент")
-    project_name = st.text_input("Име на обекта:", value="", placeholder="Въведете име на обекта")
-
-with col2:
-    offer_choice = st.radio("Тип на офертата:", ["Наем", "Продажба"])
-    offer_type = "sale" if offer_choice == "Продажба" else "rental"
+# --- ОБРАБОТКА НА ИЗОБРАЖЕНИЕ ---
+def process_uploaded_file(uploaded_file):
+    file_bytes = uploaded_file.read()
     
-    default_price = 45.00 if offer_type == "sale" else 12.50
-    price_per_m2 = st.number_input("Единична цена (EUR/m²):", value=default_price, step=0.50, format="%.2f")
-
-st.divider()
-
-# 3. Бутон за генериране
-if st.button("🚀 Генерирай Оферта", type="primary", use_container_width=True):
-    if uploaded_file is None:
-        st.error("⚠️ Моля, първо качете PDF файл!")
-    elif not client_name.strip():
-        st.warning("⚠️ Моля, въведете име на клиента / фирмата!")
-    elif not project_name.strip():
-        st.warning("⚠️ Моля, въведете име на обекта!")
+    if uploaded_file.name.lower().endswith('.pdf'):
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        page = doc[0]
+        pix = page.get_pixmap(dpi=150)
+        img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
     else:
-        with st.spinner("Сканиране на PDF файла и съставяне на офертата..."):
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                tmp_file.write(uploaded_file.getvalue())
-                tmp_path = tmp_file.name
+        img_pil = Image.open(uploaded_file)
 
-            elements = parse_pdf_elements(tmp_path)
-            
-            if not elements:
-                st.error("Не бяха намерени валидни елементи в качения PDF файл.")
-            else:
-                safe_project = project_name.strip().replace(" ", "_").replace('"', '').replace("'", "")
-                output_filename = f"Оферта_{safe_project}.docx"
-                
-                generate_word_offer(
-                    client_name=client_name.strip(),
-                    project_name=project_name.strip(),
-                    elements=elements,
-                    price_per_m2=price_per_m2,
-                    offer_type=offer_type,
-                    filename=output_filename
+    img_np = np.array(img_pil)
+    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY) if len(img_np.shape) == 3 else img_np
+    enhanced = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    
+    processed_pil = Image.fromarray(enhanced)
+    return processed_pil
+
+# --- VISION AI ИЗВЛИЧАНЕ ---
+def extract_drawing_data(image_pil, api_key):
+    client = genai.Client(api_key=api_key)
+    
+    prompt = """
+    Извлечи всички вертикални конструктивни елементи от чертежа, които изискват кофраж (колони, шайби, бетонови стени, подпорни стени, фундаментални бордюри/стълби).
+    Върни САМО чист JSON обект със следната структура:
+
+    {
+      "project_name": "Име на проекта",
+      "elements": [
+        {
+          "type": "column" или "shear_wall" или "wall" или "foundation",
+          "name": "Маркировка (напр. К1, Ф1, Ш1)",
+          "count": бройка,
+          "width_cm": ширина_в_см,
+          "length_cm": дължина_в_см,
+          "height_m": височина_или_дълбочина_на_кофража_в_метри
+        }
+      ]
+    }
+    """
+    response = client.models.generate_content(
+        model='gemini-3.6-flash',
+        contents=[image_pil, prompt],
+        config={'response_mime_type': 'application/json'}
+    )
+    return json.loads(response.text)
+
+# --- ИНТЕРФЕЙС ЗА КАЧВАНЕ ---
+uploaded_file = st.file_uploader("Изберете чертеж", type=["pdf", "jpg", "png", "jpeg"])
+
+if uploaded_file:
+    if not api_key:
+        st.warning("⚠️ Моля, въведете вашия Gemini API Key в страничния панел!")
+    else:
+        if st.button("🚀 Генерирай Кофражна Оферта", type="primary"):
+            with st.spinner("1/2 Обработка на чертежа и подобряване на контраста..."):
+                processed_img = process_uploaded_file(uploaded_file)
+                st.image(processed_img, caption="Обработен чертеж (AI Vision Input)", use_container_width=True)
+
+            with st.spinner("2/2 Разчитане от AI и пресмятане на кофражните площи..."):
+                data = extract_drawing_data(processed_img, api_key)
+
+                st.subheader(f"📋 Проект: {data.get('project_name', 'Обект')}")
+
+                table_data = []
+                total_formwork = 0.0
+
+                for el in data.get('elements', []):
+                    count = int(el.get('count') or 1)
+                    w_m = float(el.get('width_cm') or 0) / 100.0
+                    l_m = float(el.get('length_cm') or 0) / 100.0
+                    h_m = float(el.get('height_m') or 2.70)
+
+                    perimeter_m = 2 * (w_m + l_m)
+                    formwork_m2 = perimeter_m * h_m * count
+                    total_formwork += formwork_m2
+
+                    table_data.append({
+                        "Елемент": el.get('name', '-'),
+                        "Тип": (el.get('type') or 'елемент').upper(),
+                        "Брой": count,
+                        "Сечение (см)": f"{w_m*100:.0f} x {l_m*100:.0f}",
+                        "Обиколка (м)": round(perimeter_m, 2),
+                        "Височина (м)": round(h_m, 2),
+                        "Кофражна площ (кв.м)": round(formwork_m2, 2)
+                    })
+
+                # Таблица с резултати
+                df = pd.DataFrame(table_data)
+                st.dataframe(df, use_container_width=True)
+
+                # Главна метрика
+                st.metric(label="ОБЩО ВЕРТИКАЛЕН КОФРАЖ ЗА ОФЕРТА", value=f"{total_formwork:.2f} кв.м")
+
+                # Бутон за изтегляне на CSV
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Изтегли офертата (CSV)",
+                    data=csv,
+                    file_name="Kofrach_Oferta.csv",
+                    mime="text/csv"
                 )
-
-                st.success("✅ Офертата е генерирана успешно!")
-                
-                with open(output_filename, "rb") as f:
-                    st.download_button(
-                        label="📥 ИЗТЕГЛИ ГОТОВАТА ОФЕРТА (.DOCX)",
-                        data=f,
-                        file_name=output_filename,
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True
-                    )
-                
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
