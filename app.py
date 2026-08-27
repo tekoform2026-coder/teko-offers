@@ -7,17 +7,29 @@ from google import genai
 import json
 import pandas as pd
 import io
+from datetime import datetime
 from docx import Document
 from docx.shared import Pt, RGBColor, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT
 
-st.set_page_config(page_title="TEKO Offers - Кофражни Сметки", layout="wide")
+st.set_page_config(page_title="TEKO Offers - Генератор на Оферти", layout="wide")
 
-st.title("🏗️ TEKO Offers — Автоматично Изчисление на Кофраж")
-st.write("Качете конструктивен чертеж (PDF или снимка), за да получите пълна кофражна оферта.")
+st.title("🏗️ TEKO Offers — Генератор на Оферти за Кофраж")
+st.write("Попълнете данните за клиента, качете чертеж и системата ще генерира оферта.")
 
 # --- ВЗЕМАНЕ НА API KEY СКРИТО ОТ SECRETS ---
 api_key = st.secrets.get("GEMINI_API_KEY", "")
+
+# --- ВХОДНИ ПОЛЕТА ЗА КЛИЕНТ И ОБЕКТ ---
+col1, col2, col3 = st.columns([2, 2, 1])
+
+with col1:
+    client_name = st.text_input("Клиент / Фирма (До:)", value="Име на клиент / Фирма")
+with col2:
+    project_name_user = st.text_input("Име на обект (Относно:)", value="Кофриране на стоманобетонови елементи")
+with col3:
+    unit_price = st.number_input("Ед. цена (€/m²)", value=100.0, step=5.0)
 
 # --- ОБРАБОТКА НА ИЗОБРАЖЕНИЕ ---
 def process_uploaded_file(uploaded_file):
@@ -43,19 +55,19 @@ def extract_drawing_data(image_pil, api_key):
     client = genai.Client(api_key=api_key)
     
     prompt = """
-    Извлечи всички вертикални конструктивни елементи от чертежа, които изискват кофраж (колони, шайби, бетонови стени, подпорни стени, фундаментални бордюри/стъпки).
+    Извлечи всички вертикални конструктивни елементи от чертежа (колони, шайби, бетонови стени, подпорни стени, фундаменти).
     Върни САМО чист JSON обект със следната структура:
 
     {
-      "project_name": "Име на проекта",
+      "project_name": "Име на проекта от чертежа",
       "elements": [
         {
-          "type": "column" или "shear_wall" или "wall" или "foundation",
-          "name": "Маркировка (напр. К1, Ф1, Ш1)",
+          "type": "Колона" или "Стена / Шайба" или "Фундамент",
+          "name": "Маркировка",
           "count": бройка,
           "width_cm": ширина_в_см,
           "length_cm": дължина_в_см,
-          "height_m": височина_или_дълбочина_на_кофража_в_метри
+          "height_m": височина_или_дълбочина_в_метри
         }
       ]
     }
@@ -67,58 +79,122 @@ def extract_drawing_data(image_pil, api_key):
     )
     return json.loads(response.text)
 
-# --- ГЕНЕРИРАНЕ НА WORD ДОКУМЕНТ (.DOCX) ---
-def create_word_docx(project_name, table_data, total_formwork):
+# --- ГЕНЕРИРАНЕ НА ТОЧНА TEKO WORD ОФЕРТА (.DOCX) ---
+def create_teko_word_docx(client_name, project_name, table_data, total_formwork, unit_price):
     doc = Document()
     
-    # Заглавие
-    title_p = doc.add_paragraph()
-    title_run = title_p.add_run("ОФЕРТА ЗА КОФРАЖНИ РАБОТИ")
-    title_run.bold = True
-    title_run.font.size = Pt(18)
-    title_run.font.color.rgb = RGBColor(0, 51, 102)
-    title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # Задаване на полета на страницата
+    sections = doc.sections
+    for section in sections:
+        section.top_margin = Inches(0.6)
+        section.bottom_margin = Inches(0.6)
+        section.left_margin = Inches(0.8)
+        section.right_margin = Inches(0.8)
+
+    # 1. Шапка / Брандинг
+    p_header = doc.add_paragraph()
+    r_company = p_header.add_run("ПЛАСПАНЕЛ ООД | ЕИК 208141542\n")
+    r_company.bold = True
+    r_company.font.size = Pt(12)
+    r_company.font.color.rgb = RGBColor(0, 51, 102)
     
-    # Информация за обекта
-    p_info = doc.add_paragraph()
-    p_info.add_run("Обект / Проект: ").bold = True
-    p_info.add_run(f"{project_name}\n")
-    p_info.add_run("Изготвил: ").bold = True
-    p_info.add_run("TEKO Offers (Автоматична системна оферта)")
+    r_sub = p_header.add_run("2700 Благоевград, ул. „Ал. Стамболийски” №9, ет. 1\nwww.tekoform.com | e-mail: bulgaria@tekoform.com | тел: +359 879 044 188\n")
+    r_sub.font.size = Pt(9.5)
+    r_sub.font.color.rgb = RGBColor(100, 100, 100)
     
-    doc.add_paragraph("")  # Празен ред
+    doc.add_paragraph("―" * 55)
+
+    # 2. Заглавие на офертата
+    p_title = doc.add_paragraph()
+    p_title.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    r_title = p_title.add_run("ОФЕРТА\n")
+    r_title.bold = True
+    r_title.font.size = Pt(16)
+    r_title.font.color.rgb = RGBColor(0, 51, 102)
     
-    # Таблица
-    table = doc.add_table(rows=1, cols=7)
+    r_subtitle = p_title.add_run("За закупуване на пластмасова кофражна система TEKO\n")
+    r_subtitle.bold = True
+    r_subtitle.font.size = Pt(11)
+
+    # 3. Данни за офертата (До, Относно, Дата)
+    p_meta = doc.add_paragraph()
+    p_meta.add_run(f"До: ").bold = True
+    p_meta.add_run(f"{client_name}\n")
+    p_meta.add_run(f"Относно: ").bold = True
+    p_meta.add_run(f"Кофриране на стоманобетонови елементи за обект: „{project_name}“\n")
+    p_meta.add_run(f"Дата: ").bold = True
+    p_meta.add_run(f"{datetime.now().strftime('%d.%m.%Y г.')}\n")
+
+    # 4. Таблица
+    table = doc.add_table(rows=1, cols=6)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.style = 'Table Grid'
     
     hdr_cells = table.rows[0].cells
-    headers = ["Елемент", "Тип", "Брой", "Сечение (см)", "Обиколка (м)", "Височина (м)", "Кофраж (кв.м)"]
+    headers = ["Елемент", "Размери", "Брой", "Площ (m²)", "Ед. цена (€/m²)", "Обща сума (€)"]
     
     for i, header_text in enumerate(headers):
         hdr_cells[i].text = header_text
         for paragraph in hdr_cells[i].paragraphs:
             for run in paragraph.runs:
                 run.bold = True
+                run.font.size = Pt(9.5)
 
-    for row_data in table_data:
+    for row in table_data:
         row_cells = table.add_row().cells
-        row_cells[0].text = str(row_data["Елемент"])
-        row_cells[1].text = str(row_data["Тип"])
-        row_cells[2].text = str(row_data["Брой"])
-        row_cells[3].text = str(row_data["Сечение (см)"])
-        row_cells[4].text = str(row_data["Обиколка (м)"])
-        row_cells[5].text = str(row_data["Височина (м)"])
-        row_cells[6].text = str(row_data["Кофражна площ (кв.м)"])
+        row_cells[0].text = str(row["Елемент"])
+        row_cells[1].text = str(row["Размери"])
+        row_cells[2].text = f"{row['Брой']} бр."
+        row_cells[3].text = f"{row['Площ (m²)']:.2f} m²"
+        row_cells[4].text = f"{row['Ед. цена (€/m²)']:.2f} €"
+        row_cells[5].text = f"{row['Обща сума (€)']:.2f} €"
+        
+        for c in row_cells:
+            for p in c.paragraphs:
+                for r in p.runs:
+                    r.font.size = Pt(9)
 
     doc.add_paragraph("")
+
+    # 5. Калкулация на тотали и ДДС
+    total_no_vat = total_formwork * unit_price
+    vat_amount = total_no_vat * 0.20
+    grand_total = total_no_vat + vat_amount
+
+    p_totals = doc.add_paragraph()
+    p_totals.add_run(f"Обща кофражна площ: ").bold = True
+    p_totals.add_run(f"{total_formwork:.2f} m²\n")
     
-    # Крайна сума
-    p_total = doc.add_paragraph()
-    run_total = p_total.add_run(f"ОБЩО ВЕРТИКАЛЕН КОФРАЖ: {total_formwork:.2f} кв.м")
-    run_total.bold = True
-    run_total.font.size = Pt(14)
-    run_total.font.color.rgb = RGBColor(0, 102, 204)
+    p_totals.add_run(f"Обща стойност за покупка (без ДДС): ").bold = True
+    p_totals.add_run(f"{total_no_vat:.2f} €\n")
+    
+    p_totals.add_run(f"ДДС (20%): ").bold = True
+    p_totals.add_run(f"{vat_amount:.2f} €\n")
+    
+    r_grand = p_totals.add_run(f"ОБЩО ЗА ПЛАЩАНЕ: {grand_total:.2f} €")
+    r_grand.bold = True
+    r_grand.font.size = Pt(12)
+    r_grand.font.color.rgb = RGBColor(0, 51, 102)
+
+    doc.add_paragraph("")
+
+    # 6. Стандартни Условия на офертата
+    p_terms = doc.add_paragraph()
+    p_terms.add_run("Условия на офертата:\n").bold = True
+    terms_list = [
+        "1. Всички цени са посочени в евро (€) без включен ДДС.",
+        "2. Начин на плащане: 100% авансово плащане при потвърждение на поръчката.",
+        "3. Срок за доставка: До 5 работни дни след постъпване на плащането.",
+        "4. Гаранция: 12 месеца за фабрични дефекти при спазване на инструкциите за работа.",
+        "5. Забележка: В цената не са включени анкери, тапи, кофражно масло и пластмасови тръби.",
+        "6. Място на вземане: Склад на фирмата (Транспортът е за сметка на Купувача/Наемателя)."
+    ]
+    for term in terms_list:
+        p_terms.add_run(f"{term}\n")
+
+    p_footer = doc.add_paragraph()
+    p_footer.add_run("\nС уважение,\n").bold = True
+    p_footer.add_run("Екипът на ПЛАСПАНЕЛ ООД\nwww.tekoform.com")
 
     bio = io.BytesIO()
     doc.save(bio)
@@ -137,48 +213,65 @@ if uploaded_file:
                 processed_img = process_uploaded_file(uploaded_file)
                 st.image(processed_img, caption="Обработен чертеж (AI Vision Input)", use_container_width=True)
 
-            with st.spinner("2/2 Разчитане от AI и пресмятане..."):
+            with st.spinner("2/2 Извличане на контури и изчисляване..."):
                 try:
                     data = extract_drawing_data(processed_img, api_key)
-                    project_name = data.get('project_name') or 'Конструктивен обект'
+                    final_project_name = project_name_user if project_name_user else data.get('project_name', 'Обект')
 
-                    st.subheader(f"📋 Проект: {project_name}")
+                    st.subheader(f"📋 Обект: {final_project_name}")
 
                     table_data = []
                     total_formwork = 0.0
 
                     for el in data.get('elements', []):
                         count = int(el.get('count') or 1)
-                        w_m = float(el.get('width_cm') or 0) / 100.0
-                        l_m = float(el.get('length_cm') or 0) / 100.0
-                        h_m = float(el.get('height_m') or 2.70)
+                        w_cm = float(el.get('width_cm') or 0)
+                        l_cm = float(el.get('length_cm') or 0)
+                        h_m = float(el.get('height_m') or 3.0)
+
+                        w_m = w_cm / 100.0
+                        l_m = l_cm / 100.0
 
                         perimeter_m = 2 * (w_m + l_m)
-                        formwork_m2 = perimeter_m * h_m * count
-                        total_formwork += formwork_m2
+                        area_m2 = perimeter_m * h_m * count
+                        row_total_price = area_m2 * unit_price
+                        total_formwork += area_m2
+
+                        el_type = el.get('type') or 'Елемент'
+                        if "Стена" in el_type or "Шайба" in el_type:
+                            dim_str = f"L={l_m:.1f}m, B={w_cm:.0f}cm, H={h_m:.1f}m"
+                        else:
+                            dim_str = f"{w_cm:.0f}x{l_cm:.0f} cm, H={h_m:.1f}m"
 
                         table_data.append({
-                            "Елемент": el.get('name') or '-',
-                            "Тип": (el.get('type') or 'елемент').upper(),
+                            "Елемент": el_type,
+                            "Размери": dim_str,
                             "Брой": count,
-                            "Сечение (см)": f"{w_m*100:.0f} x {l_m*100:.0f}",
-                            "Обиколка (м)": round(perimeter_m, 2),
-                            "Височина (м)": round(h_m, 2),
-                            "Кофражна площ (кв.м)": round(formwork_m2, 2)
+                            "Площ (m²)": round(area_m2, 2),
+                            "Ед. цена (€/m²)": round(unit_price, 2),
+                            "Обща сума (€)": round(row_total_price, 2)
                         })
 
                     df = pd.DataFrame(table_data)
                     st.dataframe(df, use_container_width=True)
 
-                    st.metric(label="ОБЩО ВЕРТИКАЛЕН КОФРАЖ ЗА ОФЕРТА", value=f"{total_formwork:.2f} кв.м")
+                    total_no_vat = total_formwork * unit_price
+                    vat_amount = total_no_vat * 0.20
+                    grand_total = total_no_vat + vat_amount
 
-                    # Генериране на Word файл за сваляне
-                    word_doc_stream = create_word_docx(project_name, table_data, total_formwork)
+                    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+                    col_m1.metric("Общо кофраж", f"{total_formwork:.2f} m²")
+                    col_m2.metric("Сума без ДДС", f"{total_no_vat:.2f} €")
+                    col_m3.metric("ДДС (20%)", f"{vat_amount:.2f} €")
+                    col_m4.metric("ОБЩО С ДДС", f"{grand_total:.2f} €")
+
+                    # Бутон за изтегляне на Word файл
+                    word_stream = create_teko_word_docx(client_name, final_project_name, table_data, total_formwork, unit_price)
                     st.download_button(
-                        label="📄 Изтегли офертата в Word (.docx)",
-                        data=word_doc_stream,
-                        file_name=f"Oferta_Kofrach_{project_name.replace(' ', '_')}.docx",
+                        label="📄 Изтегли фирмена оферта в Word (.docx)",
+                        data=word_stream,
+                        file_name=f"Oferta_TEKO_{client_name.replace(' ', '_')}.docx",
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     )
                 except Exception as e:
-                    st.error(f"Възникна грешка при обработката: {e}")
+                    st.error(f"Грешка при генерирането: {e}")
