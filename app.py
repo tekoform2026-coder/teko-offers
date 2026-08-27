@@ -23,18 +23,22 @@ st.write("Попълнете данните за клиента, изберет�
 # --- ВЗЕМАНЕ НА API KEY СКРИТО ОТ SECRETS ---
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 
-# --- ВХОДНИ ПОЛЕТА ЗА КЛИЕНТ, ОБЕКТ И ТИП ОФЕРТА ---
+# --- ВХОДНИ ПОЛЕТА С AUTOMATIC PLACEHOLDER (БЕЗ НУЖДА ОТ ТРИЕНЕ) ---
 col1, col2, col3, col4 = st.columns([2, 2, 1.2, 1.2])
 
 with col1:
-    client_name = st.text_input("Клиент / Фирма (До:)", value="Име на клиент / Фирма")
+    client_name_input = st.text_input("Клиент / Фирма (До:)", placeholder="Въведете име на клиент или фирма")
 with col2:
-    project_name_user = st.text_input("Име на обект (Относно:)", value="Кофриране на стоманобетонови елементи")
+    project_name_input = st.text_input("Име на обект (Относно:)", placeholder="Въведете име на обект")
 with col3:
     offer_type = st.selectbox("Тип оферта", ["Закупуване", "Наем"])
 with col4:
     default_price = 100.0 if offer_type == "Закупуване" else 15.0
     unit_price = st.number_input("Ед. цена (€/m²)", value=default_price, step=1.0)
+
+# Прихващане на празни стойности
+client_name = client_name_input.strip() if client_name_input.strip() else "—"
+project_name_user = project_name_input.strip() if project_name_input.strip() else "Стоманобетонови елементи"
 
 # --- ОБРАБОТКА НА ИЗОБРАЖЕНИЕ ---
 def process_uploaded_file(uploaded_file):
@@ -93,7 +97,7 @@ def set_cell_background(cell, fill_hex):
     shd.set(qn('w:fill'), fill_hex)
     tcPr.append(shd)
 
-# --- ГЕНЕРИРАНЕ НА ОФЕРТА В WORD ПО ОРИГИНАЛНИЯ ШАБЛОН ---
+# --- ГЕНЕРИРАНЕ НА ТОЧНА ОФЕРТА ПО СНИМКАТА ---
 def create_teko_word_docx(client_name, project_name, offer_type, table_data, total_formwork, unit_price):
     doc = Document()
     
@@ -104,41 +108,40 @@ def create_teko_word_docx(client_name, project_name, offer_type, table_data, tot
         section.left_margin = Inches(0.8)
         section.right_margin = Inches(0.8)
 
-    # 1. Шапка (Лого TEKO в Зелено + Фирмени данни в Синьо)
+    # 1. Шапка (Дясно подравнена с голямо зелено TEKO лого)
     p_header = doc.add_paragraph()
+    p_header.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     
-    r_logo = p_header.add_run("TEKO ")
+    r_logo = p_header.add_run("TEKO\n")
     r_logo.bold = True
-    r_logo.font.size = Pt(14)
-    r_logo.font.color.rgb = RGBColor(0, 168, 89)  # TEKO Зелено
+    r_logo.font.size = Pt(22)
+    r_logo.font.color.rgb = RGBColor(0, 168, 89)  # Ярко TEKO Зелено
     
     r_comp = p_header.add_run("ПЛАСПАНЕЛ ООД | ЕИК 208141542\n")
     r_comp.bold = True
-    r_comp.font.size = Pt(12)
-    r_comp.font.color.rgb = RGBColor(0, 51, 102)  # Тъмно синьо
+    r_comp.font.size = Pt(10.5)
+    r_comp.font.color.rgb = RGBColor(40, 40, 40)
     
     r_sub = p_header.add_run("2700 Благоевград, ул. „Ал. Стамболийски” №9, ет. 1\nwww.tekoform.com | e-mail: bulgaria@tekoform.com | тел: +359 879 044 188\n")
-    r_sub.font.size = Pt(9.5)
+    r_sub.font.size = Pt(8.5)
     r_sub.font.color.rgb = RGBColor(100, 100, 100)
-    
-    p_div = doc.add_paragraph()
-    r_div = p_div.add_run("―" * 58)
-    r_div.font.color.rgb = RGBColor(0, 168, 89)
 
-    # 2. Заглавие на офертата
+    doc.add_paragraph("")  # Празен ред за отстояние
+
+    # 2. Заглавие на офертата (Вляво)
     p_title = doc.add_paragraph()
     r_title = p_title.add_run("ОФЕРТА\n")
     r_title.bold = True
     r_title.font.size = Pt(16)
-    r_title.font.color.rgb = RGBColor(0, 51, 102)
+    r_title.font.color.rgb = RGBColor(0, 81, 158)  # Синьо
     
     action_word = "закупуване" if offer_type == "Закупуване" else "наемане"
     r_subtitle = p_title.add_run(f"За {action_word} на пластмасова кофражна система TEKO\n")
     r_subtitle.bold = True
-    r_subtitle.font.size = Pt(11)
-    r_subtitle.font.color.rgb = RGBColor(0, 51, 102)
+    r_subtitle.font.size = Pt(12)
+    r_subtitle.font.color.rgb = RGBColor(0, 81, 158)
 
-    # 3. Метаданни (До, Относно, Дата)
+    # 3. Данни (До, Относно, Дата)
     p_meta = doc.add_paragraph()
     p_meta.add_run("До: ").bold = True
     p_meta.add_run(f"{client_name}\n")
@@ -157,12 +160,12 @@ def create_teko_word_docx(client_name, project_name, offer_type, table_data, tot
     
     for i, header_text in enumerate(headers):
         hdr_cells[i].text = header_text
-        set_cell_background(hdr_cells[i], "003366")  # Синьо за заглавната лента
+        set_cell_background(hdr_cells[i], "00519E")  # Точното синьо от снимката
         for paragraph in hdr_cells[i].paragraphs:
             for run in paragraph.runs:
                 run.bold = True
                 run.font.size = Pt(9.5)
-                run.font.color.rgb = RGBColor(255, 255, 255)  # Бял текст
+                run.font.color.rgb = RGBColor(255, 255, 255)
 
     for row in table_data:
         row_cells = table.add_row().cells
@@ -180,7 +183,7 @@ def create_teko_word_docx(client_name, project_name, offer_type, table_data, tot
 
     doc.add_paragraph("")
 
-    # 5. Калкулация и Тотали
+    # 5. Суми и ДДС
     total_no_vat = total_formwork * unit_price
     vat_amount = total_no_vat * 0.20
     grand_total = total_no_vat + vat_amount
@@ -200,11 +203,11 @@ def create_teko_word_docx(client_name, project_name, offer_type, table_data, tot
     r_grand = p_totals.add_run(f"ОБЩО ЗА ПЛАЩАНЕ: {grand_total:.2f} €")
     r_grand.bold = True
     r_grand.font.size = Pt(12)
-    r_grand.font.color.rgb = RGBColor(0, 51, 102)
+    r_grand.font.color.rgb = RGBColor(0, 81, 158)
 
     doc.add_paragraph("")
 
-    # 6. Условия на офертата
+    # 6. Условия
     p_terms = doc.add_paragraph()
     p_terms.add_run("Условия на офертата:\n").bold = True
     terms_list = [
@@ -242,7 +245,7 @@ if uploaded_file:
             with st.spinner("2/2 Извличане на контури и изчисляване..."):
                 try:
                     data = extract_drawing_data(processed_img, api_key)
-                    final_project_name = project_name_user if project_name_user else data.get('project_name', 'Обект')
+                    final_project_name = project_name_user if project_name_user != "Стоманобетонови елементи" else data.get('project_name', 'Стоманобетонови елементи')
 
                     st.subheader(f"📋 Обект: {final_project_name} ({offer_type})")
 
