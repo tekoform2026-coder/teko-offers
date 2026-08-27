@@ -1,4 +1,7 @@
 streamlit
-python-docx
-pdfplumber
-PyPDF2
+google-genai
+PyMuPDF
+opencv-python-headless
+numpy
+Pillow
+pandas
