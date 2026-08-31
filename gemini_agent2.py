@@ -3,7 +3,7 @@ from PIL import Image
 
 def analyze_blueprint(image_input, api_key):
     """
-    Разчита чертежа с gemini-1.5-flash и връща структуриран JSON.
+    Разчита чертежа с автоматично превключване между поддържаните Gemini модели.
     """
     if isinstance(image_input, Image.Image):
         img = image_input
@@ -39,24 +39,50 @@ def analyze_blueprint(image_input, api_key):
     - За "wall" (права стена): задай "length_m" (напр. 5.0), "thickness_m" (напр. 0.25), "height_m" (напр. 3.0).
     - За "l_wall" (L-образна стена): задай "l1_m", "l2_m", "thickness_m", "height_m".
     - За "u_wall" (U-образна стена): задай "l1_m", "l2_m", "l3_m", "thickness_m", "height_m".
+    - Ако някоя стойност липсва, сложи разумно отгатната стойност (напр. height_m=3.0, thickness_m=0.25).
     """
 
-    # Опит за извикване чрез новия SDK, при неуспех преминава към класическия SDK
+    models_to_try = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-latest']
+    text = None
+    last_error = None
+
+    # 1. Опит с новия SDK google-genai
     try:
         from google import genai
         client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model='gemini-1.5-flash',
-            contents=[img, prompt],
-            config={'response_mime_type': 'application/json'}
-        )
-        text = response.text.strip()
-    except Exception:
+        for model_name in models_to_try:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=[img, prompt],
+                    config={'response_mime_type': 'application/json'}
+                )
+                text = response.text.strip()
+                if text:
+                    break
+            except Exception as e:
+                last_error = e
+                continue
+    except ImportError:
+        pass
+
+    # 2. Опит със класическия SDK google-generativeai при липса на новия SDK
+    if not text:
         import google.generativeai as genai_old
         genai_old.configure(api_key=api_key)
-        model = genai_old.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content([img, prompt])
-        text = response.text.strip()
+        for model_name in models_to_try:
+            try:
+                model = genai_old.GenerativeModel(model_name)
+                response = model.generate_content([img, prompt])
+                text = response.text.strip()
+                if text:
+                    break
+            except Exception as e:
+                last_error = e
+                continue
+
+    if not text:
+        raise Exception(f"Нито един модел не успя да се свърже. Последна грешка: {last_error}")
 
     if text.startswith("```json"):
         text = text[7:]
@@ -67,7 +93,5 @@ def analyze_blueprint(image_input, api_key):
 
     return json.loads(text.strip())
 
-
-# За съвместимост с по-стари извиквания
 def analyze_blueprint_with_agent2(image_input, api_key):
     return analyze_blueprint(image_input, api_key)
