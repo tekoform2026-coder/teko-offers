@@ -1,16 +1,20 @@
 import json
 from PIL import Image
+import google.generativeai as genai
 
 def analyze_blueprint(image_input, api_key):
     """
-    Разчита чертежа с автоматично превключване между поддържаните Gemini модели.
+    Разчита чертежа чрез автоматично откриване на наличните Gemini модели за API ключа.
     """
     if isinstance(image_input, Image.Image):
         img = image_input
     elif hasattr(image_input, 'read'):
         img = Image.open(image_input)
     else:
-        img = image_input
+        img = Image.open(image_input)
+
+    # Конфигуриране на Google SDK
+    genai.configure(api_key=api_key)
 
     prompt = """
     Анализирай чертежа/плана и разпознай всички конструктивни елементи (колони, прави стени, L-образни стени, U-образни стени).
@@ -42,48 +46,49 @@ def analyze_blueprint(image_input, api_key):
     - Ако някоя стойност липсва, сложи разумно отгатната стойност (напр. height_m=3.0, thickness_m=0.25).
     """
 
-    models_to_try = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-latest']
+    # 1. Автоматично извличане на поддържаните от вашия акаунт модели
+    candidate_models = []
+    try:
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                candidate_models.append(m.name)
+    except Exception:
+        pass
+
+    # 2. Добавяне на стандартните наименования като резервен вариант
+    fallback_list = [
+        'gemini-1.5-flash',
+        'gemini-1.5-flash-001',
+        'gemini-1.5-flash-002',
+        'gemini-2.0-flash',
+        'gemini-1.5-pro',
+        'models/gemini-1.5-flash',
+        'models/gemini-1.5-flash-001'
+    ]
+
+    for f_model in fallback_list:
+        if f_model not in candidate_models:
+            candidate_models.append(f_model)
+
     text = None
     last_error = None
 
-    # 1. Опит с новия SDK google-genai
-    try:
-        from google import genai
-        client = genai.Client(api_key=api_key)
-        for model_name in models_to_try:
-            try:
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=[img, prompt],
-                    config={'response_mime_type': 'application/json'}
-                )
+    # 3. Обхождане на откритите модели до първия успешен отговор
+    for model_name in candidate_models:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content([img, prompt])
+            if response and response.text:
                 text = response.text.strip()
-                if text:
-                    break
-            except Exception as e:
-                last_error = e
-                continue
-    except ImportError:
-        pass
-
-    # 2. Опит със класическия SDK google-generativeai при липса на новия SDK
-    if not text:
-        import google.generativeai as genai_old
-        genai_old.configure(api_key=api_key)
-        for model_name in models_to_try:
-            try:
-                model = genai_old.GenerativeModel(model_name)
-                response = model.generate_content([img, prompt])
-                text = response.text.strip()
-                if text:
-                    break
-            except Exception as e:
-                last_error = e
-                continue
+                break
+        except Exception as e:
+            last_error = e
+            continue
 
     if not text:
-        raise Exception(f"Нито един модел не успя да се свърже. Последна грешка: {last_error}")
+        raise Exception(f"Не можа да се осъществи връзка с Gemini API. Последна грешка: {last_error}")
 
+    # Изчистване на евентуални форматиращи тагове
     if text.startswith("```json"):
         text = text[7:]
     if text.startswith("```"):
