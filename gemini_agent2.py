@@ -2,14 +2,13 @@ import json
 from PIL import Image
 from google import genai
 
-
 def analyze_blueprint_with_agent2(image_input, api_key):
     client = genai.Client(api_key=api_key)
 
-    # Прихващане дали подаденото изображение е PIL Image или файл
+    # Проверка дали снимката вече е заредена като PIL обект
     if isinstance(image_input, Image.Image):
         img = image_input
-    elif hasattr(image_input, "read"):
+    elif hasattr(image_input, 'read'):
         img = Image.open(image_input)
     else:
         img = image_input
@@ -53,9 +52,9 @@ def analyze_blueprint_with_agent2(image_input, api_key):
     """
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model='gemini-3.6-flash',
         contents=[img, prompt],
-        config={"response_mime_type": "application/json"},
+        config={'response_mime_type': 'application/json'}
     )
 
     return json.loads(response.text)
