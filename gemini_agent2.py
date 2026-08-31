@@ -61,3 +61,8 @@ def analyze_blueprint(image_input, api_key):
         text = text[:-3]
 
     return json.loads(text.strip())
+
+
+# За съвместимост с по-стар код:
+def analyze_blueprint_with_agent2(image_input, api_key):
+    return analyze_blueprint(image_input, api_key)
