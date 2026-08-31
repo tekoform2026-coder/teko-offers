@@ -92,7 +92,7 @@ with tab1:
         }
         """
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.6-flash',
             contents=[image_pil, prompt],
             config={'response_mime_type': 'application/json'}
         )
@@ -318,13 +318,11 @@ with tab2:
         else:
             if st.button("🚀 Анализирай с Agent 2 & Изчисли Панели", type="primary", key="t2_btn"):
                 with st.spinner("1/2 Обработка на изображението..."):
-                    # Използваме същата обработка за подготвяне на изображението
                     processed_img_tab2 = process_uploaded_file(uploaded_file_tab2)
                     st.image(processed_img_tab2, caption="Обработен чертеж (Agent 2 Input)", use_container_width=True)
 
                 with st.spinner("2/2 Gemini Agent 2 разчита конструкцията и изчислява панелите..."):
                     try:
-                        # Вторият агент анализира чертежа и връща елементите
                         elements_data = gemini_agent2.analyze_blueprint_with_agent2(processed_img_tab2, api_key)
                         
                         results = []
@@ -355,7 +353,6 @@ with tab2:
 
                         st.success("Чертежът е разчетен успешно от Gemini Agent 2!")
                         
-                        # Агрегиране на панелите и аксесоарите
                         aggregated_panels = {}
                         aggregated_accessories = {}
                         total_area = sum(r["area_m2"] for r in results)
