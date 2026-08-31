@@ -4,8 +4,8 @@ import google.generativeai as genai
 
 def analyze_blueprint(image_input, api_key):
     """
-    Разчита чертежа, като приоритетно използва най-новия модел Gemini 3.6 Flash.
-    Ако той е недостъпен, автоматично преминава към резервните версии.
+    Разчита чертежа, като приоритетно използва най-новия и бърз актуален модел (gemini-2.0-flash).
+    При проблем автоматично преминава към резервни варианти.
     """
     if isinstance(image_input, Image.Image):
         img = image_input
@@ -14,7 +14,6 @@ def analyze_blueprint(image_input, api_key):
     else:
         img = Image.open(image_input)
 
-    # Конфигуриране на Google SDK
     genai.configure(api_key=api_key)
 
     prompt = """
@@ -47,26 +46,22 @@ def analyze_blueprint(image_input, api_key):
     - Ако някоя стойност липсва, сложи разумно отгатната стойност (напр. height_m=3.0, thickness_m=0.25).
     """
 
-    # Приоритетен списък: Започваме с Gemini 3.6 Flash
+    # Приоритетен списък с реалните бързи модели на Google
     preferred_models = [
-        'gemini-3.6-flash',
-        'gemini-3.5-flash',
-        'gemini-2.5-flash',
         'gemini-2.0-flash',
+        'gemini-2.0-flash-exp',
         'gemini-1.5-flash',
-        'models/gemini-3.6-flash',
-        'models/gemini-3.5-flash',
-        'models/gemini-2.0-flash',
-        'models/gemini-1.5-flash'
+        'gemini-1.5-flash-latest',
+        'gemini-1.5-pro'
     ]
 
-    # Допълваме с автоматично откритите модели от акаунта ви
     candidate_models = list(preferred_models)
     try:
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
-                if m.name not in candidate_models and m.name.replace('models/', '') not in candidate_models:
-                    candidate_models.append(m.name)
+                clean_name = m.name.replace('models/', '')
+                if clean_name not in candidate_models:
+                    candidate_models.append(clean_name)
     except Exception:
         pass
 
@@ -74,7 +69,6 @@ def analyze_blueprint(image_input, api_key):
     last_error = None
     used_model = None
 
-    # Проверка подред: опитваме 3.6 Flash първо!
     for model_name in candidate_models:
         try:
             model = genai.GenerativeModel(
@@ -93,7 +87,6 @@ def analyze_blueprint(image_input, api_key):
     if not raw_text:
         raise Exception(f"Не можа да се осъществи връзка с Gemini API. Последна грешка: {last_error}")
 
-    # Безопасно парсване на JSON
     start_idx = raw_text.find('{')
     end_idx = raw_text.rfind('}')
 
@@ -104,9 +97,10 @@ def analyze_blueprint(image_input, api_key):
 
     try:
         parsed_json = json.loads(json_str)
-        return parsed_json
+        return parsed_json, used_model
     except json.JSONDecodeError as e:
         raise Exception(f"Грешка при обработка на JSON отговора: {e}\nПолучен текст: {raw_text[:200]}")
 
 def analyze_blueprint_with_agent2(image_input, api_key):
-    return analyze_blueprint(image_input, api_key)
+    res, _ = analyze_blueprint(image_input, api_key)
+    return res
