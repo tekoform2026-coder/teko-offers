@@ -4,7 +4,7 @@ import google.generativeai as genai
 
 def analyze_blueprint(image_input, api_key):
     """
-    Разчита чертежа чрез автоматично откриване на наличните Gemini модели за API ключа.
+    Разчита чертежа чрез Gemini и автоматично извлича и парсва JSON отговора.
     """
     if isinstance(image_input, Image.Image):
         img = image_input
@@ -18,35 +18,35 @@ def analyze_blueprint(image_input, api_key):
 
     prompt = """
     Анализирай чертежа/плана и разпознай всички конструктивни елементи (колони, прави стени, L-образни стени, U-образни стени).
-    Върни САМО чист JSON обект (без markdown, без ```json, без допълнителен текст) със следната структура:
+    Върни САМО валиден JSON обект със следната структура:
 
     {
       "project_name": "Име на обект/проект от чертежа",
       "elements": [
         {
-          "type": "column" или "wall" или "l_wall" или "u_wall",
-          "name": "Маркировка (напр. К1, Ш1, W1)",
-          "count": брой_елементи,
-          "width_m": ширина_в_метри,
-          "length_m": дължина_в_метри,
-          "thickness_m": дебелина_на_стена_в_метри,
-          "l1_m": дължина_рамо_1_в_метри,
-          "l2_m": дължина_рамо_2_в_метри,
-          "l3_m": дължина_рамо_3_в_метри,
-          "height_m": височина_в_метри
+          "type": "column",
+          "name": "К1",
+          "count": 1,
+          "width_m": 0.30,
+          "length_m": 0.50,
+          "thickness_m": 0.25,
+          "l1_m": 0.0,
+          "l2_m": 0.0,
+          "l3_m": 0.0,
+          "height_m": 3.0
         }
       ]
     }
 
     Инструкции за размерите:
-    - За "column": задай "width_m" (напр. 0.30), "length_m" (напр. 0.50), "height_m" (напр. 3.0).
-    - За "wall" (права стена): задай "length_m" (напр. 5.0), "thickness_m" (напр. 0.25), "height_m" (напр. 3.0).
+    - За "column" (колона): задай "width_m", "length_m", "height_m".
+    - За "wall" (права стена): задай "length_m", "thickness_m", "height_m".
     - За "l_wall" (L-образна стена): задай "l1_m", "l2_m", "thickness_m", "height_m".
     - За "u_wall" (U-образна стена): задай "l1_m", "l2_m", "l3_m", "thickness_m", "height_m".
     - Ако някоя стойност липсва, сложи разумно отгатната стойност (напр. height_m=3.0, thickness_m=0.25).
     """
 
-    # 1. Автоматично извличане на поддържаните от вашия акаунт модели
+    # 1. Извличане на поддържаните от акаунта модели
     candidate_models = []
     try:
         for m in genai.list_models():
@@ -55,7 +55,6 @@ def analyze_blueprint(image_input, api_key):
     except Exception:
         pass
 
-    # 2. Добавяне на стандартните наименования като резервен вариант
     fallback_list = [
         'gemini-1.5-flash',
         'gemini-1.5-flash-001',
@@ -70,33 +69,40 @@ def analyze_blueprint(image_input, api_key):
         if f_model not in candidate_models:
             candidate_models.append(f_model)
 
-    text = None
+    raw_text = None
     last_error = None
 
-    # 3. Обхождане на откритите модели до първия успешен отговор
+    # 2. Опит с откритите модели с форсиране на JSON формат
     for model_name in candidate_models:
         try:
-            model = genai.GenerativeModel(model_name)
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                generation_config={"response_mime_type": "application/json"}
+            )
             response = model.generate_content([img, prompt])
             if response and response.text:
-                text = response.text.strip()
+                raw_text = response.text.strip()
                 break
         except Exception as e:
             last_error = e
             continue
 
-    if not text:
-        raise Exception(f"Не можа да се осъществи връзка с Gemini API. Последна грешка: {last_error}")
+    if not raw_text:
+        raise Exception(f"Не можа да се осъществи връзка с Gemini API или отговорът бе празен. Последна грешка: {last_error}")
 
-    # Изчистване на евентуални форматиращи тагове
-    if text.startswith("```json"):
-        text = text[7:]
-    if text.startswith("```"):
-        text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
+    # 3. Безопасно извличане само на JSON блока { ... }
+    start_idx = raw_text.find('{')
+    end_idx = raw_text.rfind('}')
 
-    return json.loads(text.strip())
+    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+        json_str = raw_text[start_idx:end_idx + 1]
+    else:
+        json_str = raw_text
+
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError as e:
+        raise Exception(f"Грешка при обработка на JSON отговора от Gemini: {e}\nПолучен текст: {raw_text[:200]}")
 
 def analyze_blueprint_with_agent2(image_input, api_key):
     return analyze_blueprint(image_input, api_key)
