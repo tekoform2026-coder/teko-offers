@@ -1,22 +1,22 @@
-import google.generativeai as genai
-from PIL import Image
 import json
+from PIL import Image
+from google import genai
+
 
 def analyze_blueprint_with_agent2(image_input, api_key):
-    # Автоматично разпознаване дали е предадено PIL изображение или файл
+    client = genai.Client(api_key=api_key)
+
+    # Прихващане дали подаденото изображение е PIL Image или файл
     if isinstance(image_input, Image.Image):
         img = image_input
-    elif hasattr(image_input, 'read'):
+    elif hasattr(image_input, "read"):
         img = Image.open(image_input)
     else:
         img = image_input
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
-
     prompt = """
     Анализирай чертежа/плана и разпознай всички конструктивни елементи (колони и стени).
-    Върни САМО чист JSON масив (array) от обекти, без markdown форматиране, без ```json, без допълнителен текст.
+    Върни САМО чист JSON масив (array) от обекти, без markdown форматиране, без допълнителен текст.
 
     Всеки обект трябва да съдържа:
     - "type": един от следните видове: "column", "wall", "l_wall", "u_wall"
@@ -52,16 +52,10 @@ def analyze_blueprint_with_agent2(image_input, api_key):
     ]
     """
 
-    response = model.generate_content([img, prompt])
-    
-    # Изчистване на форматиращи тагове, ако Gemini върне съобщението в кодови блокове
-    text = response.text.strip()
-    if text.startswith("```json"):
-        text = text[7:]
-    if text.startswith("```"):
-        text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-    text = text.strip()
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=[img, prompt],
+        config={"response_mime_type": "application/json"},
+    )
 
-    return json.loads(text)
+    return json.loads(response.text)
