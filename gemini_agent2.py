@@ -2,10 +2,13 @@ import json
 from PIL import Image
 from google import genai
 
-def analyze_blueprint_with_agent2(image_input, api_key):
+def analyze_blueprint(image_input, api_key):
+    """
+    Разчита чертежа ЕДИН ПЪТ с gemini-1.5-flash и връща структуриран JSON
+    с всички колони, прави стени, L-стени и U-стени.
+    """
     client = genai.Client(api_key=api_key)
 
-    # Проверка дали снимката вече е заредена като PIL обект
     if isinstance(image_input, Image.Image):
         img = image_input
     elif hasattr(image_input, 'read'):
@@ -14,47 +17,47 @@ def analyze_blueprint_with_agent2(image_input, api_key):
         img = image_input
 
     prompt = """
-    Анализирай чертежа/плана и разпознай всички конструктивни елементи (колони и стени).
-    Върни САМО чист JSON масив (array) от обекти, без markdown форматиране, без допълнителен текст.
+    Анализирай чертежа/плана и разпознай всички конструктивни елементи (колони, прави стени, L-образни стени, U-образни стени).
+    Върни САМО чист JSON обект (без markdown, без ```json, без допълнителен текст) със следната структура:
 
-    Всеки обект трябва да съдържа:
-    - "type": един от следните видове: "column", "wall", "l_wall", "u_wall"
-    - "count": брой на елементите (цяло число, напр. 1)
-    
-    За "column":
-      - "width_m": ширина в метри (напр. 0.25)
-      - "length_m": дължина в метри (напр. 0.50)
-      - "height_m": височина в метри (напр. 3.0)
+    {
+      "project_name": "Име на обект/проект от чертежа",
+      "elements": [
+        {
+          "type": "column" или "wall" или "l_wall" или "u_wall",
+          "name": "Маркировка (напр. К1, Ш1, W1)",
+          "count": брой_елементи,
+          "width_m": ширина_в_метри,
+          "length_m": дължина_в_метри,
+          "thickness_m": дебелина_на_стена_в_метри,
+          "l1_m": дължина_рамо_1_в_метри,
+          "l2_m": дължина_рамо_2_в_метри,
+          "l3_m": дължина_рамо_3_в_метри,
+          "height_m": височина_в_метри
+        }
+      ]
+    }
 
-    За "wall" (права стена):
-      - "length_m": дължина в метри (напр. 4.0)
-      - "thickness_m": дебелина в метри (напр. 0.25)
-      - "height_m": височина в метри (напр. 3.0)
-
-    За "l_wall" (L-образна стена / ъгъл):
-      - "l1_m": дължина на първото рамо в метри
-      - "l2_m": дължина на второто рамо в метри
-      - "thickness_m": дебелина в метри
-      - "height_m": височина в метри
-
-    За "u_wall" (U-образна стена):
-      - "l1_m": дължина на първо рамо в метри
-      - "l2_m": дължина на второ рамо в метри
-      - "l3_m": дължина на трето рамо в метри
-      - "thickness_m": дебелина в метри
-      - "height_m": височина в метри
-
-    Пример за валиден JSON изход:
-    [
-      {"type": "column", "count": 2, "width_m": 0.3, "length_m": 0.6, "height_m": 3.0},
-      {"type": "wall", "count": 1, "length_m": 5.0, "thickness_m": 0.25, "height_m": 3.0}
-    ]
+    Инструкции за размерите:
+    - За "column": задай "width_m" (напр. 0.30), "length_m" (напр. 0.50), "height_m" (напр. 3.0).
+    - За "wall" (права стена): задай "length_m" (напр. 5.0), "thickness_m" (напр. 0.25), "height_m" (напр. 3.0).
+    - За "l_wall" (L-образна стена): задай "l1_m", "l2_m", "thickness_m", "height_m".
+    - За "u_wall" (U-образна стена): задай "l1_m", "l2_m", "l3_m", "thickness_m", "height_m".
+    - Ако някоя стойност липсва, сложи разумно отгатната стойност (напр. height_m=3.0, thickness_m=0.25).
     """
 
     response = client.models.generate_content(
-        model='gemini-3.6-flash',
+        model='gemini-1.5-flash',
         contents=[img, prompt],
         config={'response_mime_type': 'application/json'}
     )
 
-    return json.loads(response.text)
+    text = response.text.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    if text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+
+    return json.loads(text.strip())
