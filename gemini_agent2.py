@@ -4,8 +4,8 @@ import google.generativeai as genai
 
 def analyze_blueprint(image_input, api_key):
     """
-    Разчита чертежа, като приоритетно използва най-новия и бърз актуален модел (gemini-2.0-flash).
-    При проблем автоматично преминава към резервни варианти.
+    Разчита чертежа, като приоритетно използва най-новия модел gemini-3.6-flash.
+    При натовареност преминава последователно през по-старите версии (3.5 -> 2.5 -> 2.0 -> 1.5).
     """
     if isinstance(image_input, Image.Image):
         img = image_input
@@ -46,13 +46,13 @@ def analyze_blueprint(image_input, api_key):
     - Ако някоя стойност липсва, сложи разумно отгатната стойност (напр. height_m=3.0, thickness_m=0.25).
     """
 
-    # Приоритетен списък с реалните бързи модели на Google
+    # Последователен хронологичен списък с приоритет от най-новия към по-стари модели
     preferred_models = [
+        'gemini-3.6-flash',
+        'gemini-3.5-flash',
+        'gemini-2.5-flash',
         'gemini-2.0-flash',
-        'gemini-2.0-flash-exp',
-        'gemini-1.5-flash',
-        'gemini-1.5-flash-latest',
-        'gemini-1.5-pro'
+        'gemini-1.5-flash'
     ]
 
     candidate_models = list(preferred_models)
