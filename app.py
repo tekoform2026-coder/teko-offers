@@ -16,7 +16,83 @@ st.set_page_config(
     layout="wide"
 )
 
-# 2. Помощна функция за обработка на качения файл (PDF / Изображение)
+# 2. Помощни функции за разбивка и пресмятане на панели TEKO
+def calculate_height_breakdown(height_cm):
+    height_levels = []
+    rem = height_cm
+    while rem >= 150:
+        height_levels.append(150)
+        rem -= 150
+    while rem >= 120:
+        height_levels.append(120)
+        rem -= 120
+    while rem >= 60:
+        height_levels.append(60)
+        rem -= 60
+    if rem > 0:
+        height_levels.append(rem)
+    return height_levels
+
+def calculate_panel_width_breakdown(width_cm):
+    panel_widths = [60, 35, 30, 25, 20]
+    compensators = [15, 10, 5]
+    
+    remaining = width_cm
+    result_panels = {}
+    
+    for w in panel_widths:
+        count = remaining // w
+        if count > 0:
+            result_panels[f"TK _{int(w)}"] = int(count)
+            remaining -= count * w
+            
+    for c in compensators:
+        count = remaining // c
+        if count > 0:
+            result_panels[f"TC _{int(c)}"] = int(count)
+            remaining -= count * c
+            
+    return result_panels
+
+def get_element_teko_panels(elem_type, row):
+    cnt = int(row.get("count", 1) or 1)
+    h_m = float(row.get("height_m", 3.0) or 3.0)
+    h_cm = h_m * 100
+    h_levels = calculate_height_breakdown(h_cm)
+    
+    element_panels = {}
+    
+    def add_face_panels(face_width_cm):
+        p_breakdown = calculate_panel_width_breakdown(face_width_cm)
+        for h_val in h_levels:
+            for p_code, p_cnt in p_breakdown.items():
+                panel_name = p_code.replace("_", f"{int(h_val)}/")
+                element_panels[panel_name] = element_panels.get(panel_name, 0) + p_cnt * 2 * cnt
+
+    if elem_type == "column":
+        w_cm = float(row.get("width_m", 0.3) or 0.3) * 100
+        l_cm = float(row.get("length_m", 0.5) or 0.5) * 100
+        add_face_panels(w_cm)
+        add_face_panels(l_cm)
+    elif elem_type == "wall":
+        l_cm = float(row.get("length_m", 5.0) or 5.0) * 100
+        add_face_panels(l_cm)
+    elif elem_type == "l_wall":
+        l1_cm = float(row.get("l1_m", 2.0) or 2.0) * 100
+        l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100
+        add_face_panels(l1_cm)
+        add_face_panels(l2_cm)
+    elif elem_type == "u_wall":
+        l1_cm = float(row.get("l1_m", 2.0) or 2.0) * 100
+        l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100
+        l3_cm = float(row.get("l3_m", 2.0) or 2.0) * 100
+        add_face_panels(l1_cm)
+        add_face_panels(l2_cm)
+        add_face_panels(l3_cm)
+        
+    return element_panels
+
+# 3. Помощна функция за обработка на качения файл (PDF / Изображение)
 def process_uploaded_file(uploaded_file):
     uploaded_file.seek(0)
     if uploaded_file.type == "application/pdf":
@@ -28,7 +104,7 @@ def process_uploaded_file(uploaded_file):
     else:
         return Image.open(uploaded_file)
 
-# 3. Функция за генериране на Word (.docx) оферта по шаблон на ПЛАСПАНЕЛ ООД
+# 4. Функция за генериране на Word (.docx) оферта по шаблон на ПЛАСПАНЕЛ ООД
 def generate_word_offer(client_name, project_name, offer_date, offer_type, price_per_m2, detailed_rows, total_area, subtotal, vat_amount, grand_total):
     doc = docx.Document()
     
@@ -139,10 +215,10 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
     target_stream.seek(0)
     return target_stream
 
-# 4. Извличане на API ключ
+# 5. Извличане на API ключ
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 
-# 5. Инициализация на Session State
+# 6. Инициализация на Session State
 if "blueprint_data" not in st.session_state:
     st.session_state["blueprint_data"] = None
 if "used_model" not in st.session_state:
@@ -150,7 +226,7 @@ if "used_model" not in st.session_state:
 if "edited_df" not in st.session_state:
     st.session_state["edited_df"] = pd.DataFrame()
 
-# 6. Странично меню (Sidebar)
+# 7. Странично меню (Sidebar)
 with st.sidebar:
     st.header("⚙️ Настройки и Цени (€)")
     
@@ -173,10 +249,10 @@ with st.sidebar:
 
 st.title("🏗️ ПЛАСПАНЕЛ ООД - Пластмасова Кофражна Система TEKO")
 
-# 7. Табове
+# 8. Табове
 tab1, tab2, tab3 = st.tabs([
     "📐 Чертеж и Редактиране", 
-    "🧱 Кофражни Елементи (м²)", 
+    "🧱 Кофражни Елементи и Панели TEKO", 
     "💰 Генериране на Оферта (Word)"
 ])
 
@@ -261,7 +337,7 @@ with tab1:
 # ТАБ 2: КОФРАЖНИ ЕЛЕМЕНТИ (ТЕКО СИСТЕМА)
 # ==========================================
 with tab2:
-    st.header("2. Спецификация на кофражните елементи TEKO")
+    st.header("2. Спецификация на кофражните елементи и панели TEKO")
     
     df_calc = st.session_state["edited_df"]
     
@@ -270,6 +346,7 @@ with tab2:
     else:
         detailed_rows = []
         total_a = 0.0
+        project_panels_summary = {}
 
         for _, row in df_calc.iterrows():
             cnt = int(row.get("count", 1) or 1)
@@ -313,22 +390,34 @@ with tab2:
                 dim_str = f"L={l1:.1f}+{l2:.1f}+{l3:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
 
             total_a += area
-            item_cost = area * price_formwork
+            panels_dict = get_element_teko_panels(elem_type, row)
+            
+            for p_name, p_qty in panels_dict.items():
+                project_panels_summary[p_name] = project_panels_summary.get(p_name, 0) + p_qty
+
+            panels_str = ", ".join([f"{k} ({v} бр.)" for k, v in panels_dict.items()])
 
             detailed_rows.append({
                 "Елемент": elem_label,
                 "Размери": dim_str,
                 "Брой": cnt,
                 "Площ (m²)": round(area, 2),
-                "Ед. цена (€/m²)": price_formwork,
-                "Обща сума (€)": round(item_cost, 2)
+                "Панели TEKO (Вид и брой)": panels_str
             })
 
         df_detailed = pd.DataFrame(detailed_rows)
 
         st.metric("📊 ОБЩА КОФРАЖНА ПЛОЩ", f"{total_a:.2f} m²")
-        st.subheader("📋 Изчислени кофражни елементи за офертата")
+        st.subheader("📋 Спецификация на кофражните елементи и съответните панели")
         st.dataframe(df_detailed, use_container_width=True)
+
+        st.divider()
+        st.subheader("📦 Общ брой нужни панели TEKO за целия обект")
+        df_panels_sum = pd.DataFrame([
+            {"Код на панела / коф. елемент": k, "Общ брой (бр.)": v} 
+            for k, v in sorted(project_panels_summary.items())
+        ])
+        st.dataframe(df_panels_sum, use_container_width=True)
 
 # ==========================================
 # ТАБ 3: ГЕНЕРИРАНЕ НА ОФЕРТА (WORD)
