@@ -7,6 +7,8 @@ import docx
 from docx.shared import Pt, RGBColor, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
 from gemini_agent2 import analyze_blueprint
 
 # 1. Настройки на страницата
@@ -15,6 +17,12 @@ st.set_page_config(
     page_icon="🏗️",
     layout="wide"
 )
+
+# Помощна функция за оцветяване на клетки в Word
+def set_cell_background(cell, hex_color):
+    """Задава цвят на фона на клетка от таблица."""
+    shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{hex_color}"/>')
+    cell._tc.get_or_add_tcPr().append(shading_elm)
 
 # 2. Помощни функции за разбивка и пресмятане на панели TEKO
 def calculate_height_breakdown(height_cm):
@@ -108,58 +116,89 @@ def process_uploaded_file(uploaded_file):
 def generate_word_offer(client_name, project_name, offer_date, offer_type, price_per_m2, detailed_rows, total_area, subtotal, vat_amount, grand_total):
     doc = docx.Document()
     
-    # Настройки на полетата на страницата
-    sections = doc.sections
-    for section in sections:
-        section.top_margin = Inches(0.8)
-        section.bottom_margin = Inches(0.8)
+    # Полета на страницата
+    for section in doc.sections:
+        section.top_margin = Inches(0.7)
+        section.bottom_margin = Inches(0.7)
         section.left_margin = Inches(0.8)
         section.right_margin = Inches(0.8)
 
-    # Заглавна част (Фирмени данни)
-    p_header = doc.add_paragraph()
-    p_header.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    run_company = p_header.add_run("ПЛАСПАНЕЛ ООД | ЕИК 208141542\n")
-    run_company.bold = True
-    run_company.font.size = Pt(11)
+    GREEN_COLOR = RGBColor(46, 125, 50)    # TEKO Зелено
+    BLUE_COLOR = RGBColor(0, 51, 102)      # Корпоративно синьо
+    BLUE_HEX = "003366"                     # Хекс за шапка на таблицата
+
+    is_sale = ("закуп" in offer_type.lower())
+
+    # 1. Шапка - Данни вляво, Зелено лого TEKO вдясно
+    header_table = doc.add_table(rows=1, cols=2)
+    header_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    header_table.autofit = False
+    header_table.rows[0].cells[0].width = Inches(4.5)
+    header_table.rows[0].cells[1].width = Inches(2.3)
+
+    cell_left = header_table.rows[0].cells[0]
+    p_left = cell_left.paragraphs[0]
+    p_left.alignment = WD_ALIGN_PARAGRAPH.LEFT
     
-    run_address = p_header.add_run("2700 Благоевград, ул. „Ал. Стамболийски” №9, ет. 1\nwww.tekoform.com | e-mail: bulgaria@tekoform.com | тел: +359 879 044 188\n")
-    run_address.font.size = Pt(9.5)
-    run_address.font.color.rgb = RGBColor(100, 100, 100)
+    r_comp = p_left.add_run("ПЛАСПАНЕЛ ООД | ЕИК 208141542\n")
+    r_comp.bold = True
+    r_comp.font.size = Pt(10.5)
+    r_comp.font.color.rgb = BLUE_COLOR
+
+    r_addr = p_left.add_run(
+        "2700 Благоевград, ул. „Ал. Стамболийски” №9, ет. 1\n"
+        "www.tekoform.com | e-mail: bulgaria@tekoform.com | тел: +359 879 044 188"
+    )
+    r_addr.font.size = Pt(8.5)
+    r_addr.font.color.rgb = RGBColor(90, 90, 90)
+
+    cell_right = header_table.rows[0].cells[1]
+    p_right = cell_right.paragraphs[0]
+    p_right.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    r_logo = p_right.add_run("TEKO")
+    r_logo.bold = True
+    r_logo.font.size = Pt(28)
+    r_logo.font.color.rgb = GREEN_COLOR
 
     doc.add_paragraph().paragraph_format.space_after = Pt(6)
 
-    # Заглавие на офертата
+    # 2. Заглавие на офертата
     p_title = doc.add_paragraph()
-    p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run_title = p_title.add_run(f"ОФЕРТА\nЗа {offer_type.lower()} на пластмасова кофражна система TEKO")
+    p_title.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    action_text = "закупуване" if is_sale else "отдаване под наем"
+    run_title = p_title.add_run(f"ОФЕРТА\nЗа {action_text} на пластмасова кофражна система TEKO")
     run_title.bold = True
     run_title.font.size = Pt(14)
-    run_title.font.color.rgb = RGBColor(0, 51, 102)
+    run_title.font.color.rgb = BLUE_COLOR
+    p_title.paragraph_format.space_after = Pt(10)
 
-    doc.add_paragraph().paragraph_format.space_after = Pt(6)
-
-    # Данни за офертата
+    # 3. Данни за офертата
     p_info = doc.add_paragraph()
-    p_info.add_run(f"До: ").bold = True
-    p_info.add_run(f"{client_name}\n")
-    p_info.add_run(f"Относно: ").bold = True
-    p_info.add_run(f"Кофриране на стоманобетонови елементи за обект: „{project_name}“\n")
-    p_info.add_run(f"Дата: ").bold = True
-    p_info.add_run(f"{offer_date.strftime('%d.%m.%Y')} г.")
     p_info.paragraph_format.space_after = Pt(12)
+    p_info.add_run("До: ").bold = True
+    p_info.add_run(f"{client_name}\n")
+    p_info.add_run("Относно: ").bold = True
+    p_info.add_run(f"Кофриране на стоманобетонови елементи за обект: „{project_name}“\n")
+    p_info.add_run("Дата: ").bold = True
+    p_info.add_run(f"{offer_date.strftime('%d.%m.%Y')} г.")
 
-    # Таблица с елементи
+    # 4. Таблица с елементи
     table = doc.add_table(rows=1, cols=6)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    table.style = 'Table Grid'
 
     hdr_cells = table.rows[0].cells
-    headers = ["Елемент", "Размери", "Брой", "Площ (m²)", "Ед. цена (€/m²)", "Обща сума (€)"]
+    col_last = "Обща сума (€)" if is_sale else "Наем (€)"
+    headers = ["Елемент", "Размери", "Брой", "Площ (m²)", "Ед. цена (€/m²)", col_last]
+    
     for i, header_text in enumerate(headers):
         hdr_cells[i].text = header_text
-        hdr_cells[i].paragraphs[0].runs[0].font.bold = True
-        hdr_cells[i].paragraphs[0].runs[0].font.size = Pt(9.5)
+        set_cell_background(hdr_cells[i], BLUE_HEX)
+        p = hdr_cells[i].paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        for run in p.runs:
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(255, 255, 255)
+            run.font.size = Pt(9.5)
 
     for row_data in detailed_rows:
         row_cells = table.add_row().cells
@@ -170,46 +209,57 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
         row_cells[4].text = f"{price_per_m2:.2f} €"
         row_cells[5].text = f"{row_data['Обща сума (€)']:.2f} €"
         
-        for c in row_cells:
-            c.paragraphs[0].runs[0].font.size = Pt(9)
+        for i, c in enumerate(row_cells):
+            p = c.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i > 0 else WD_ALIGN_PARAGRAPH.LEFT
+            for r in p.runs:
+                r.font.size = Pt(9)
 
     doc.add_paragraph().paragraph_format.space_after = Pt(10)
 
-    # Обобщение на цените
-    action_word = "наем" if "наем" in offer_type.lower() else "закупуване"
+    # 5. Обобщение на цените
+    action_word = "покупка" if is_sale else "наем"
     p_summary = doc.add_paragraph()
-    p_summary.paragraph_format.space_after = Pt(14)
+    p_summary.paragraph_format.line_spacing = 1.25
+    p_summary.paragraph_format.space_after = Pt(12)
+    
     p_summary.add_run(f"Обща кофражна площ: {total_area:.2f} m²\n").bold = True
     p_summary.add_run(f"Обща стойност за {action_word} (без ДДС): {subtotal:.2f} €\n").bold = True
     p_summary.add_run(f"ДДС (20%): {vat_amount:.2f} €\n")
-    run_total = p_summary.add_run(f"ОБЩО ЗА ПЛАЩАНЕ: {grand_total:.2f} €")
-    run_total.bold = True
-    run_total.font.size = Pt(11.5)
-
-    # Условия на офертата
-    p_terms_head = doc.add_paragraph()
-    p_terms_head.add_run("Условия на офертата:").bold = True
     
+    grand_label = f"ОБЩО ЗА ПЛАЩАНЕ: {grand_total:.2f} €" if is_sale else f"ОБЩО ЗА ПЛАЩАНЕ / МЕСЕЦ: {grand_total:.2f} €"
+    run_total = p_summary.add_run(grand_label)
+    run_total.bold = True
+    run_total.font.size = Pt(12)
+    run_total.font.color.rgb = BLUE_COLOR
+
+    # 6. Условия на офертата
+    notes_p = doc.add_paragraph()
+    notes_p.paragraph_format.space_before = Pt(10)
+    run_th = notes_p.add_run("Условия на офертата:\n")
+    run_th.bold = True
+    run_th.font.color.rgb = BLUE_COLOR
+
     terms = [
         "1. Всички цени са посочени в евро (€) без включен ДДС.",
-        "2. Начин на плащане: 100% авансово плащане при потвърждение на поръчката.",
+        "2. Начин на плащане: 100% авансово плащане при потвърждение на поръчката." if is_sale else "2. Минимален срок за наем: 30 календарни дни.",
         "3. Срок за доставка: До 5 работни дни след постъпване на плащането.",
         "4. Гаранция: 12 месеца за фабрични дефекти при спазване на инструкциите за работа.",
         "5. Забележка: В цената не са включени анкери, тапи, кофражно масло и пластмасови тръби.",
         "6. Място на вземане: Склад на фирмата (Транспортът е за сметка на Купувача/Наемателя)."
     ]
-    
-    p_terms = doc.add_paragraph()
-    p_terms.paragraph_format.space_after = Pt(16)
     for term in terms:
-        p_terms.add_run(f"{term}\n").font.size = Pt(8.5)
+        r = notes_p.add_run(f"{term}\n")
+        r.font.size = Pt(8.5)
 
-    # Подпис
+    # 7. Подпис
     p_sign = doc.add_paragraph()
+    p_sign.paragraph_format.space_before = Pt(12)
     p_sign.add_run("С уважение,\n").bold = True
-    p_sign.add_run("Екипът на ПЛАСПАНЕЛ ООД\nwww.tekoform.com").font.color.rgb = RGBColor(0, 51, 102)
+    run_sign = p_sign.add_run("Екипът на ПЛАСПАНЕЛ ООД\nwww.tekoform.com")
+    run_sign.font.color.rgb = BLUE_COLOR
+    run_sign.bold = True
 
-    # Запазване в BytesIO буфер
     target_stream = io.BytesIO()
     doc.save(target_stream)
     target_stream.seek(0)
@@ -507,7 +557,7 @@ with tab3:
         
         st.table(preview_df)
 
-        action_name = "наем" if "наем" in offer_type.lower() else "закупуване"
+        action_name = "покупка" if "закуп" in offer_type.lower() else "наем"
 
         st.markdown(f"**Обща кофражна площ:** {total_a:.2f} m²")
         st.markdown(f"**Обща стойност за {action_name} (без ДДС):** {subtotal:.2f} €")
