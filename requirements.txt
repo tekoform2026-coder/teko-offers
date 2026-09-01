@@ -7,3 +7,6 @@ numpy
 Pillow
 pandas
 python-docx
+matplotlib
+plotly
+reportlab
