@@ -511,7 +511,7 @@ with tab3:
 
         action_text = "наемане" if "наем" in offer_type.lower() else "закупуване"
 
-        st.markdown("<h2 style='color: #2E7D32; margin-bottom: 0;'>TEKO</h2>", unsafe_allow_headers=True)
+        st.markdown("<h2 style='color: #2E7D32; margin-bottom: 0;'>TEKO</h2>", unsafe_allow_html=True)
         st.subheader("ПЛАСПАНЕЛ ООД | ЕИК 208141542")
         st.caption("2700 Благоевград, ул. „Ал. Стамболийски” №9, ет. 1 | www.tekoform.com | bulgaria@tekoform.com | тел: +359 879 044 188")
         st.markdown(f"### **ОФЕРТА**\n**За {action_text} на пластмасова кофражна система TEKO**")
