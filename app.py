@@ -11,20 +11,17 @@ from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 from gemini_agent2 import analyze_blueprint
 
-# 1. Настройки на страницата
 st.set_page_config(
     page_title="TEKO - Вертикален Кофраж и Оферти",
     page_icon="🏗️",
     layout="wide"
 )
 
-# Помощна функция за оцветяване на клетки в Word
 def set_cell_background(cell, hex_color):
     """Задава цвят на фона на клетка от таблица."""
     shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{hex_color}"/>')
     cell._tc.get_or_add_tcPr().append(shading_elm)
 
-# 2. Помощни функции за разбивка и пресмятане на панели TEKO
 def calculate_height_breakdown(height_cm):
     height_levels = []
     rem = height_cm
@@ -100,7 +97,18 @@ def get_element_teko_panels(elem_type, row):
         
     return element_panels
 
-# 3. Помощна функция за обработка на качения файл (PDF / Изображение)
+def format_element_label(elem_type, name):
+    name_str = str(name).strip() if name else ""
+    if elem_type == "column":
+        return name_str if name_str.lower().startswith("колона") else f"Колона {name_str}".strip()
+    elif elem_type == "wall":
+        return name_str if name_str.lower().startswith("стена") else f"Стена {name_str}".strip()
+    elif elem_type == "l_wall":
+        return name_str if (name_str.lower().startswith("l-стена") or name_str.lower().startswith("стена")) else f"L-Стена {name_str}".strip()
+    elif elem_type == "u_wall":
+        return name_str if (name_str.lower().startswith("u-ядро") or name_str.lower().startswith("ядро")) else f"U-Ядро {name_str}".strip()
+    return name_str
+
 def process_uploaded_file(uploaded_file):
     uploaded_file.seek(0)
     if uploaded_file.type == "application/pdf":
@@ -112,60 +120,49 @@ def process_uploaded_file(uploaded_file):
     else:
         return Image.open(uploaded_file)
 
-# 4. Функция за генериране на Word (.docx) оферта по шаблон на ПЛАСПАНЕЛ ООД
 def generate_word_offer(client_name, project_name, offer_date, offer_type, price_per_m2, detailed_rows, total_area, subtotal, vat_amount, grand_total):
     doc = docx.Document()
     
-    # Полета на страницата
     for section in doc.sections:
         section.top_margin = Inches(0.7)
         section.bottom_margin = Inches(0.7)
         section.left_margin = Inches(0.8)
         section.right_margin = Inches(0.8)
 
-    GREEN_COLOR = RGBColor(46, 125, 50)    # TEKO Зелено
-    BLUE_COLOR = RGBColor(0, 51, 102)      # Корпоративно синьо
-    BLUE_HEX = "003366"                     # Хекс за шапка на таблицата
+    GREEN_COLOR = RGBColor(46, 125, 50)
+    BLUE_COLOR = RGBColor(0, 51, 102)
+    BLUE_HEX = "003366"
 
-    is_sale = ("закуп" in offer_type.lower())
+    is_sale = ("закуп" in offer_type.lower() or "продажба" in offer_type.lower())
 
-    # 1. Шапка - Данни вляво, Зелено лого TEKO вдясно
-    header_table = doc.add_table(rows=1, cols=2)
-    header_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    header_table.autofit = False
-    header_table.rows[0].cells[0].width = Inches(4.5)
-    header_table.rows[0].cells[1].width = Inches(2.3)
+    # 1. Шапка
+    p_logo = doc.add_paragraph()
+    p_logo.paragraph_format.space_before = Pt(0)
+    p_logo.paragraph_format.space_after = Pt(2)
+    r_logo = p_logo.add_run("TEKO")
+    r_logo.bold = True
+    r_logo.font.size = Pt(26)
+    r_logo.font.color.rgb = GREEN_COLOR
 
-    cell_left = header_table.rows[0].cells[0]
-    p_left = cell_left.paragraphs[0]
-    p_left.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    
-    r_comp = p_left.add_run("ПЛАСПАНЕЛ ООД | ЕИК 208141542\n")
+    p_comp = doc.add_paragraph()
+    p_comp.paragraph_format.space_after = Pt(12)
+    p_comp.paragraph_format.line_spacing = 1.15
+
+    r_comp = p_comp.add_run("ПЛАСПАНЕЛ ООД | ЕИК 208141542\n")
     r_comp.bold = True
     r_comp.font.size = Pt(10.5)
     r_comp.font.color.rgb = BLUE_COLOR
 
-    r_addr = p_left.add_run(
+    r_addr = p_comp.add_run(
         "2700 Благоевград, ул. „Ал. Стамболийски” №9, ет. 1\n"
         "www.tekoform.com | e-mail: bulgaria@tekoform.com | тел: +359 879 044 188"
     )
     r_addr.font.size = Pt(8.5)
     r_addr.font.color.rgb = RGBColor(90, 90, 90)
 
-    cell_right = header_table.rows[0].cells[1]
-    p_right = cell_right.paragraphs[0]
-    p_right.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    r_logo = p_right.add_run("TEKO")
-    r_logo.bold = True
-    r_logo.font.size = Pt(28)
-    r_logo.font.color.rgb = GREEN_COLOR
-
-    doc.add_paragraph().paragraph_format.space_after = Pt(6)
-
     # 2. Заглавие на офертата
     p_title = doc.add_paragraph()
-    p_title.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    action_text = "закупуване" if is_sale else "отдаване под наем"
+    action_text = "закупуване" if is_sale else "наемане"
     run_title = p_title.add_run(f"ОФЕРТА\nЗа {action_text} на пластмасова кофражна система TEKO")
     run_title.bold = True
     run_title.font.size = Pt(14)
@@ -174,6 +171,7 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
 
     # 3. Данни за офертата
     p_info = doc.add_paragraph()
+    p_info.paragraph_format.line_spacing = 1.25
     p_info.paragraph_format.space_after = Pt(12)
     p_info.add_run("До: ").bold = True
     p_info.add_run(f"{client_name}\n")
@@ -187,8 +185,7 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
     hdr_cells = table.rows[0].cells
-    col_last = "Обща сума (€)" if is_sale else "Наем (€)"
-    headers = ["Елемент", "Размери", "Брой", "Площ (m²)", "Ед. цена (€/m²)", col_last]
+    headers = ["Елемент", "Размери", "Брой", "Площ (m²)", "Ед. цена (€/m²)", "Обща сума (€)"]
     
     for i, header_text in enumerate(headers):
         hdr_cells[i].text = header_text
@@ -227,22 +224,24 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
     p_summary.add_run(f"Обща стойност за {action_word} (без ДДС): {subtotal:.2f} €\n").bold = True
     p_summary.add_run(f"ДДС (20%): {vat_amount:.2f} €\n")
     
-    grand_label = f"ОБЩО ЗА ПЛАЩАНЕ: {grand_total:.2f} €" if is_sale else f"ОБЩО ЗА ПЛАЩАНЕ / МЕСЕЦ: {grand_total:.2f} €"
-    run_total = p_summary.add_run(grand_label)
+    run_total = p_summary.add_run(f"ОБЩО ЗА ПЛАЩАНЕ: {grand_total:.2f} €")
     run_total.bold = True
-    run_total.font.size = Pt(12)
+    run_total.font.size = Pt(11)
     run_total.font.color.rgb = BLUE_COLOR
 
     # 6. Условия на офертата
     notes_p = doc.add_paragraph()
-    notes_p.paragraph_format.space_before = Pt(10)
+    notes_p.paragraph_format.space_before = Pt(8)
+    notes_p.paragraph_format.space_after = Pt(12)
+    notes_p.paragraph_format.line_spacing = 1.15
+    
     run_th = notes_p.add_run("Условия на офертата:\n")
     run_th.bold = True
     run_th.font.color.rgb = BLUE_COLOR
 
     terms = [
         "1. Всички цени са посочени в евро (€) без включен ДДС.",
-        "2. Начин на плащане: 100% авансово плащане при потвърждение на поръчката." if is_sale else "2. Минимален срок за наем: 30 календарни дни.",
+        "2. Начин на плащане: 100% авансово плащане при потвърждение на поръчката.",
         "3. Срок за доставка: До 5 работни дни след постъпване на плащането.",
         "4. Гаранция: 12 месеца за фабрични дефекти при спазване на инструкциите за работа.",
         "5. Забележка: В цената не са включени анкери, тапи, кофражно масло и пластмасови тръби.",
@@ -254,7 +253,7 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
 
     # 7. Подпис
     p_sign = doc.add_paragraph()
-    p_sign.paragraph_format.space_before = Pt(12)
+    p_sign.paragraph_format.space_before = Pt(8)
     p_sign.add_run("С уважение,\n").bold = True
     run_sign = p_sign.add_run("Екипът на ПЛАСПАНЕЛ ООД\nwww.tekoform.com")
     run_sign.font.color.rgb = BLUE_COLOR
@@ -265,10 +264,8 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
     target_stream.seek(0)
     return target_stream
 
-# 5. Извличане на API ключ
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 
-# 6. Инициализация на Session State
 if "blueprint_data" not in st.session_state:
     st.session_state["blueprint_data"] = None
 if "used_model" not in st.session_state:
@@ -276,50 +273,27 @@ if "used_model" not in st.session_state:
 if "edited_df" not in st.session_state:
     st.session_state["edited_df"] = pd.DataFrame()
 
-# 7. Странично меню (Sidebar)
 with st.sidebar:
-    st.header("⚙️ Настройки и Цени (€)")
-    
+    st.header("⚙️ Настройки")
     if not api_key:
         api_key = st.text_input("Въведете Gemini API Key:", type="password")
     else:
         st.success("🔑 API Ключът е зареден!")
 
-    st.divider()
-    st.subheader("📋 Данни за Клиента")
-    client_name = st.text_input("Име на клиента / Фирма:", value="—")
-    project_name_input = st.text_input("Име на обект:", value="Реконструкция на сгради")
-    offer_date = st.date_input("Дата на офертата")
-    offer_type = st.selectbox("Тип на офертата:", ["За наемане", "За закупуване"])
-
-    st.divider()
-    st.subheader("💶 Единична Цена (€/m²)")
-    price_formwork = st.number_input("Цена за вертикален кофраж TEKO (€/m²):", min_value=0.0, value=15.0, step=0.5)
-    vat_percent = st.number_input("ДДС (%):", min_value=0.0, value=20.0, step=1.0)
-
 st.title("🏗️ ПЛАСПАНЕЛ ООД - Пластмасова Кофражна Система TEKO")
 
-# 8. Табове
 tab1, tab2, tab3 = st.tabs([
     "📐 Чертеж и Редактиране", 
     "🧱 Кофражни Елементи и Панели TEKO", 
-    "💰 Генериране на Оферта (Word)"
+    "Оферта"
 ])
 
-# ==========================================
-# ТАБ 1: ЧЕРТЕЖ И РЕДАКТИРАНЕ
-# ==========================================
 with tab1:
     st.header("1. Качване на чертеж и AI разчитане")
-    
-    uploaded_file = st.file_uploader(
-        "Изберете чертеж (PDF, PNG, JPG):", 
-        type=["pdf", "png", "jpg", "jpeg"]
-    )
+    uploaded_file = st.file_uploader("Изберете чертеж (PDF, PNG, JPG):", type=["pdf", "png", "jpg", "jpeg"])
 
     if uploaded_file:
         col_img, col_actions = st.columns([1, 1])
-
         with col_img:
             st.subheader("🖼️ Преглед на файла")
             try:
@@ -346,28 +320,20 @@ with tab1:
 
                                 st.session_state["blueprint_data"] = blueprint_data
                                 st.session_state["used_model"] = used_model
-
                                 elements_list = blueprint_data.get("elements", [])
                                 st.session_state["edited_df"] = pd.DataFrame(elements_list)
                                 st.success(f"✅ Готово! Разчетено с: **{used_model}**")
                             except Exception as e:
                                 st.error(f"Грешка при анализа: {e}")
 
-    # Таблица за преглед и редакция
     if not st.session_state["edited_df"].empty:
         st.divider()
         st.subheader("✏️ Корекция на разчетените вертикални елементи")
-        st.caption("Променете размерите или добавете нови елементи при нужда:")
-
         edited_df = st.data_editor(
             st.session_state["edited_df"],
             num_rows="dynamic",
             column_config={
-                "type": st.column_config.SelectboxColumn(
-                    "Тип елемент",
-                    options=["column", "wall", "l_wall", "u_wall"],
-                    required=True
-                ),
+                "type": st.column_config.SelectboxColumn("Тип елемент", options=["column", "wall", "l_wall", "u_wall"], required=True),
                 "name": st.column_config.TextColumn("Наименование / Маркировка"),
                 "count": st.column_config.NumberColumn("Брой", min_value=1, step=1, default=1),
                 "width_m": st.column_config.NumberColumn("Ширина (м)", format="%.2f"),
@@ -383,12 +349,8 @@ with tab1:
         )
         st.session_state["edited_df"] = edited_df
 
-# ==========================================
-# ТАБ 2: КОФРАЖНИ ЕЛЕМЕНТИ (ТЕКО СИСТЕМА)
-# ==========================================
 with tab2:
     st.header("2. Спецификация на кофражните елементи и панели TEKO")
-    
     df_calc = st.session_state["edited_df"]
     
     if df_calc.empty:
@@ -406,20 +368,18 @@ with tab2:
 
             area = 0.0
             dim_str = ""
-            elem_label = ""
+            elem_label = format_element_label(elem_type, name)
 
             if elem_type == "column":
                 w = float(row.get("width_m", 0.3) or 0.3)
                 l = float(row.get("length_m", 0.5) or 0.5)
                 area = 2 * (w + l) * h * cnt
-                elem_label = f"Колона {name}"
                 dim_str = f"{int(w*100)}x{int(l*100)} cm, H={h:.1f}m"
 
             elif elem_type == "wall":
                 l = float(row.get("length_m", 5.0) or 5.0)
                 t = float(row.get("thickness_m", 0.25) or 0.25)
                 area = 2 * l * h * cnt
-                elem_label = f"Стена {name}"
                 dim_str = f"L={l:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
 
             elif elem_type == "l_wall":
@@ -427,7 +387,6 @@ with tab2:
                 l2 = float(row.get("l2_m", 2.0) or 2.0)
                 t = float(row.get("thickness_m", 0.25) or 0.25)
                 area = 2 * (l1 + l2) * h * cnt
-                elem_label = f"L-Стена {name}"
                 dim_str = f"L={l1:.1f}+{l2:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
 
             elif elem_type == "u_wall":
@@ -436,12 +395,10 @@ with tab2:
                 l3 = float(row.get("l3_m", 2.0) or 2.0)
                 t = float(row.get("thickness_m", 0.25) or 0.25)
                 area = 2 * (l1 + l2 + l3) * h * cnt
-                elem_label = f"U-Ядро {name}"
                 dim_str = f"L={l1:.1f}+{l2:.1f}+{l3:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
 
             total_a += area
             panels_dict = get_element_teko_panels(elem_type, row)
-            
             for p_name, p_qty in panels_dict.items():
                 project_panels_summary[p_name] = project_panels_summary.get(p_name, 0) + p_qty
 
@@ -456,7 +413,6 @@ with tab2:
             })
 
         df_detailed = pd.DataFrame(detailed_rows)
-
         st.metric("📊 ОБЩА КОФРАЖНА ПЛОЩ", f"{total_a:.2f} m²")
         st.subheader("📋 Спецификация на кофражните елементи и съответните панели")
         st.dataframe(df_detailed, use_container_width=True)
@@ -469,16 +425,33 @@ with tab2:
         ])
         st.dataframe(df_panels_sum, use_container_width=True)
 
-# ==========================================
-# ТАБ 3: ГЕНЕРИРАНЕ НА ОФЕРТА (WORD)
-# ==========================================
 with tab3:
-    st.header(f"3. Подготовка на официална оферта ({offer_type})")
+    st.header("Оферта")
+    
+    # 1. Полета за клиент, обект, тип и дата
+    col_info1, col_info2 = st.columns(2)
+    with col_info1:
+        client_name = st.text_input("Име на клиента / Фирма:", value="", key="client_name_in_tab")
+        project_name_input = st.text_input("Име на обект:", value="", key="project_name_in_tab")
+    
+    with col_info2:
+        offer_type = st.selectbox("Тип на офертата:", ["Наем", "Продажба"], key="offer_type_in_tab")
+        offer_date = st.date_input("Дата на офертата", key="offer_date_in_tab")
+
+    # 2. Отделна секция за цена (с бутони +/-)
+    st.markdown("### 💶 Настройка на цена")
+    col_price1, col_price2 = st.columns(2)
+    with col_price1:
+        price_formwork = st.number_input("Цена за кофраж (€/m²):", min_value=0.0, value=15.0, step=0.5, format="%.2f", key="price_in_tab")
+    with col_price2:
+        vat_percent = st.number_input("ДДС (%):", min_value=0.0, value=20.0, step=1.0, format="%.1f", key="vat_in_tab")
+
+    st.divider()
 
     df_calc = st.session_state["edited_df"]
 
     if df_calc.empty:
-        st.info("ℹ️ Няма въведени елементи за изчисляване на оферта.")
+        st.info("ℹ️ Няма въведени елементи за изчисляване на оферта. Качете чертеж или въведете данни в Таб 1.")
     else:
         detailed_rows = []
         total_a = 0.0
@@ -491,20 +464,18 @@ with tab3:
 
             area = 0.0
             dim_str = ""
-            elem_label = ""
+            elem_label = format_element_label(elem_type, name)
 
             if elem_type == "column":
                 w = float(row.get("width_m", 0.3) or 0.3)
                 l = float(row.get("length_m", 0.5) or 0.5)
                 area = 2 * (w + l) * h * cnt
-                elem_label = f"Колона {name}"
                 dim_str = f"{int(w*100)}x{int(l*100)} cm, H={h:.1f}m"
 
             elif elem_type == "wall":
                 l = float(row.get("length_m", 5.0) or 5.0)
                 t = float(row.get("thickness_m", 0.25) or 0.25)
                 area = 2 * l * h * cnt
-                elem_label = f"Стена {name}"
                 dim_str = f"L={l:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
 
             elif elem_type == "l_wall":
@@ -512,7 +483,6 @@ with tab3:
                 l2 = float(row.get("l2_m", 2.0) or 2.0)
                 t = float(row.get("thickness_m", 0.25) or 0.25)
                 area = 2 * (l1 + l2) * h * cnt
-                elem_label = f"L-Стена {name}"
                 dim_str = f"L={l1:.1f}+{l2:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
 
             elif elem_type == "u_wall":
@@ -521,7 +491,6 @@ with tab3:
                 l3 = float(row.get("l3_m", 2.0) or 2.0)
                 t = float(row.get("thickness_m", 0.25) or 0.25)
                 area = 2 * (l1 + l2 + l3) * h * cnt
-                elem_label = f"U-Ядро {name}"
                 dim_str = f"L={l1:.1f}+{l2:.1f}+{l3:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
 
             total_a += area
@@ -540,16 +509,17 @@ with tab3:
         vat_amount = subtotal * (vat_percent / 100.0)
         grand_total = subtotal + vat_amount
 
-        # Визуализация на офертата на екрана
+        action_text = "наемане" if "наем" in offer_type.lower() else "закупуване"
+
+        st.markdown("<h2 style='color: #2E7D32; margin-bottom: 0;'>TEKO</h2>", unsafe_allow_headers=True)
         st.subheader("ПЛАСПАНЕЛ ООД | ЕИК 208141542")
-        st.caption("2700 Благоевград, ул. „Ал. Стамболийски” №9, ет. 1 | www.tekoform.com | bulgaria@tekoform.com")
-        st.markdown(f"### **ОФЕРТА**\n**За {offer_type.lower()} на пластмасова кофражна система TEKO**")
+        st.caption("2700 Благоевград, ул. „Ал. Стамболийски” №9, ет. 1 | www.tekoform.com | bulgaria@tekoform.com | тел: +359 879 044 188")
+        st.markdown(f"### **ОФЕРТА**\n**За {action_text} на пластмасова кофражна система TEKO**")
         
-        st.write(f"**До:** {client_name}")
-        st.write(f"**Относно:** Кофриране на стоманобетонови елементи за обект: „{project_name_input}“")
+        st.write(f"**До:** {client_name if client_name else '—'}")
+        st.write(f"**Относно:** Кофриране на стоманобетонови елементи за обект: „{project_name_input if project_name_input else '—'}“")
         st.write(f"**Дата:** {offer_date.strftime('%d.%m.%Y')} г.")
 
-        # Таблица
         preview_df = pd.DataFrame(detailed_rows)
         preview_df["Площ (m²)"] = preview_df["Площ (m²)"].apply(lambda x: f"{x:.2f} m²")
         preview_df["Ед. цена (€/m²)"] = preview_df["Ед. цена (€/m²)"].apply(lambda x: f"{x:.2f} €")
@@ -557,7 +527,7 @@ with tab3:
         
         st.table(preview_df)
 
-        action_name = "покупка" if "закуп" in offer_type.lower() else "наем"
+        action_name = "наем" if "наем" in offer_type.lower() else "покупка"
 
         st.markdown(f"**Обща кофражна площ:** {total_a:.2f} m²")
         st.markdown(f"**Обща стойност за {action_name} (без ДДС):** {subtotal:.2f} €")
@@ -566,7 +536,6 @@ with tab3:
 
         st.divider()
 
-        # Генериране и сваляне на Word документ (.docx)
         docx_file = generate_word_offer(
             client_name=client_name,
             project_name=project_name_input,
@@ -583,7 +552,7 @@ with tab3:
         st.download_button(
             label="📄 Свали офертата във MS Word (.docx)",
             data=docx_file,
-            file_name=f"Oferta_TEKO_{client_name.replace(' ', '_')}_{offer_date}.docx",
+            file_name=f"Oferta_TEKO_{client_name.replace(' ', '_') if client_name else 'клиент'}_{offer_date}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             type="primary",
             use_container_width=True
