@@ -10,6 +10,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 from gemini_agent2 import analyze_blueprint
+from drawing_generator import generate_wall_2d, generate_wall_3d, generate_pdf_drawings
 
 st.set_page_config(
     page_title="TEKO - Вертикален Кофраж и Оферти",
@@ -135,7 +136,6 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
 
     is_sale = ("закуп" in offer_type.lower() or "продажба" in offer_type.lower())
 
-    # 1. Шапка
     p_logo = doc.add_paragraph()
     p_logo.paragraph_format.space_before = Pt(0)
     p_logo.paragraph_format.space_after = Pt(2)
@@ -160,7 +160,6 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
     r_addr.font.size = Pt(8.5)
     r_addr.font.color.rgb = RGBColor(90, 90, 90)
 
-    # 2. Заглавие на офертата
     p_title = doc.add_paragraph()
     action_text = "закупуване" if is_sale else "наемане"
     run_title = p_title.add_run(f"ОФЕРТА\nЗа {action_text} на пластмасова кофражна система TEKO")
@@ -169,7 +168,6 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
     run_title.font.color.rgb = BLUE_COLOR
     p_title.paragraph_format.space_after = Pt(10)
 
-    # 3. Данни за офертата
     p_info = doc.add_paragraph()
     p_info.paragraph_format.line_spacing = 1.25
     p_info.paragraph_format.space_after = Pt(12)
@@ -180,7 +178,6 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
     p_info.add_run("Дата: ").bold = True
     p_info.add_run(f"{offer_date.strftime('%d.%m.%Y')} г.")
 
-    # 4. Таблица с елементи
     table = doc.add_table(rows=1, cols=6)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
@@ -214,7 +211,6 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
 
     doc.add_paragraph().paragraph_format.space_after = Pt(10)
 
-    # 5. Обобщение на цените
     action_word = "покупка" if is_sale else "наем"
     p_summary = doc.add_paragraph()
     p_summary.paragraph_format.line_spacing = 1.25
@@ -229,7 +225,6 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
     run_total.font.size = Pt(11)
     run_total.font.color.rgb = BLUE_COLOR
 
-    # 6. Условия на офертата
     notes_p = doc.add_paragraph()
     notes_p.paragraph_format.space_before = Pt(8)
     notes_p.paragraph_format.space_after = Pt(12)
@@ -251,7 +246,6 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
         r = notes_p.add_run(f"{term}\n")
         r.font.size = Pt(8.5)
 
-    # 7. Подпис
     p_sign = doc.add_paragraph()
     p_sign.paragraph_format.space_before = Pt(8)
     p_sign.add_run("С уважение,\n").bold = True
@@ -282,10 +276,11 @@ with st.sidebar:
 
 st.title("🏗️ ПЛАСПАНЕЛ ООД - Пластмасова Кофражна Система TEKO")
 
-tab1, tab2, tab3 = st.tabs([
+tab1, tab2, tab3, tab4 = st.tabs([
     "📐 Чертеж и Редактиране", 
     "🧱 Кофражни Елементи и Панели TEKO", 
-    "Оферта"
+    "🎨 2D/3D Чертежи",
+    "📄 Оферта"
 ])
 
 with tab1:
@@ -426,9 +421,87 @@ with tab2:
         st.dataframe(df_panels_sum, use_container_width=True)
 
 with tab3:
+    st.header("3. 2D Развертки и 3D Моделиране")
+    df_calc = st.session_state["edited_df"]
+
+    if df_calc.empty:
+        st.info("ℹ️ Няма въведени елементи. Качете чертеж в Таб 1 или въведете данни ръчно.")
+    else:
+        selected_idx = st.selectbox(
+            "Изберете елемент за визуализация:",
+            options=list(range(len(df_calc))),
+            format_func=lambda i: f"{format_element_label(df_calc.iloc[i].get('type', 'wall'), df_calc.iloc[i].get('name', 'Елемент'))}"
+        )
+
+        row = df_calc.iloc[selected_idx]
+        elem_type = str(row.get("type", "wall"))
+        name = str(row.get("name", "Елемент"))
+        h_cm = float(row.get("height_m", 3.0) or 3.0) * 100
+        t_cm = float(row.get("thickness_m", 0.25) or 0.25) * 100
+
+        col_2d, col_3d = st.columns(2)
+
+        with col_2d:
+            st.subheader("📐 2D Развертка на панелите")
+            l_cm = float(row.get("length_m", 5.0) or 5.0) * 100
+            if elem_type in ["l_wall", "u_wall"]:
+                l_cm = float(row.get("l1_m", 2.0) or 2.0) * 100
+            fig_2d = generate_wall_2d(l_cm, h_cm, wall_name=format_element_label(elem_type, name))
+            st.image(fig_2d, use_container_width=True)
+
+        with col_3d:
+            st.subheader("🧊 3D Модел")
+            l1_cm = float(row.get("l1_m", 2.0) or 2.0) * 100 if "l1_m" in row and pd.notnull(row["l1_m"]) else float(row.get("length_m", 5.0) or 5.0) * 100
+            l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100 if "l2_m" in row and pd.notnull(row["l2_m"]) else 150
+            l3_cm = float(row.get("l3_m", 2.0) or 2.0) * 100 if "l3_m" in row and pd.notnull(row["l3_m"]) else 150
+
+            wall_type_map = {
+                "wall": "Права стена",
+                "column": "Права стена",
+                "l_wall": "L-образна стена",
+                "u_wall": "U-образна стена"
+            }
+
+            fig_3d = generate_wall_3d(
+                wall_type=wall_type_map.get(elem_type, "Права стена"),
+                dim_a=l1_cm,
+                dim_b=l2_cm,
+                dim_c=l3_cm,
+                height=h_cm,
+                thickness=t_cm
+            )
+            st.plotly_chart(fig_3d, use_container_width=True)
+
+        st.divider()
+        st.subheader("📄 Генериране на PDF с чертежи")
+
+        pdf_elements = []
+        bom_summary = {}
+        for _, r in df_calc.iterrows():
+            e_type = str(r.get("type", "wall"))
+            e_name = format_element_label(e_type, str(r.get("name", "Елемент")))
+            e_h = float(r.get("height_m", 3.0) or 3.0) * 100
+            e_l = float(r.get("length_m", 5.0) or 5.0) * 100
+            if e_type in ["l_wall", "u_wall"]:
+                e_l = float(r.get("l1_m", 2.0) or 2.0) * 100
+            pdf_elements.append({"name": e_name, "length_a": e_l, "height": e_h})
+
+            p_dict = get_element_teko_panels(e_type, r)
+            for pk, pv in p_dict.items():
+                bom_summary[pk] = bom_summary.get(pk, 0) + pv
+
+        pdf_bytes = generate_pdf_drawings(pdf_elements, bom_summary)
+        st.download_button(
+            label="⬇️ Свали PDF чертежи и количествена сметка",
+            data=pdf_bytes,
+            file_name="Teko_Drawings.pdf",
+            mime="application/pdf",
+            type="primary"
+        )
+
+with tab4:
     st.header("Оферта")
     
-    # 1. Полета за клиент, обект, тип и дата
     col_info1, col_info2 = st.columns(2)
     with col_info1:
         client_name = st.text_input("Име на клиента / Фирма:", value="", key="client_name_in_tab")
@@ -438,7 +511,6 @@ with tab3:
         offer_type = st.selectbox("Тип на офертата:", ["Наем", "Продажба"], key="offer_type_in_tab")
         offer_date = st.date_input("Дата на офертата", key="offer_date_in_tab")
 
-    # 2. Отделна секция за цена (с бутони +/-)
     st.markdown("### 💶 Настройка на цена")
     col_price1, col_price2 = st.columns(2)
     with col_price1:
