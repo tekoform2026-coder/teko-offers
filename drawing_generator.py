@@ -1,3 +1,4 @@
+import io
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
@@ -11,18 +12,17 @@ COLOR_WALER = '#7EC87E'      # Зелено за ригелите
 COLOR_BORDER = '#222222'     # Тъмен кант за панелите
 COLOR_GRID = '#E0E0E0'       # Светлосива мрежа на пода
 
+
 def draw_3d_box(ax, origin, size, color, edgecolor=COLOR_BORDER, alpha=1.0):
     """Чертае 3D паралелепипед (панел, ъгъл или бетон)"""
     x, y, z = origin
     dx, dy, dz = size
     
-    # 8-те върха на елемента
     vertices = np.array([
         [x, y, z], [x+dx, y, z], [x+dx, y+dy, z], [x, y+dy, z],
         [x, y, z+dz], [x+dx, y, z+dz], [x+dx, y+dy, z+dz], [x, y+dy, z+dz]
     ])
     
-    # 6-те стени
     faces = [
         [vertices[0], vertices[1], vertices[2], vertices[3]], # Долна
         [vertices[4], vertices[5], vertices[6], vertices[7]], # Горна
@@ -34,6 +34,7 @@ def draw_3d_box(ax, origin, size, color, edgecolor=COLOR_BORDER, alpha=1.0):
     
     poly = Poly3DCollection(faces, facecolors=color, edgecolors=edgecolor, linewidths=0.6, alpha=alpha)
     ax.add_collection3d(poly)
+
 
 def draw_ground_grid(ax, bounds, step=50):
     """Чертае подложната сива мрежа (Grid) на пода"""
@@ -47,19 +48,15 @@ def draw_ground_grid(ax, bounds, step=50):
     for y in y_lines:
         ax.plot([x_lines[0], x_lines[-1]], [y, y], [0, 0], color=COLOR_GRID, linewidth=0.8, zorder=1)
 
+
 def render_3d_element(ax, element_structure):
-    """
-    Основна функция за визуализация на 3D модела.
-    element_structure съдържа списък от блокове: {'type': 'panel'|'corner'|'concrete', 'origin': (x,y,z), 'size': (dx,dy,dz)}
-    """
-    # 1. Настройка на перспективата и ортогоналния изглед
+    """Визуализира 3D модела въз основа на подадените блокове"""
     ax.view_init(elev=25, azim=-60)
     ax.set_proj_type('ortho')
-    ax.set_axis_off()  # Скриване на координатните оси
+    ax.set_axis_off()
     
     all_x, all_y, all_z = [], [], []
     
-    # 2. Чертаене на отделните компоненти
     for block in element_structure:
         b_type = block.get('type', 'panel')
         origin = block['origin']
@@ -77,18 +74,68 @@ def render_3d_element(ax, element_structure):
         all_y.extend([origin[1], origin[1] + size[1]])
         all_z.extend([origin[2], origin[2] + size[2]])
 
-    # 3. Чертаене на мрежата на пода
-    min_x, max_x = min(all_x), max(all_x)
-    min_y, max_y = min(all_y), max(all_y)
-    draw_ground_grid(ax, (min_x, max_x, min_y, max_y))
+    if all_x and all_y and all_z:
+        min_x, max_x = min(all_x), max(all_x)
+        min_y, max_y = min(all_y), max(all_y)
+        draw_ground_grid(ax, (min_x, max_x, min_y, max_y))
 
-    # 4. Пропорционално мащабиране на осите
-    max_range = np.array([max_x - min_x, max_y - min_y, max(all_z)]).max() / 2.0
-    mid_x = (max_x + min_x) * 0.5
-    mid_y = (max_y + min_y) * 0.5
-    mid_z = max(all_z) * 0.5
+        max_range = np.array([max_x - min_x, max_y - min_y, max(all_z)]).max() / 2.0
+        mid_x = (max_x + min_x) * 0.5
+        mid_y = (max_y + min_y) * 0.5
+        mid_z = max(all_z) * 0.5
 
-    ax.set_xlim(mid_x - max_range, mid_x + max_range)
-    ax.set_ylim(mid_y - max_range, mid_y + max_range)
-    ax.set_zlim(0, mid_z + max_range)
-    ax.set_box_aspect([1, 1, 1])
+        ax.set_xlim(mid_x - max_range, mid_x + max_range)
+        ax.set_ylim(mid_y - max_range, mid_y + max_range)
+        ax.set_zlim(0, mid_z + max_range)
+        ax.set_box_aspect([1, 1, 1])
+
+
+# =====================================================================
+# ИЗИСКВАНИ ФУНКЦИИ ОТ app.py
+# =====================================================================
+
+def generate_wall_2d(element_data=None, *args, **kwargs):
+    """Генерира 2D чертеж (изглед отгоре / фронтален)"""
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.set_title("2D Развертка на Кофраж", fontsize=12, fontweight='bold')
+    
+    # Примерно визуализиране на панел
+    rect = plt.Rectangle((10, 10), 100, 20, facecolor=COLOR_PANEL, edgecolor=COLOR_BORDER, lw=1.5)
+    ax.add_patch(rect)
+    ax.text(60, 20, "TK ПАНЕЛ 120/270", color="black", ha="center", va="center", fontweight="bold")
+    
+    ax.set_xlim(0, 120)
+    ax.set_ylim(0, 40)
+    ax.set_aspect('equal')
+    ax.axis('off')
+    
+    plt.tight_layout()
+    return fig
+
+
+def generate_wall_3d(element_structure=None, *args, **kwargs):
+    """Генерира 3D изометричен изглед"""
+    fig = plt.figure(figsize=(7, 6))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    if not element_structure or not isinstance(element_structure, list):
+        # Структура по подразбиране, ако не са подадени данни
+        element_structure = [
+            {'type': 'panel', 'origin': (0, 0, 0), 'size': (100, 15, 270)},
+            {'type': 'corner', 'origin': (-15, 0, 0), 'size': (15, 15, 270)},
+            {'type': 'concrete', 'origin': (0, 15, 0), 'size': (100, 25, 270)}
+        ]
+    
+    render_3d_element(ax, element_structure)
+    plt.tight_layout()
+    return fig
+
+
+def generate_pdf_drawings(element_data=None, *args, **kwargs):
+    """Генерира PDF файл с чертежите и го връща като байтове"""
+    buffer = io.BytesIO()
+    fig = generate_wall_2d(element_data)
+    fig.savefig(buffer, format='pdf', bbox_inches='tight')
+    plt.close(fig)
+    buffer.seek(0)
+    return buffer.getvalue()
