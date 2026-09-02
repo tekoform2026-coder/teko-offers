@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import numpy as np
+from PIL import Image
 
 # Точни цветове според референтните PDF документи
 COLOR_PANEL = '#E8A5B2'      # Розов цвят за панели (TK)
@@ -90,12 +91,21 @@ def render_3d_element(ax, element_structure):
         ax.set_box_aspect([1, 1, 1])
 
 
+def _fig_to_pil_image(fig):
+    """Помощна функция: преобразува Matplotlib чертеж в PIL Изображение за st.image()"""
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', bbox_inches='tight', dpi=150)
+    plt.close(fig)
+    buf.seek(0)
+    return Image.open(buf)
+
+
 # =====================================================================
 # ИЗИСКВАНИ ФУНКЦИИ ОТ app.py
 # =====================================================================
 
 def generate_wall_2d(element_data=None, *args, **kwargs):
-    """Генерира 2D чертеж (изглед отгоре / фронтален)"""
+    """Генерира 2D чертеж и го връща като PIL изображение за st.image()"""
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.set_title("2D Развертка на Кофраж", fontsize=12, fontweight='bold')
     
@@ -110,16 +120,16 @@ def generate_wall_2d(element_data=None, *args, **kwargs):
     ax.axis('off')
     
     plt.tight_layout()
-    return fig
+    return _fig_to_pil_image(fig)
 
 
 def generate_wall_3d(element_structure=None, *args, **kwargs):
-    """Генерира 3D изометричен изглед"""
+    """Генерира 3D изометричен изглед и го връща като PIL изображение за st.image()"""
     fig = plt.figure(figsize=(7, 6))
     ax = fig.add_subplot(111, projection='3d')
     
     if not element_structure or not isinstance(element_structure, list):
-        # Структура по подразбиране, ако не са подадени данни
+        # Примерна структура по подразбиране
         element_structure = [
             {'type': 'panel', 'origin': (0, 0, 0), 'size': (100, 15, 270)},
             {'type': 'corner', 'origin': (-15, 0, 0), 'size': (15, 15, 270)},
@@ -128,13 +138,23 @@ def generate_wall_3d(element_structure=None, *args, **kwargs):
     
     render_3d_element(ax, element_structure)
     plt.tight_layout()
-    return fig
+    return _fig_to_pil_image(fig)
 
 
 def generate_pdf_drawings(element_data=None, *args, **kwargs):
-    """Генерира PDF файл с чертежите и го връща като байтове"""
+    """Генерира PDF файл с чертежите и го връща като байтове за свалимия файл"""
     buffer = io.BytesIO()
-    fig = generate_wall_2d(element_data)
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.set_title("2D Развертка на Кофраж", fontsize=12, fontweight='bold')
+    rect = plt.Rectangle((10, 10), 100, 20, facecolor=COLOR_PANEL, edgecolor=COLOR_BORDER, lw=1.5)
+    ax.add_patch(rect)
+    ax.text(60, 20, "TK ПАНЕЛ 120/270", color="black", ha="center", va="center", fontweight="bold")
+    ax.set_xlim(0, 120)
+    ax.set_ylim(0, 40)
+    ax.set_aspect('equal')
+    ax.axis('off')
+    
+    plt.tight_layout()
     fig.savefig(buffer, format='pdf', bbox_inches='tight')
     plt.close(fig)
     buffer.seek(0)
