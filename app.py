@@ -266,6 +266,8 @@ if "used_model" not in st.session_state:
     st.session_state["used_model"] = None
 if "edited_df" not in st.session_state:
     st.session_state["edited_df"] = pd.DataFrame()
+if "render_3d" not in st.session_state:
+    st.session_state["render_3d"] = False
 
 with st.sidebar:
     st.header("⚙️ Настройки")
@@ -433,71 +435,75 @@ with tab3:
             format_func=lambda i: f"{format_element_label(df_calc.iloc[i].get('type', 'wall'), df_calc.iloc[i].get('name', 'Елемент'))}"
         )
 
-        row = df_calc.iloc[selected_idx]
-        elem_type = str(row.get("type", "wall"))
-        name = str(row.get("name", "Елемент"))
-        h_cm = float(row.get("height_m", 3.0) or 3.0) * 100
-        t_cm = float(row.get("thickness_m", 0.25) or 0.25) * 100
+        if st.button("🏗️ Генерирай 3D модел и PDF чертежи", type="primary"):
+            st.session_state["render_3d"] = True
 
-        col_2d, col_3d = st.columns(2)
+        if st.session_state["render_3d"]:
+            row = df_calc.iloc[selected_idx]
+            elem_type = str(row.get("type", "wall"))
+            name = str(row.get("name", "Елемент"))
+            h_cm = float(row.get("height_m", 3.0) or 3.0) * 100
+            t_cm = float(row.get("thickness_m", 0.25) or 0.25) * 100
 
-        with col_2d:
-            st.subheader("📐 2D Развертка на панелите")
-            l_cm = float(row.get("length_m", 5.0) or 5.0) * 100
-            if elem_type in ["l_wall", "u_wall"]:
-                l_cm = float(row.get("l1_m", 2.0) or 2.0) * 100
-            fig_2d = generate_wall_2d(l_cm, h_cm, wall_name=format_element_label(elem_type, name))
-            st.image(fig_2d, use_container_width=True)
+            col_2d, col_3d = st.columns(2)
 
-        with col_3d:
-            st.subheader("🧊 3D Модел")
-            l1_cm = float(row.get("l1_m", 2.0) or 2.0) * 100 if "l1_m" in row and pd.notnull(row["l1_m"]) else float(row.get("length_m", 5.0) or 5.0) * 100
-            l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100 if "l2_m" in row and pd.notnull(row["l2_m"]) else 150
-            l3_cm = float(row.get("l3_m", 2.0) or 2.0) * 100 if "l3_m" in row and pd.notnull(row["l3_m"]) else 150
+            with col_2d:
+                st.subheader("📐 2D Развертка на панелите")
+                l_cm = float(row.get("length_m", 5.0) or 5.0) * 100
+                if elem_type in ["l_wall", "u_wall"]:
+                    l_cm = float(row.get("l1_m", 2.0) or 2.0) * 100
+                fig_2d = generate_wall_2d(l_cm, h_cm, wall_name=format_element_label(elem_type, name))
+                st.image(fig_2d, use_container_width=True)
 
-            wall_type_map = {
-                "wall": "Права стена",
-                "column": "Права стена",
-                "l_wall": "L-образна стена",
-                "u_wall": "U-образна стена"
-            }
+            with col_3d:
+                st.subheader("🧊 3D Модел")
+                l1_cm = float(row.get("l1_m", 2.0) or 2.0) * 100 if "l1_m" in row and pd.notnull(row["l1_m"]) else float(row.get("length_m", 5.0) or 5.0) * 100
+                l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100 if "l2_m" in row and pd.notnull(row["l2_m"]) else 150
+                l3_cm = float(row.get("l3_m", 2.0) or 2.0) * 100 if "l3_m" in row and pd.notnull(row["l3_m"]) else 150
 
-            fig_3d = generate_wall_3d(
-                wall_type=wall_type_map.get(elem_type, "Права стена"),
-                dim_a=l1_cm,
-                dim_b=l2_cm,
-                dim_c=l3_cm,
-                height=h_cm,
-                thickness=t_cm
+                wall_type_map = {
+                    "wall": "Права стена",
+                    "column": "Права стена",
+                    "l_wall": "L-образна стена",
+                    "u_wall": "U-образна стена"
+                }
+
+                fig_3d = generate_wall_3d(
+                    wall_type=wall_type_map.get(elem_type, "Права стена"),
+                    dim_a=l1_cm,
+                    dim_b=l2_cm,
+                    dim_c=l3_cm,
+                    height=h_cm,
+                    thickness=t_cm
+                )
+                st.plotly_chart(fig_3d, use_container_width=True)
+
+            st.divider()
+            st.subheader("📄 Генериране на PDF с чертежи")
+
+            pdf_elements = []
+            bom_summary = {}
+            for _, r in df_calc.iterrows():
+                e_type = str(r.get("type", "wall"))
+                e_name = format_element_label(e_type, str(r.get("name", "Елемент")))
+                e_h = float(r.get("height_m", 3.0) or 3.0) * 100
+                e_l = float(r.get("length_m", 5.0) or 5.0) * 100
+                if e_type in ["l_wall", "u_wall"]:
+                    e_l = float(r.get("l1_m", 2.0) or 2.0) * 100
+                pdf_elements.append({"name": e_name, "length_a": e_l, "height": e_h})
+
+                p_dict = get_element_teko_panels(e_type, r)
+                for pk, pv in p_dict.items():
+                    bom_summary[pk] = bom_summary.get(pk, 0) + pv
+
+            pdf_bytes = generate_pdf_drawings(pdf_elements, bom_summary)
+            st.download_button(
+                label="⬇️ Свали PDF чертежи и количествена сметка",
+                data=pdf_bytes,
+                file_name="Teko_Drawings.pdf",
+                mime="application/pdf",
+                type="primary"
             )
-            st.plotly_chart(fig_3d, use_container_width=True)
-
-        st.divider()
-        st.subheader("📄 Генериране на PDF с чертежи")
-
-        pdf_elements = []
-        bom_summary = {}
-        for _, r in df_calc.iterrows():
-            e_type = str(r.get("type", "wall"))
-            e_name = format_element_label(e_type, str(r.get("name", "Елемент")))
-            e_h = float(r.get("height_m", 3.0) or 3.0) * 100
-            e_l = float(r.get("length_m", 5.0) or 5.0) * 100
-            if e_type in ["l_wall", "u_wall"]:
-                e_l = float(r.get("l1_m", 2.0) or 2.0) * 100
-            pdf_elements.append({"name": e_name, "length_a": e_l, "height": e_h})
-
-            p_dict = get_element_teko_panels(e_type, r)
-            for pk, pv in p_dict.items():
-                bom_summary[pk] = bom_summary.get(pk, 0) + pv
-
-        pdf_bytes = generate_pdf_drawings(pdf_elements, bom_summary)
-        st.download_button(
-            label="⬇️ Свали PDF чертежи и количествена сметка",
-            data=pdf_bytes,
-            file_name="Teko_Drawings.pdf",
-            mime="application/pdf",
-            type="primary"
-        )
 
 with tab4:
     st.header("Оферта")
