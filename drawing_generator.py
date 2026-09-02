@@ -1,115 +1,39 @@
 import io
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-import numpy as np
+import plotly.graph_objects as go
 from PIL import Image
 
-# Точни цветове според референтните PDF документи
 COLOR_PANEL = '#E8A5B2'      # Розов цвят за панели (TK)
 COLOR_CORNER = '#96D28C'     # Зелен цвят за ъгли (EX / IN)
 COLOR_CONCRETE = '#808588'   # Сиво за бетоновото ядро
-COLOR_WALER = '#7EC87E'      # Зелено за ригелите
-COLOR_BORDER = '#222222'     # Тъмен кант за панелите
-COLOR_GRID = '#E0E0E0'       # Светлосива мрежа на пода
+COLOR_BORDER = '#222222'     # Тъмен кант
 
 
-def draw_3d_box(ax, origin, size, color, edgecolor=COLOR_BORDER, alpha=1.0):
-    """Чертае 3D паралелепипед (панел, ъгъл или бетон)"""
-    x, y, z = origin
-    dx, dy, dz = size
+def _create_plotly_box(x, y, z, dx, dy, dz, color, name=""):
+    """Създава 3D кутия за Plotly"""
+    vx = [x, x+dx, x+dx, x, x, x+dx, x+dx, x]
+    vy = [y, y, y+dy, y+dy, y, y, y+dy, y+dy]
+    vz = [z, z, z, z, z+dz, z+dz, z+dz, z+dz]
     
-    vertices = np.array([
-        [x, y, z], [x+dx, y, z], [x+dx, y+dy, z], [x, y+dy, z],
-        [x, y, z+dz], [x+dx, y, z+dz], [x+dx, y+dy, z+dz], [x, y+dy, z+dz]
-    ])
-    
-    faces = [
-        [vertices[0], vertices[1], vertices[2], vertices[3]], # Долна
-        [vertices[4], vertices[5], vertices[6], vertices[7]], # Горна
-        [vertices[0], vertices[1], vertices[5], vertices[4]], # Предна
-        [vertices[2], vertices[3], vertices[7], vertices[6]], # Задна
-        [vertices[0], vertices[3], vertices[7], vertices[4]], # Лява
-        [vertices[1], vertices[2], vertices[6], vertices[5]]  # Дясна
-    ]
-    
-    poly = Poly3DCollection(faces, facecolors=color, edgecolors=edgecolor, linewidths=0.6, alpha=alpha)
-    ax.add_collection3d(poly)
+    i = [0, 0, 4, 4, 0, 0, 2, 2, 0, 0, 1, 1]
+    j = [1, 2, 6, 7, 5, 4, 7, 6, 7, 4, 6, 5]
+    k = [2, 3, 5, 6, 1, 5, 3, 7, 3, 7, 2, 6]
 
+    return go.Mesh3d(
+        x=vx, y=vy, z=vz,
+        i=i, j=j, k=k,
+        color=color,
+        flatshading=True,
+        name=name,
+        showscale=False
+    )
 
-def draw_ground_grid(ax, bounds, step=50):
-    """Чертае подложната сива мрежа (Grid) на пода"""
-    min_x, max_x, min_y, max_y = bounds
-    
-    x_lines = np.arange(min_x - step, max_x + step*2, step)
-    y_lines = np.arange(min_y - step, max_y + step*2, step)
-    
-    for x in x_lines:
-        ax.plot([x, x], [y_lines[0], y_lines[-1]], [0, 0], color=COLOR_GRID, linewidth=0.8, zorder=1)
-    for y in y_lines:
-        ax.plot([x_lines[0], x_lines[-1]], [y, y], [0, 0], color=COLOR_GRID, linewidth=0.8, zorder=1)
-
-
-def render_3d_element(ax, element_structure):
-    """Визуализира 3D модела въз основа на подадените блокове"""
-    ax.view_init(elev=25, azim=-60)
-    ax.set_proj_type('ortho')
-    ax.set_axis_off()
-    
-    all_x, all_y, all_z = [], [], []
-    
-    for block in element_structure:
-        b_type = block.get('type', 'panel')
-        origin = block['origin']
-        size = block['size']
-        
-        color = COLOR_PANEL
-        if b_type == 'corner':
-            color = COLOR_CORNER
-        elif b_type == 'concrete':
-            color = COLOR_CONCRETE
-            
-        draw_3d_box(ax, origin, size, color)
-        
-        all_x.extend([origin[0], origin[0] + size[0]])
-        all_y.extend([origin[1], origin[1] + size[1]])
-        all_z.extend([origin[2], origin[2] + size[2]])
-
-    if all_x and all_y and all_z:
-        min_x, max_x = min(all_x), max(all_x)
-        min_y, max_y = min(all_y), max(all_y)
-        draw_ground_grid(ax, (min_x, max_x, min_y, max_y))
-
-        max_range = np.array([max_x - min_x, max_y - min_y, max(all_z)]).max() / 2.0
-        mid_x = (max_x + min_x) * 0.5
-        mid_y = (max_y + min_y) * 0.5
-        mid_z = max(all_z) * 0.5
-
-        ax.set_xlim(mid_x - max_range, mid_x + max_range)
-        ax.set_ylim(mid_y - max_range, mid_y + max_range)
-        ax.set_zlim(0, mid_z + max_range)
-        ax.set_box_aspect([1, 1, 1])
-
-
-def _fig_to_pil_image(fig):
-    """Помощна функция: преобразува Matplotlib чертеж в PIL Изображение за st.image()"""
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', bbox_inches='tight', dpi=150)
-    plt.close(fig)
-    buf.seek(0)
-    return Image.open(buf)
-
-
-# =====================================================================
-# ИЗИСКВАНИ ФУНКЦИИ ОТ app.py
-# =====================================================================
 
 def generate_wall_2d(element_data=None, *args, **kwargs):
-    """Генерира 2D чертеж и го връща като PIL изображение за st.image()"""
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.set_title("2D Развертка на Кофраж", fontsize=12, fontweight='bold')
+    """Генерира 2D изображение"""
+    fig, ax = plt.subplots(figsize=(6, 3))
+    ax.set_title("2D Развертка на Кофраж", fontsize=11, fontweight='bold')
     
-    # Примерно визуализиране на панел
     rect = plt.Rectangle((10, 10), 100, 20, facecolor=COLOR_PANEL, edgecolor=COLOR_BORDER, lw=1.5)
     ax.add_patch(rect)
     ax.text(60, 20, "TK ПАНЕЛ 120/270", color="black", ha="center", va="center", fontweight="bold")
@@ -119,30 +43,52 @@ def generate_wall_2d(element_data=None, *args, **kwargs):
     ax.set_aspect('equal')
     ax.axis('off')
     
+    buf = io.BytesIO()
     plt.tight_layout()
-    return _fig_to_pil_image(fig)
+    fig.savefig(buf, format='png', bbox_inches='tight', dpi=120)
+    plt.close(fig)
+    buf.seek(0)
+    return Image.open(buf)
 
 
 def generate_wall_3d(element_structure=None, *args, **kwargs):
-    """Генерира 3D изометричен изглед и го връща като PIL изображение за st.image()"""
-    fig = plt.figure(figsize=(7, 6))
-    ax = fig.add_subplot(111, projection='3d')
-    
+    """Генерира интерактивен Plotly 3D модел за st.plotly_chart()"""
+    fig = go.Figure()
+
     if not element_structure or not isinstance(element_structure, list):
-        # Примерна структура по подразбиране
         element_structure = [
             {'type': 'panel', 'origin': (0, 0, 0), 'size': (100, 15, 270)},
             {'type': 'corner', 'origin': (-15, 0, 0), 'size': (15, 15, 270)},
             {'type': 'concrete', 'origin': (0, 15, 0), 'size': (100, 25, 270)}
         ]
-    
-    render_3d_element(ax, element_structure)
-    plt.tight_layout()
-    return _fig_to_pil_image(fig)
+
+    for block in element_structure:
+        b_type = block.get('type', 'panel')
+        x, y, z = block['origin']
+        dx, dy, dz = block['size']
+
+        color = COLOR_PANEL
+        if b_type == 'corner':
+            color = COLOR_CORNER
+        elif b_type == 'concrete':
+            color = COLOR_CONCRETE
+
+        fig.add_trace(_create_plotly_box(x, y, z, dx, dy, dz, color, name=b_type))
+
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False),
+            zaxis=dict(visible=False),
+            aspectmode='data'
+        ),
+        margin=dict(l=0, r=0, b=0, t=0)
+    )
+    return fig
 
 
 def generate_pdf_drawings(element_data=None, *args, **kwargs):
-    """Генерира PDF файл с чертежите и го връща като байтове за свалимия файл"""
+    """Генерира PDF файл с чертежи"""
     buffer = io.BytesIO()
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.set_title("2D Развертка на Кофраж", fontsize=12, fontweight='bold')
