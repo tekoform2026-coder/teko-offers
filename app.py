@@ -10,7 +10,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 from gemini_agent2 import analyze_blueprint
-from drawing_generator import generate_wall_2d, generate_wall_3d, generate_pdf_drawings
+from drawing_generator import generate_pdf_drawings
 
 st.set_page_config(
     page_title="TEKO - Вертикален Кофраж и Оферти",
@@ -266,8 +266,6 @@ if "used_model" not in st.session_state:
     st.session_state["used_model"] = None
 if "edited_df" not in st.session_state:
     st.session_state["edited_df"] = pd.DataFrame()
-if "render_3d" not in st.session_state:
-    st.session_state["render_3d"] = False
 
 with st.sidebar:
     st.header("⚙️ Настройки")
@@ -281,7 +279,7 @@ st.title("🏗️ ПЛАСПАНЕЛ ООД - Пластмасова Кофра�
 tab1, tab2, tab3, tab4 = st.tabs([
     "📐 Чертеж и Редактиране", 
     "🧱 Кофражни Елементи и Панели TEKO", 
-    "🎨 2D/3D Чертежи",
+    "📄 PDF Чертежи",
     "📄 Оферта"
 ])
 
@@ -423,116 +421,52 @@ with tab2:
         st.dataframe(df_panels_sum, use_container_width=True)
 
 with tab3:
-    st.header("3. 2D Развертки и 3D Моделиране")
+    st.header("3. Генериране на PDF Чертежи и Спецификация")
     df_calc = st.session_state["edited_df"]
 
     if df_calc.empty:
         st.info("ℹ️ Няма въведени елементи. Качете чертеж в Таб 1 или въведете данни ръчно.")
     else:
-        selected_idx = st.selectbox(
-            "Изберете елемент за визуализация:",
-            options=list(range(len(df_calc))),
-            format_func=lambda i: f"{format_element_label(df_calc.iloc[i].get('type', 'wall'), df_calc.iloc[i].get('name', 'Елемент'))}"
-        )
+        pdf_elements = []
+        bom_summary = {}
+        for _, r in df_calc.iterrows():
+            e_type = str(r.get("type", "wall"))
+            e_name = format_element_label(e_type, str(r.get("name", "Елемент")))
+            e_h = float(r.get("height_m", 3.0) or 3.0) * 100
+            e_l = float(r.get("length_m", 5.0) or 5.0) * 100
+            e_t = float(r.get("thickness_m", 0.25) or 0.25) * 100
+            if e_type in ["l_wall", "u_wall"]:
+                e_l = float(r.get("l1_m", 2.0) or 2.0) * 100
+            
+            pdf_elements.append({
+                "name": e_name, 
+                "type": e_type,
+                "length_a_cm": e_l, 
+                "height_cm": e_h,
+                "thickness_cm": e_t
+            })
 
-        if st.button("🏗️ Генерирай 3D модел и PDF чертежи", type="primary"):
-            st.session_state["render_3d"] = True
+            p_dict = get_element_teko_panels(e_type, r)
+            for pk, pv in p_dict.items():
+                bom_summary[pk] = bom_summary.get(pk, 0) + pv
 
-        if st.session_state["render_3d"]:
-            row = df_calc.iloc[selected_idx]
-            elem_type = str(row.get("type", "wall"))
-            name = str(row.get("name", "Елемент"))
-            h_cm = float(row.get("height_m", 3.0) or 3.0) * 100
-            t_cm = float(row.get("thickness_m", 0.25) or 0.25) * 100
+        proj_info = {
+            "client": st.session_state.get("client_name_in_tab", "Клиент"),
+            "project": st.session_state.get("project_name_in_tab", "Обект TEKO")
+        }
 
-            col_2d, col_3d = st.columns(2)
-
-            with col_2d:
-                st.subheader("📐 2D Развертка на панелите")
-                l_cm = float(row.get("length_m", 5.0) or 5.0) * 100
-                if elem_type in ["l_wall", "u_wall"]:
-                    l_cm = float(row.get("l1_m", 2.0) or 2.0) * 100
-                
-                try:
-                    fig_2d = generate_wall_2d(l_cm, h_cm, wall_name=format_element_label(elem_type, name))
-                    if fig_2d is not None:
-                        st.image(fig_2d, use_container_width=True)
-                    else:
-                        st.info("Няма наличен 2D чертеж за този елемент.")
-                except Exception as err:
-                    st.error(f"Грешка при визуализация на 2D чертеж: {err}")
-
-            with col_3d:
-                st.subheader("🧊 3D Модел")
-                l1_cm = float(row.get("l1_m", 2.0) or 2.0) * 100 if ("l1_m" in row and pd.notnull(row["l1_m"])) else float(row.get("length_m", 5.0) or 5.0) * 100
-                l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100 if ("l2_m" in row and pd.notnull(row["l2_m"])) else 150
-                l3_cm = float(row.get("l3_m", 2.0) or 2.0) * 100 if ("l3_m" in row and pd.notnull(row["l3_m"])) else 150
-
-                wall_type_map = {
-                    "wall": "Права стена",
-                    "column": "Права стена",
-                    "l_wall": "L-образна стена",
-                    "u_wall": "U-образна стена"
-                }
-
-                try:
-                    fig_3d = generate_wall_3d(
-                        wall_type=wall_type_map.get(elem_type, "Права стена"),
-                        dim_a=l1_cm,
-                        dim_b=l2_cm,
-                        dim_c=l3_cm,
-                        height=h_cm,
-                        thickness=t_cm
-                    )
-                    if fig_3d is not None:
-                        st.plotly_chart(fig_3d, use_container_width=True)
-                    else:
-                        st.info("Няма наличен 3D модел за този елемент.")
-                except Exception as err:
-                    st.error(f"Грешка при визуализация на 3D модел: {err}")
-
-            st.divider()
-            st.subheader("📄 Генериране на PDF с чертежи")
-
-            pdf_elements = []
-            bom_summary = {}
-            for _, r in df_calc.iterrows():
-                e_type = str(r.get("type", "wall"))
-                e_name = format_element_label(e_type, str(r.get("name", "Елемент")))
-                e_h = float(r.get("height_m", 3.0) or 3.0) * 100
-                e_l = float(r.get("length_m", 5.0) or 5.0) * 100
-                e_t = float(r.get("thickness_m", 0.25) or 0.25) * 100
-                if e_type in ["l_wall", "u_wall"]:
-                    e_l = float(r.get("l1_m", 2.0) or 2.0) * 100
-                
-                pdf_elements.append({
-                    "name": e_name, 
-                    "type": e_type,
-                    "length_a_cm": e_l, 
-                    "height_cm": e_h,
-                    "thickness_cm": e_t
-                })
-
-                p_dict = get_element_teko_panels(e_type, r)
-                for pk, pv in p_dict.items():
-                    bom_summary[pk] = bom_summary.get(pk, 0) + pv
-
-            proj_info = {
-                "client": st.session_state.get("client_name_in_tab", "Клиент"),
-                "project": st.session_state.get("project_name_in_tab", "Обект TEKO")
-            }
-
-            try:
-                pdf_bytes = generate_pdf_drawings(pdf_elements, bom_summary, proj_info)
-                st.download_button(
-                    label="⬇️ Свали PDF чертежи и количествена сметка",
-                    data=pdf_bytes,
-                    file_name="Teko_Drawings.pdf",
-                    mime="application/pdf",
-                    type="primary"
-                )
-            except Exception as e:
-                st.error(f"Грешка при генериране на PDF: {e}")
+        try:
+            pdf_bytes = generate_pdf_drawings(pdf_elements, bom_summary, proj_info)
+            st.download_button(
+                label="⬇️ Свали PDF чертежи и количествена сметка",
+                data=pdf_bytes,
+                file_name="Teko_Drawings.pdf",
+                mime="application/pdf",
+                type="primary",
+                use_container_width=True
+            )
+        except Exception as e:
+            st.error(f"Грешка при генериране на PDF: {e}")
 
 with tab4:
     st.header("Оферта")
