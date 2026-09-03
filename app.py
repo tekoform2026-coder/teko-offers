@@ -488,15 +488,28 @@ with tab3:
                 e_name = format_element_label(e_type, str(r.get("name", "Елемент")))
                 e_h = float(r.get("height_m", 3.0) or 3.0) * 100
                 e_l = float(r.get("length_m", 5.0) or 5.0) * 100
+                e_t = float(r.get("thickness_m", 0.25) or 0.25) * 100
                 if e_type in ["l_wall", "u_wall"]:
                     e_l = float(r.get("l1_m", 2.0) or 2.0) * 100
-                pdf_elements.append({"name": e_name, "length_a": e_l, "height": e_h})
+                
+                pdf_elements.append({
+                    "name": e_name, 
+                    "type": e_type,
+                    "length_a_cm": e_l, 
+                    "height_cm": e_h,
+                    "thickness_cm": e_t
+                })
 
                 p_dict = get_element_teko_panels(e_type, r)
                 for pk, pv in p_dict.items():
                     bom_summary[pk] = bom_summary.get(pk, 0) + pv
 
-            pdf_bytes = generate_pdf_drawings(pdf_elements, bom_summary)
+            proj_info = {
+                "client": st.session_state.get("client_name_in_tab", "Клиент"),
+                "project": st.session_state.get("project_name_in_tab", "Обект TEKO")
+            }
+
+            pdf_bytes = generate_pdf_drawings(pdf_elements, bom_summary, proj_info)
             st.download_button(
                 label="⬇️ Свали PDF чертежи и количествена сметка",
                 data=pdf_bytes,
