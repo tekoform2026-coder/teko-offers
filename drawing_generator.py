@@ -81,7 +81,12 @@ def generate_wall_2d(length_cm, height_cm, wall_name="Стена"):
     h_levels = calculate_height_breakdown(height_cm)
     w_panels = calculate_panel_width_breakdown(length_cm)
     
-    fig, ax = plt.subplots(figsize=(8, 4), dpi=150)
+    # Динамично изчисляване на пропорциите на чертежа
+    aspect_ratio = length_cm / max(height_cm, 1)
+    fig_w = 6.5
+    fig_h = max(3.0, min(8.0, fig_w / aspect_ratio))
+    
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=300)
     
     curr_y = 0
     for h_val in h_levels:
@@ -89,21 +94,34 @@ def generate_wall_2d(length_cm, height_cm, wall_name="Стена"):
         for w_val in w_panels:
             rect = patches.Rectangle(
                 (curr_x, curr_y), w_val, h_val,
-                linewidth=1, edgecolor='#003366', facecolor='#E3F2FD'
+                linewidth=1.2, edgecolor='#003366', facecolor='#E3F2FD'
             )
             ax.add_patch(rect)
             
-            if w_val >= 10 and h_val >= 20:
+            # Динамично завъртане и оразмеряване на текста
+            text_str = f"{int(w_val)}/{int(h_val)}"
+            if w_val < 30 and h_val >= 40:
+                rotation = 90
+                font_sz = max(5, min(8, int(w_val / 3)))
+            else:
+                rotation = 0
+                font_sz = max(5, min(8, int(w_val / 5)))
+                
+            if w_val >= 5 and h_val >= 15:
                 ax.text(
                     curr_x + w_val / 2, curr_y + h_val / 2,
-                    f"{int(w_val)}/{int(h_val)}",
-                    ha='center', va='center', fontsize=7, color='#003366', fontweight='bold'
+                    text_str,
+                    ha='center', va='center', 
+                    fontsize=font_sz, 
+                    color='#002244', 
+                    fontweight='bold',
+                    rotation=rotation
                 )
             curr_x += w_val
         curr_y += h_val
         
-    ax.set_xlim(-10, length_cm + 10)
-    ax.set_ylim(-10, height_cm + 20)
+    ax.set_xlim(-5, length_cm + 5)
+    ax.set_ylim(-5, height_cm + 15)
     ax.set_aspect('equal')
     ax.set_title(f"2D Развертка: {wall_name} ({int(length_cm)}x{int(height_cm)} cm)", fontsize=10, fontweight='bold', pad=10)
     ax.set_xlabel("Дължина (cm)", fontsize=8)
@@ -113,7 +131,7 @@ def generate_wall_2d(length_cm, height_cm, wall_name="Стена"):
     plt.tight_layout()
     
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', dpi=150)
+    plt.savefig(buf, format='png', bbox_inches='tight', dpi=300)
     plt.close(fig)
     buf.seek(0)
     return Image.open(buf)
@@ -182,8 +200,8 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         'PDFTitle',
         parent=styles['Heading1'],
         fontName=font_bold,
-        fontSize=16,
-        leading=20,
+        fontSize=15,
+        leading=18,
         textColor=colors.HexColor('#003366'),
         spaceAfter=10
     )
@@ -194,8 +212,8 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         fontName=font_name,
         fontSize=10,
         leading=14,
-        textColor=colors.HexColor('#555555'),
-        spaceAfter=15
+        textColor=colors.HexColor('#444444'),
+        spaceAfter=12
     )
 
     cell_style = ParagraphStyle(
@@ -265,11 +283,20 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         img_obj = generate_wall_2d(l_cm, h_cm, wall_name=e_name)
         if img_obj:
             img_buf = io.BytesIO()
-            img_obj.save(img_buf, format='PNG')
+            img_obj.save(img_buf, format='PNG', dpi=(300, 300))
             img_buf.seek(0)
             
+            # Запазване на точните пропорции при оразмеряване в PDF
+            img_w, img_h = img_obj.size
+            max_pdf_w = 480.0
+            max_pdf_h = 380.0
+            
+            scale = min(max_pdf_w / img_w, max_pdf_h / img_h)
+            pdf_w = img_w * scale
+            pdf_h = img_h * scale
+            
             story.append(Paragraph(f"<b>{e_name}</b> ({int(l_cm)}x{int(h_cm)} cm)", subtitle_style))
-            rl_img = RLImage(img_buf, width=450, height=225)
+            rl_img = RLImage(img_buf, width=pdf_w, height=pdf_h)
             story.append(rl_img)
             story.append(Spacer(1, 15))
             
