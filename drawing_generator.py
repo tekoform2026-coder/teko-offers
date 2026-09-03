@@ -123,7 +123,7 @@ def generate_wall_2d(length_cm, height_cm, wall_name="Стена"):
     ax.set_xlim(-5, length_cm + 5)
     ax.set_ylim(-5, height_cm + 15)
     ax.set_aspect('equal')
-    ax.set_title(f"2D Развертка: {wall_name} ({int(length_cm)}x{int(height_cm)} cm)", fontsize=10, fontweight='bold', pad=10)
+    ax.set_title(f"2D Изглед: {wall_name} ({int(length_cm)}x{int(height_cm)} cm)", fontsize=10, fontweight='bold', pad=10)
     ax.set_xlabel("Дължина (cm)", fontsize=8)
     ax.set_ylabel("Височина (cm)", fontsize=8)
     ax.grid(True, linestyle='--', alpha=0.3)
@@ -272,7 +272,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
     story.append(t)
     story.append(Spacer(1, 20))
     
-    story.append(Paragraph("<b>2D Чертежи и Развертки на Елементите</b>", title_style))
+    story.append(Paragraph("<b>2D Чертежи и Изгледи на Елементите</b>", title_style))
     story.append(Spacer(1, 10))
     
     for elem in pdf_elements:
