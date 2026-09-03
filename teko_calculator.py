@@ -27,12 +27,23 @@ OPTIMAL_REMAINDERS = {
     55: [30, 25]
 }
 
+def format_panel_code(width_cm, height_cm):
+    """
+    Генерира правилното каталожно наименование според системата ТЕКО.
+    Ширини <= 15 см при височини 120/150 см са компенсатори (TC).
+    Всички останали са стандартни платна (TK).
+    """
+    if width_cm <= 15 and height_cm in [120, 150]:
+        return f"TC {height_cm}/{width_cm}"
+    return f"TK {height_cm}/{width_cm}"
+
 def solve_height_cm(height_cm):
     if height_cm in STANDARD_HEIGHT_MAP:
         return STANDARD_HEIGHT_MAP[height_cm]
+    
     remaining = height_cm
     levels = []
-    for h in [150, 120, 60, 40, 30, 20, 15]:
+    for h in [150, 120, 60]:
         while remaining >= h:
             levels.append(h)
             remaining -= h
@@ -70,10 +81,10 @@ def calculate_column(width_m, length_m, height_m, count=1):
     detailed_panels = {}
     for h in height_levels:
         for w, c in side_a_panels.items():
-            key = f"Панел {w}x{h} см"
+            key = format_panel_code(w, h)
             detailed_panels[key] = detailed_panels.get(key, 0) + (c * 2 * count)
         for w, c in side_b_panels.items():
-            key = f"Панел {w}x{h} см"
+            key = format_panel_code(w, h)
             detailed_panels[key] = detailed_panels.get(key, 0) + (c * 2 * count)
             
     outer_corners = 4 * len(height_levels) * count
@@ -108,7 +119,7 @@ def calculate_wall(length_m, thickness_m, height_m, count=1):
     detailed_panels = {}
     for h in height_levels:
         for w, c in side_panels.items():
-            key = f"Панел {w}x{h} см"
+            key = format_panel_code(w, h)
             detailed_panels[key] = detailed_panels.get(key, 0) + (c * 2 * count)
             
     total_panel_pieces = sum(detailed_panels.values())
@@ -150,7 +161,7 @@ def calculate_l_wall(l1_m, l2_m, thickness_m, height_m, count=1):
     for h in height_levels:
         for side in [out1_panels, out2_panels, in1_panels, in2_panels]:
             for w, c in side.items():
-                key = f"Панел {w}x{h} см"
+                key = format_panel_code(w, h)
                 detailed_panels[key] = detailed_panels.get(key, 0) + (c * count)
                 
     total_panel_pieces = sum(detailed_panels.values())
@@ -198,7 +209,7 @@ def calculate_u_wall(l1_m, l2_m, l3_m, thickness_m, height_m, count=1):
     for h in height_levels:
         for side in [out1_panels, out2_panels, out3_panels, in1_panels, in2_panels, in3_panels]:
             for w, c in side.items():
-                key = f"Панел {w}x{h} см"
+                key = format_panel_code(w, h)
                 detailed_panels[key] = detailed_panels.get(key, 0) + (c * count)
                 
     total_panel_pieces = sum(detailed_panels.values())
