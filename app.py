@@ -453,7 +453,10 @@ with tab3:
                 if elem_type in ["l_wall", "u_wall"]:
                     l_cm = float(row.get("l1_m", 2.0) or 2.0) * 100
                 fig_2d = generate_wall_2d(l_cm, h_cm, wall_name=format_element_label(elem_type, name))
-                st.image(fig_2d, use_container_width=True)
+                if fig_2d is not None:
+    st.image(fig_2d, use_container_width=True)
+else:
+    st.info("Няма наличен 2D чертеж за този елемент.")
 
             with col_3d:
                 st.subheader("🧊 3D Модел")
