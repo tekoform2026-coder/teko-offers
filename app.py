@@ -452,17 +452,21 @@ with tab3:
                 l_cm = float(row.get("length_m", 5.0) or 5.0) * 100
                 if elem_type in ["l_wall", "u_wall"]:
                     l_cm = float(row.get("l1_m", 2.0) or 2.0) * 100
-                fig_2d = generate_wall_2d(l_cm, h_cm, wall_name=format_element_label(elem_type, name))
-                if fig_2d is not None:
-                    st.image(fig_2d, use_container_width=True)
-                else:
-                    st.info("Няма наличен 2D чертеж за този елемент.")
+                
+                try:
+                    fig_2d = generate_wall_2d(l_cm, h_cm, wall_name=format_element_label(elem_type, name))
+                    if fig_2d is not None:
+                        st.image(fig_2d, use_container_width=True)
+                    else:
+                        st.info("Няма наличен 2D чертеж за този елемент.")
+                except Exception as err:
+                    st.error(f"Грешка при визуализация на 2D чертеж: {err}")
 
             with col_3d:
                 st.subheader("🧊 3D Модел")
-                l1_cm = float(row.get("l1_m", 2.0) or 2.0) * 100 if "l1_m" in row and pd.notnull(row["l1_m"]) else float(row.get("length_m", 5.0) or 5.0) * 100
-                l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100 if "l2_m" in row and pd.notnull(row["l2_m"]) else 150
-                l3_cm = float(row.get("l3_m", 2.0) or 2.0) * 100 if "l3_m" in row and pd.notnull(row["l3_m"]) else 150
+                l1_cm = float(row.get("l1_m", 2.0) or 2.0) * 100 if ("l1_m" in row and pd.notnull(row["l1_m"])) else float(row.get("length_m", 5.0) or 5.0) * 100
+                l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100 if ("l2_m" in row and pd.notnull(row["l2_m"])) else 150
+                l3_cm = float(row.get("l3_m", 2.0) or 2.0) * 100 if ("l3_m" in row and pd.notnull(row["l3_m"])) else 150
 
                 wall_type_map = {
                     "wall": "Права стена",
@@ -471,15 +475,21 @@ with tab3:
                     "u_wall": "U-образна стена"
                 }
 
-                fig_3d = generate_wall_3d(
-                    wall_type=wall_type_map.get(elem_type, "Права стена"),
-                    dim_a=l1_cm,
-                    dim_b=l2_cm,
-                    dim_c=l3_cm,
-                    height=h_cm,
-                    thickness=t_cm
-                )
-                st.plotly_chart(fig_3d, use_container_width=True)
+                try:
+                    fig_3d = generate_wall_3d(
+                        wall_type=wall_type_map.get(elem_type, "Права стена"),
+                        dim_a=l1_cm,
+                        dim_b=l2_cm,
+                        dim_c=l3_cm,
+                        height=h_cm,
+                        thickness=t_cm
+                    )
+                    if fig_3d is not None:
+                        st.plotly_chart(fig_3d, use_container_width=True)
+                    else:
+                        st.info("Няма наличен 3D модел за този елемент.")
+                except Exception as err:
+                    st.error(f"Грешка при визуализация на 3D модел: {err}")
 
             st.divider()
             st.subheader("📄 Генериране на PDF с чертежи")
@@ -512,14 +522,17 @@ with tab3:
                 "project": st.session_state.get("project_name_in_tab", "Обект TEKO")
             }
 
-            pdf_bytes = generate_pdf_drawings(pdf_elements, bom_summary, proj_info)
-            st.download_button(
-                label="⬇️ Свали PDF чертежи и количествена сметка",
-                data=pdf_bytes,
-                file_name="Teko_Drawings.pdf",
-                mime="application/pdf",
-                type="primary"
-            )
+            try:
+                pdf_bytes = generate_pdf_drawings(pdf_elements, bom_summary, proj_info)
+                st.download_button(
+                    label="⬇️ Свали PDF чертежи и количествена сметка",
+                    data=pdf_bytes,
+                    file_name="Teko_Drawings.pdf",
+                    mime="application/pdf",
+                    type="primary"
+                )
+            except Exception as e:
+                st.error(f"Грешка при генериране на PDF: {e}")
 
 with tab4:
     st.header("Оферта")
