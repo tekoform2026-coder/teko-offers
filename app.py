@@ -1,4 +1,5 @@
 import io
+import hmac
 import fitz  # PyMuPDF
 import pandas as pd
 from PIL import Image
@@ -17,6 +18,31 @@ st.set_page_config(
     page_icon="🏗️",
     layout="wide"
 )
+
+# === СИСТЕМА ЗА ЗАЩИТА С ПАРОЛА ===
+def check_password():
+    """Връща True, ако потребителят е въвел правилна парола."""
+    def password_entered():
+        if hmac.compare_digest(st.session_state["password_input"], st.secrets.get("password", "")):
+            st.session_state["password_correct"] = True
+            del st.session_state["password_input"]
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        st.title("🔒 Вход в системата TEKO")
+        st.text_input("🔑 Въведете парола за достъп:", type="password", on_change=password_entered, key="password_input")
+        return False
+    elif not st.session_state["password_correct"]:
+        st.title("🔒 Вход в системата TEKO")
+        st.text_input("🔑 Въведете парола за достъп:", type="password", on_change=password_entered, key="password_input")
+        st.error("❌ Грешна парола! Опитайте отново.")
+        return False
+    return True
+
+if not check_password():
+    st.stop()
+# ==================================
 
 def set_cell_background(cell, hex_color):
     """Задава цвят на фона на клетка от таблица."""
