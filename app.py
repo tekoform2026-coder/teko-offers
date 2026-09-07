@@ -23,7 +23,10 @@ st.set_page_config(
 def check_password():
     """Връща True, ако потребителят е въвел правилна парола."""
     def password_entered():
-        if hmac.compare_digest(st.session_state["password_input"], st.secrets.get("password", "")):
+        user_pass = str(st.session_state.get("password_input", ""))
+        secret_pass = str(st.secrets.get("password", ""))
+        
+        if hmac.compare_digest(user_pass, secret_pass):
             st.session_state["password_correct"] = True
             del st.session_state["password_input"]
         else:
@@ -39,7 +42,6 @@ def check_password():
         st.error("❌ Грешна парола! Опитайте отново.")
         return False
     return True
-
 if not check_password():
     st.stop()
 # ==================================
