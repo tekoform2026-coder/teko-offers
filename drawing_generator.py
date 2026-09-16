@@ -14,21 +14,22 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-# Висока резолюция за кристални векторни чертежи
+# Висока резолюция за векторно изглеждащи растерни чертежи
 DPI_RESOLUTION = 300
 
-# Настройки на шрифтовете
+# Настройки на шрифтовете и рендирането
 matplotlib.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'sans-serif']
 matplotlib.rcParams['font.family'] = 'sans-serif'
 matplotlib.rcParams['text.antialiased'] = True
+matplotlib.rcParams['path.simplify'] = False
 
 # Цветова палитра TEKO
-COLOR_PANEL = '#F1948A'        # Кофражен панел (розово-червен)
-COLOR_PANEL_BORDER = '#681910' # Кант на панел (тъмночервен)
-COLOR_CORNER_EX = '#52BE80'    # Външен ъгъл EX (яркозелено)
-COLOR_CORNER_IN = '#1E8449'    # Вътрешен ъгъл IN (тъмнозелено)
-COLOR_WALER = '#27AE60'        # Ригел AW (зелено)
-COLOR_CONCRETE = '#D5D8DC'     # Бетонно ядро (светлосиво)
+COLOR_PANEL = '#F1948A'         # Кофражен панел (розово-червен)
+COLOR_PANEL_BORDER = '#681910'  # Кант на панел (тъмночервен)
+COLOR_CORNER_EX = '#52BE80'     # Външен ъгъл EX (яркозелено)
+COLOR_CORNER_IN = '#1E8449'     # Вътрешен ъгъл IN (тъмнозелено)
+COLOR_WALER = '#27AE60'         # Ригел AW (зелено)
+COLOR_CONCRETE = '#D5D8DC'      # Бетонно ядро (светлосиво)
 
 def setup_pdf_fonts():
     """Регистрира кирилски шрифт в ReportLab."""
@@ -84,7 +85,7 @@ def calculate_panel_width_breakdown(width_cm):
             remaining -= count * c
             
     if remaining > 0:
-        result.append(remaining) me
+        result.append(remaining)
         
     return result
 
@@ -112,10 +113,9 @@ def generate_overall_project_3d_buf(pdf_elements):
         poly = Poly3DCollection(faces, facecolors=facecolor, edgecolors=edgecolor, linewidths=0.5, alpha=alpha)
         ax.add_collection3d(poly)
 
-    # Автоматично подреждане на елементите в пространствена решетка
     grid_cols = 3
-    spacing_x = 250.0  # cm
-    spacing_y = 250.0  # cm
+    spacing_x = 250.0
+    spacing_y = 250.0
     
     max_x, max_y, max_z = 300.0, 300.0, 300.0
 
@@ -136,7 +136,7 @@ def generate_overall_project_3d_buf(pdf_elements):
         # Бетонно ядро
         draw_prism_3d(pos_x, pos_y, 0, l_a, l_b if "Колона" in w_type else thick, h_cm, COLOR_CONCRETE, alpha=0.6)
         
-        # Кофражни платна около него
+        # Кофражни платна
         draw_prism_3d(pos_x - 10, pos_y - 10, 0, l_a + 20, 10, h_cm, COLOR_PANEL)
         draw_prism_3d(pos_x - 10, pos_y + (l_b if "Колона" in w_type else thick), 0, l_a + 20, 10, h_cm, COLOR_PANEL)
         
@@ -144,23 +144,26 @@ def generate_overall_project_3d_buf(pdf_elements):
         draw_prism_3d(pos_x - 10, pos_y - 10, 0, 10, 10, h_cm, COLOR_CORNER_EX)
         draw_prism_3d(pos_x + l_a, pos_y - 10, 0, 10, 10, h_cm, COLOR_CORNER_EX)
 
-        # Етикет с името на елемента
-        ax.text(pos_x + l_a/2, pos_y + l_b/2, h_cm + 20, e_name, ha='center', va='bottom', fontsize=7, fontweight='bold')
+        ax.text(pos_x + l_a/2, pos_y + (l_b/2 if "Колона" in w_type else thick/2), h_cm + 20, e_name, ha='center', va='bottom', fontsize=7, fontweight='bold')
 
         max_x = max(max_x, pos_x + l_a + 100)
-        max_y = max(max_y, pos_y + l_b + 100)
+        max_y = max(max_y, pos_y + (l_b if "Колона" in w_type else thick) + 100)
         max_z = max(max_z, h_cm + 50)
 
     ax.set_xlim(-50, max_x)
     ax.set_ylim(-50, max_y)
     ax.set_zlim(0, max_z)
+    
+    # Фиксиране на пропорциите в 3D (предотвратява деформацията)
+    ax.set_box_aspect([max_x + 50, max_y + 50, max_z])
+    
     ax.axis('off')
     ax.view_init(elev=28, azim=-55)
     ax.set_title("3D Общ кофражен план на обект (Project Overview)", fontsize=10, fontweight='bold', pad=10)
     
     plt.tight_layout()
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', dpi=DPI_RESOLUTION)
+    plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0.05, dpi=DPI_RESOLUTION)
     plt.close(fig)
     buf.seek(0)
     return buf
@@ -221,13 +224,13 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
         ax.set_xlim(-20, a + 20)
         ax.set_ylim(-25, t + 25)
 
-    ax.set_aspect('equal')
+    ax.set_aspect('equal', adjustable='datalim')
     ax.axis('off')
     ax.set_title("Изглед отгоре (Top View)", fontsize=8, fontweight='bold', pad=4)
     plt.tight_layout()
     
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', dpi=DPI_RESOLUTION)
+    plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0.05, dpi=DPI_RESOLUTION)
     plt.close(fig)
     buf.seek(0)
     return buf
@@ -259,20 +262,14 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                                          linewidth=0.8, edgecolor=COLOR_PANEL_BORDER, facecolor=COLOR_PANEL)
                 ax.add_patch(rect)
                 
-                # ИЗЧИСТЕНИ КРИСТАЛНИ НАДПИСИ
+                # ИЗЧИСТЕНИ НАДПИСИ С КРИСТАЛЕН ФОН
                 text_str = f"{int(w_val)}/{int(h_val)}"
-                
-                # Избор на размер на шрифта, за да не излиза извън панела
-                if w_val >= 35:
-                    font_sz = 6.5
-                elif w_val >= 20:
-                    font_sz = 5.5
-                else:
-                    font_sz = 4.5
+                font_sz = 6.5 if w_val >= 35 else (5.5 if w_val >= 20 else 4.5)
                 
                 ax.text(curr_x + w_val / 2, curr_y + h_val / 2, text_str,
-                        ha='center', va='center', fontsize=font_sz, color='#333333', fontweight='bold', 
-                        rotation=90 if w_val < 35 else 0)
+                        ha='center', va='center', fontsize=font_sz, color='#111111', fontweight='bold', 
+                        rotation=90 if w_val < 35 else 0,
+                        bbox=dict(boxstyle='round,pad=0.15', facecolor='white', alpha=0.75, edgecolor='none'))
                 
                 curr_x += w_val
             curr_y += h_val
@@ -285,7 +282,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
 
         ax.set_xlim(-20, side_len + 20)
         ax.set_ylim(-10, h_cm + 15)
-        ax.set_aspect('equal')
+        ax.set_aspect('equal', adjustable='datalim')
         ax.axis('off')
         ax.set_title(f"Страна {title_label} ({int(side_len)}x{int(h_cm)} cm)", fontsize=8, fontweight='bold')
 
@@ -296,7 +293,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     plt.tight_layout()
     
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', dpi=DPI_RESOLUTION)
+    plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0.05, dpi=DPI_RESOLUTION)
     plt.close(fig)
     buf.seek(0)
     return buf
@@ -313,6 +310,8 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     h = float(height_cm or 270)
     t = float(thickness or 30)
     
+    dim_y = b if "Колона" in wall_type else t
+
     def draw_prism_3d(x0, y0, z0, dx, dy, dz, facecolor, edgecolor='#2C3E50', alpha=0.85):
         vertices = np.array([
             [x0, y0, z0], [x0+dx, y0, z0], [x0+dx, y0+dy, z0], [x0, y0+dy, z0],
@@ -330,27 +329,31 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
         ax.add_collection3d(poly)
 
     # Бетонно ядро
-    draw_prism_3d(0, 0, 0, a, b if "Колона" in wall_type else t, h, COLOR_CONCRETE, alpha=0.5)
+    draw_prism_3d(0, 0, 0, a, dim_y, h, COLOR_CONCRETE, alpha=0.5)
 
-    # Реални 4 кофражни платна около бетонната колона/стена
+    # Кофражни платна
     draw_prism_3d(-12, -12, 0, a + 24, 12, h, COLOR_PANEL)
-    draw_prism_3d(-12, (b if "Колона" in wall_type else t), 0, a + 24, 12, h, COLOR_PANEL)
-    draw_prism_3d(-12, 0, 0, 12, (b if "Колона" in wall_type else t), h, COLOR_PANEL)
-    draw_prism_3d(a, 0, 0, 12, (b if "Колона" in wall_type else t), h, COLOR_PANEL)
+    draw_prism_3d(-12, dim_y, 0, a + 24, 12, h, COLOR_PANEL)
+    draw_prism_3d(-12, 0, 0, 12, dim_y, h, COLOR_PANEL)
+    draw_prism_3d(a, 0, 0, 12, dim_y, h, COLOR_PANEL)
 
-    # 4 Ъглови профила EX по вертикалните ръбове
-    for xc, yc in [(-12, -12), (a, -12), (a, (b if "Колона" in wall_type else t)), (-12, (b if "Колона" in wall_type else t))]:
+    # 4 Ъглови профила EX
+    for xc, yc in [(-12, -12), (a, -12), (a, dim_y), (-12, dim_y)]:
         draw_prism_3d(xc, yc, 0, 12, 12, h, COLOR_CORNER_EX)
 
     ax.set_xlim(-30, a + 30)
-    ax.set_ylim(-30, (b if "Колона" in wall_type else t) + 30)
+    ax.set_ylim(-30, dim_y + 30)
     ax.set_zlim(0, h + 20)
+    
+    # Фиксиране на 3D пропорциите, за да не се сплесква геометрията
+    ax.set_box_aspect([a + 60, dim_y + 60, h + 20])
+    
     ax.axis('off')
     ax.view_init(elev=22, azim=-45)
     ax.set_title("3D Изометрия (3D View)", fontsize=8, fontweight='bold', pad=2)
     
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', dpi=DPI_RESOLUTION)
+    plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0.05, dpi=DPI_RESOLUTION)
     plt.close(fig)
     buf.seek(0)
     return buf
@@ -427,7 +430,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
     
     # ОБЩ 3D МОДЕЛ НА ОБЕКТА
     overall_3d_buf = generate_overall_project_3d_buf(pdf_elements)
-    rl_overall_3d = RLImage(overall_3d_buf, width=490, height=230)
+    rl_overall_3d = RLImage(overall_3d_buf, width=490, height=261)
     story.append(rl_overall_3d)
     story.append(Spacer(1, 6))
 
@@ -477,8 +480,8 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         buf_top = generate_top_view_buf(w_type, l_a, l_b, thick, name=e_name)
         buf_axon = generate_3d_axonometry_buf(w_type, l_a, l_b, h_cm, thick, name=e_name)
         
-        rl_top = RLImage(buf_top, width=240, height=140)
-        rl_axon = RLImage(buf_axon, width=240, height=140)
+        rl_top = RLImage(buf_top, width=240, height=156)
+        rl_axon = RLImage(buf_axon, width=240, height=156)
         
         row_table = Table([[rl_top, rl_axon]], colWidths=[245, 245])
         row_table.setStyle(TableStyle([
@@ -492,7 +495,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
 
         # Изглед отпред (Front View)
         buf_front = generate_front_view_buf(w_type, l_a, l_b, h_cm, name=e_name)
-        rl_front = RLImage(buf_front, width=490, height=210)
+        rl_front = RLImage(buf_front, width=490, height=208)
         story.append(rl_front)
         story.append(Spacer(1, 6))
 
