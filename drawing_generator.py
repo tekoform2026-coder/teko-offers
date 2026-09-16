@@ -6,7 +6,6 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-from PIL import Image
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -15,17 +14,20 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
+# Висока разделителна способност за кристална яснота
+DPI_RESOLUTION = 300
+
 # Настройки на шрифтовете
 matplotlib.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'sans-serif']
 matplotlib.rcParams['font.family'] = 'sans-serif'
 
 # Цветова палитра (стандарт TEKO / PERI / Doka)
-COLOR_PANEL = '#F5B7B1'        # Розов цвят за панели
-COLOR_PANEL_BORDER = '#78281F' # Тъмночервен кант
+COLOR_PANEL = '#F5B7B1'        # Светлорозов цвят за панели
+COLOR_PANEL_BORDER = '#78281F' # Тъмночервен кант за контраст
 COLOR_CORNER_EX = '#82E0AA'    # Светлозелено за външен ъгъл EX
 COLOR_CORNER_IN = '#27AE60'    # Тъмнозелено за вътрешен ъгъл IN
-COLOR_WALER = '#2ECC71'        # Зелено за ригели AW
-COLOR_CONCRETE = '#EAEDED'     # Светлосиво за бетон
+COLOR_WALER = '#2ECC71'        # Яркозелено за ригели AW
+COLOR_CONCRETE = '#D5D8DC'     # Сиво за бетонната сърцевина
 
 def setup_pdf_fonts():
     """Регистрира кирилски шрифт в ReportLab."""
@@ -88,70 +90,78 @@ def calculate_panel_width_breakdown(width_cm):
 # ==========================================
 # 1. ИЗГЛЕД ОТГОРЕ (TOP VIEW)
 # ==========================================
-def generate_top_view(wall_type, dim_a, dim_b, thickness, name="Елемент"):
-    fig, ax = plt.subplots(figsize=(4, 2.8), dpi=300)
+def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемент"):
+    fig, ax = plt.subplots(figsize=(4.5, 3.0), dpi=DPI_RESOLUTION)
     
     a = float(dim_a or 100)
     b = float(dim_b or 100)
     t = float(thickness or 30)
     
-    if wall_type == "L-образна стена":
-        poly = patches.Polygon([[0, 0], [a, 0], [a, t], [t, t], [t, b], [0, b]], 
-                               facecolor=COLOR_CONCRETE, edgecolor='#333333', linewidth=1.2)
-        ax.add_patch(poly)
-        
-        # Ъгли EX и IN
-        ax.add_patch(patches.Rectangle((-15, -15), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black'))
-        ax.text(-7.5, -7.5, "EX", ha='center', va='center', fontsize=6, fontweight='bold')
-        
-        ax.add_patch(patches.Rectangle((t, t), 15, 15, facecolor=COLOR_CORNER_IN, edgecolor='black'))
-        ax.text(t+7.5, t+7.5, "IN", ha='center', va='center', fontsize=6, fontweight='bold', color='white')
-
-        # Панели
-        for curr_x, w in zip([0, a-30], [30, 30]):
-            ax.add_patch(patches.Rectangle((curr_x, -15), w, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER))
-            
-    elif wall_type in ["Колона", "Квадратна колона"]:
-        ax.add_patch(patches.Rectangle((0, 0), a, b, facecolor=COLOR_CONCRETE, edgecolor='#333333', linewidth=1.2))
+    if wall_type in ["Колона", "Квадратна колона"]:
+        # Бетонно ядро
+        ax.add_patch(patches.Rectangle((0, 0), a, b, facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.5))
+        # 4 броя EX ъгли
         for x_pos, y_pos in [(-15, -15), (a, -15), (a, b), (-15, b)]:
-            ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black'))
-            ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5, fontweight='bold')
+            ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=1.0))
+            ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=7, fontweight='bold')
 
         # Панели по страните
         w_a = calculate_panel_width_breakdown(a)
         curr_x = 0
         for w in w_a:
-            ax.add_patch(patches.Rectangle((curr_x, -15), w, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER))
-            ax.text(curr_x + w/2, -7.5, f"{int(w)}", ha='center', va='center', fontsize=5)
-            ax.add_patch(patches.Rectangle((curr_x, b), w, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER))
-            ax.text(curr_x + w/2, b + 7.5, f"{int(w)}", ha='center', va='center', fontsize=5)
+            ax.add_patch(patches.Rectangle((curr_x, -15), w, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=1.0))
+            ax.text(curr_x + w/2, -7.5, f"{int(w)}", ha='center', va='center', fontsize=6.5, fontweight='bold')
+            ax.add_patch(patches.Rectangle((curr_x, b), w, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=1.0))
+            ax.text(curr_x + w/2, b + 7.5, f"{int(w)}", ha='center', va='center', fontsize=6.5, fontweight='bold')
             curr_x += w
-    else:
-        ax.add_patch(patches.Rectangle((0, 0), a, t, facecolor=COLOR_CONCRETE, edgecolor='#333333'))
+
+        ax.set_xlim(-25, a + 25)
+        ax.set_ylim(-25, b + 25)
+
+    elif wall_type == "L-образна стена":
+        poly = patches.Polygon([[0, 0], [a, 0], [a, t], [t, t], [t, b], [0, b]], 
+                               facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.5)
+        ax.add_patch(poly)
+        
+        ax.add_patch(patches.Rectangle((-15, -15), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=1.0))
+        ax.text(-7.5, -7.5, "EX", ha='center', va='center', fontsize=7, fontweight='bold')
+        
+        ax.add_patch(patches.Rectangle((t, t), 15, 15, facecolor=COLOR_CORNER_IN, edgecolor='black', linewidth=1.0))
+        ax.text(t+7.5, t+7.5, "IN", ha='center', va='center', fontsize=7, fontweight='bold', color='white')
+
+        ax.set_xlim(-25, a + 25)
+        ax.set_ylim(-25, b + 25)
+
+    else: # Прави стени
+        ax.add_patch(patches.Rectangle((0, 0), a, t, facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.5))
         w_a = calculate_panel_width_breakdown(a)
         curr_x = 0
         for w in w_a:
-            ax.add_patch(patches.Rectangle((curr_x, -15), w, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER))
-            ax.add_patch(patches.Rectangle((curr_x, t), w, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER))
+            ax.add_patch(patches.Rectangle((curr_x, -15), w, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=1.0))
+            ax.text(curr_x + w/2, -7.5, f"{int(w)}", ha='center', va='center', fontsize=6.5, fontweight='bold')
+            ax.add_patch(patches.Rectangle((curr_x, t), w, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=1.0))
+            ax.text(curr_x + w/2, t + 7.5, f"{int(w)}", ha='center', va='center', fontsize=6.5, fontweight='bold')
             curr_x += w
 
-    ax.autoscale_view()
+        ax.set_xlim(-20, a + 20)
+        ax.set_ylim(-25, t + 25)
+
     ax.set_aspect('equal')
     ax.axis('off')
-    ax.set_title(f"Изглед отгоре (Top View)", fontsize=8, fontweight='bold', pad=4)
+    ax.set_title("Изглед отгоре (Top View)", fontsize=8.5, fontweight='bold', pad=4)
     plt.tight_layout()
     
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', dpi=300)
+    plt.savefig(buf, format='png', bbox_inches='tight', dpi=DPI_RESOLUTION)
     plt.close(fig)
     buf.seek(0)
-    return Image.open(buf)
+    return buf
 
 # ==========================================
 # 2. ИЗГЛЕД ОТПРЕД (FRONT VIEW)
 # ==========================================
-def generate_front_view(wall_type, dim_a, dim_b, height_cm, name="Елемент"):
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.5, 3.2), dpi=300)
+def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елемент"):
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.0, 3.6), dpi=DPI_RESOLUTION)
     
     a = float(dim_a or 100)
     b = float(dim_b or 100)
@@ -161,9 +171,9 @@ def generate_front_view(wall_type, dim_a, dim_b, height_cm, name="Елемент
     def draw_side_front(ax, side_len, title_label):
         w_panels = calculate_panel_width_breakdown(side_len)
         
-        # EX ъгли по краищата
-        ax.add_patch(patches.Rectangle((-8, 0), 8, h_cm, facecolor=COLOR_CORNER_EX, edgecolor='black'))
-        ax.add_patch(patches.Rectangle((side_len, 0), 8, h_cm, facecolor=COLOR_CORNER_EX, edgecolor='black'))
+        # EX ъглови профили по страните
+        ax.add_patch(patches.Rectangle((-10, 0), 10, h_cm, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=1.0))
+        ax.add_patch(patches.Rectangle((side_len, 0), 10, h_cm, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=1.0))
 
         # Панели
         curr_y = 0
@@ -171,44 +181,46 @@ def generate_front_view(wall_type, dim_a, dim_b, height_cm, name="Елемент
             curr_x = 0
             for w_val in w_panels:
                 rect = patches.Rectangle((curr_x, curr_y), w_val, h_val, 
-                                         linewidth=0.8, edgecolor=COLOR_PANEL_BORDER, facecolor=COLOR_PANEL)
+                                         linewidth=1.0, edgecolor=COLOR_PANEL_BORDER, facecolor=COLOR_PANEL)
                 ax.add_patch(rect)
                 text_str = f"{int(w_val)}/{int(h_val)}"
-                if w_val >= 15:
-                    ax.text(curr_x + w_val / 2, curr_y + h_val / 2, text_str,
-                            ha='center', va='center', fontsize=4.5, color='#4A235A', fontweight='bold', rotation=90)
+                
+                # Ясно четим текст
+                font_sz = 6.5 if w_val >= 25 else 5.5
+                ax.text(curr_x + w_val / 2, curr_y + h_val / 2, text_str,
+                        ha='center', va='center', fontsize=font_sz, color='#4A235A', fontweight='bold', rotation=90)
                 curr_x += w_val
             curr_y += h_val
 
         # Ригели AW
         waler_positions = [h for h in [50, 120, 180, 240, 300] if h < h_cm]
         for w_y in waler_positions:
-            ax.add_patch(patches.Rectangle((-12, w_y - 4), side_len + 24, 8, 
-                                     facecolor=COLOR_WALER, edgecolor='#1E8449', alpha=0.85, zorder=3))
+            ax.add_patch(patches.Rectangle((-14, w_y - 4), side_len + 28, 8, 
+                                     facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.8, alpha=0.9, zorder=3))
 
-        ax.set_xlim(-18, side_len + 18)
-        ax.set_ylim(-10, h_cm + 15)
+        ax.set_xlim(-22, side_len + 22)
+        ax.set_ylim(-12, h_cm + 18)
         ax.set_aspect('equal')
         ax.axis('off')
-        ax.set_title(f"Страна {title_label} ({int(side_len)}x{int(h_cm)} cm)", fontsize=7.5, fontweight='bold')
+        ax.set_title(f"Страна {title_label} ({int(side_len)}x{int(h_cm)} cm)", fontsize=8, fontweight='bold')
 
     draw_side_front(ax1, a, "A")
     draw_side_front(ax2, b, "B" if wall_type in ["L-образна стена", "Колона", "Квадратна колона"] else "A1")
 
-    fig.suptitle(f"Изглед отпред (Front View)", fontsize=9, fontweight='bold', y=0.98)
+    fig.suptitle("Изглед отпред (Front View)", fontsize=9.5, fontweight='bold', y=0.98)
     plt.tight_layout()
     
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', dpi=300)
+    plt.savefig(buf, format='png', bbox_inches='tight', dpi=DPI_RESOLUTION)
     plt.close(fig)
     buf.seek(0)
-    return Image.open(buf)
+    return buf
 
 # ==========================================
 # 3. 3D ИЗОМЕТРИЧЕН ИЗГЛЕД (3D VIEW)
 # ==========================================
-def generate_3d_axonometry(wall_type, dim_a, dim_b, height_cm, thickness, name="Елемент"):
-    fig = plt.figure(figsize=(4, 2.8), dpi=300)
+def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, name="Елемент"):
+    fig = plt.figure(figsize=(4.5, 3.0), dpi=DPI_RESOLUTION)
     ax = fig.add_subplot(111, projection='3d')
     
     a = float(dim_a or 100) / 10.0
@@ -216,7 +228,7 @@ def generate_3d_axonometry(wall_type, dim_a, dim_b, height_cm, thickness, name="
     h = float(height_cm or 270) / 10.0
     t = float(thickness or 30) / 10.0
     
-    def draw_prism_3d(x0, y0, z0, dx, dy, dz, facecolor, edgecolor='black'):
+    def draw_prism_3d(x0, y0, z0, dx, dy, dz, facecolor, edgecolor='#2C3E50'):
         vertices = np.array([
             [x0, y0, z0], [x0+dx, y0, z0], [x0+dx, y0+dy, z0], [x0, y0+dy, z0],
             [x0, y0, z0+dz], [x0+dx, y0, z0+dz], [x0+dx, y0+dy, z0+dz], [x0, y0+dy, z0+dz]
@@ -229,7 +241,7 @@ def generate_3d_axonometry(wall_type, dim_a, dim_b, height_cm, thickness, name="
             [vertices[0], vertices[3], vertices[7], vertices[4]],
             [vertices[1], vertices[2], vertices[6], vertices[5]]
         ]
-        poly = Poly3DCollection(faces, facecolors=facecolor, edgecolors=edgecolor, linewidths=0.4, alpha=0.85)
+        poly = Poly3DCollection(faces, facecolors=facecolor, edgecolors=edgecolor, linewidths=0.6, alpha=0.85)
         ax.add_collection3d(poly)
 
     if wall_type == "L-образна стена":
@@ -241,18 +253,18 @@ def generate_3d_axonometry(wall_type, dim_a, dim_b, height_cm, thickness, name="
         draw_prism_3d(-1.5, -1.5, 0, 1.5, 1.5, h, COLOR_CORNER_EX)
         draw_prism_3d(a, -1.5, 0, 1.5, 1.5, h, COLOR_CORNER_EX)
 
-    ax.set_xlim(-2, max(a, b) + 2)
-    ax.set_ylim(-2, max(a, b) + 2)
+    ax.set_xlim(-3, max(a, b) + 3)
+    ax.set_ylim(-3, max(a, b) + 3)
     ax.set_zlim(0, h + 2)
     ax.axis('off')
     ax.view_init(elev=22, azim=-40)
-    ax.set_title("3D Изометрия (3D View)", fontsize=8, fontweight='bold', pad=2)
+    ax.set_title("3D Изометрия (3D View)", fontsize=8.5, fontweight='bold', pad=2)
     
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', dpi=300)
+    plt.savefig(buf, format='png', bbox_inches='tight', dpi=DPI_RESOLUTION)
     plt.close(fig)
     buf.seek(0)
-    return Image.open(buf)
+    return buf
 
 # ==========================================
 # 4. СПЕЦИФИКАЦИЯ ЗА ЕЛЕМЕНТА
@@ -284,7 +296,7 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm):
     return bom
 
 # ==========================================
-# 5. ГЕНЕРИРАНЕ НА ЦЕЛИЯ PDF Документ
+# 5. ГЕНЕРИРАНЕ НА ЦЕЛИЯ PDF ДОКУМЕНТ
 # ==========================================
 def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
     has_dejavu = setup_pdf_fonts()
@@ -319,7 +331,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
     client = proj_info.get('client', 'Клиент')
     project = proj_info.get('project', 'Обект TEKO')
     
-    # ПЪРВА СТРАНИЦА: ОБЩА СПЕЦИФИКАЦИЯ
+    # 1. СТРАНИЦА: ОБЩА КОЛИЧЕСТВЕНА СМЕТКА
     story.append(Paragraph("<b>КОФРАЖНА СИСТЕМА TEKO / TEKO FORMWORK SYSTEM</b>", title_style))
     story.append(Paragraph(f"<b>Обект:</b> {project} | <b>Клиент:</b> {client}", subtitle_style))
     story.append(Spacer(1, 6))
@@ -354,7 +366,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
     story.append(t_summary)
     story.append(PageBreak())
 
-    # СЛЕДВАЩИ СТРАНИЦИ: ВСЕКИ ЕЛЕМЕНТ НА ОТДЕЛНА СТРАНИЦА
+    # 2. ВСЕКИ ЕЛЕМЕНТ НА ОТДЕЛНА СТРАНИЦА
     for elem in pdf_elements:
         e_name = elem.get('name', 'Елемент')
         w_type = elem.get('type_bg') or elem.get('wall_type') or 'Стена'
@@ -366,19 +378,14 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         story.append(Paragraph(f"<b>Чертеж и Спецификация: {e_name}</b>", title_style))
         story.append(Paragraph(f"Тип: {w_type} | Размери: {int(l_a)}x{int(l_b)} cm | Височина: {int(h_cm)} cm", subtitle_style))
         
-        # 1. Изглед отгоре + 3D Изглед един до друг
-        top_img = generate_top_view(w_type, l_a, l_b, thick, name=e_name)
-        axon_img = generate_3d_axonometry(w_type, l_a, l_b, h_cm, thick, name=e_name)
+        # Изглед отгоре + 3D Изометрия (Рамо до рамо)
+        buf_top = generate_top_view_buf(w_type, l_a, l_b, thick, name=e_name)
+        buf_axon = generate_3d_axonometry_buf(w_type, l_a, l_b, h_cm, thick, name=e_name)
         
-        buf_top = io.BytesIO()
-        top_img.save(buf_top, format='PNG')
-        buf_axon = io.BytesIO()
-        axon_img.save(buf_axon, format='PNG')
+        rl_top = RLImage(buf_top, width=235, height=140)
+        rl_axon = RLImage(buf_axon, width=235, height=140)
         
-        rl_top = RLImage(buf_top, width=240, height=140)
-        rl_axon = RLImage(buf_axon, width=240, height=140)
-        
-        row_table = Table([[rl_top, rl_axon]], colWidths=[245, 245])
+        row_table = Table([[rl_top, rl_axon]], colWidths=[240, 240])
         row_table.setStyle(TableStyle([
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
@@ -388,15 +395,13 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         story.append(row_table)
         story.append(Spacer(1, 4))
 
-        # 2. Изглед отпред (Front View)
-        front_img = generate_front_view(w_type, l_a, l_b, h_cm, name=e_name)
-        buf_front = io.BytesIO()
-        front_img.save(buf_front, format='PNG')
-        rl_front = RLImage(buf_front, width=490, height=210)
+        # Изглед отпред (Front View)
+        buf_front = generate_front_view_buf(w_type, l_a, l_b, h_cm, name=e_name)
+        rl_front = RLImage(buf_front, width=485, height=210)
         story.append(rl_front)
         story.append(Spacer(1, 6))
 
-        # 3. Таблица с количества за конкретния елемент
+        # Таблица с количества за елемента
         elem_bom = calculate_element_bom(w_type, l_a, l_b, h_cm)
         
         e_table_data = [[
@@ -409,7 +414,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
                 Paragraph(str(item_qty), cell_style)
             ])
             
-        t_elem = Table(e_table_data, colWidths=[350, 140])
+        t_elem = Table(e_table_data, colWidths=[345, 140])
         t_elem.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2E4053')),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
