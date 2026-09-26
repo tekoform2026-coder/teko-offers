@@ -19,32 +19,14 @@ st.set_page_config(
     layout="wide"
 )
 
-# === СИСТЕМА ЗА ЗАЩИТА С ПАРОЛА ===
+# === СИСТЕМА ЗА ЗАЩИТА С ПАРОЛА (ВРЕМЕННО ИЗКЛЮЧЕНА) ===
 def check_password():
-    """Връща True, ако потребителят е въвел правилна парола."""
-    def password_entered():
-        user_pass = str(st.session_state.get("password_input", ""))
-        secret_pass = str(st.secrets.get("password", ""))
-        
-        if hmac.compare_digest(user_pass, secret_pass):
-            st.session_state["password_correct"] = True
-            del st.session_state["password_input"]
-        else:
-            st.session_state["password_correct"] = False
-
-    if "password_correct" not in st.session_state:
-        st.title("🔒 Вход в системата TEKO")
-        st.text_input("🔑 Въведете парола за достъп:", type="password", on_change=password_entered, key="password_input")
-        return False
-    elif not st.session_state["password_correct"]:
-        st.title("🔒 Вход в системата TEKO")
-        st.text_input("🔑 Въведете парола за достъп:", type="password", on_change=password_entered, key="password_input")
-        st.error("❌ Грешна парола! Опитайте отново.")
-        return False
+    """Временно пропуска проверката и пуска директно в системата."""
     return True
+
 if not check_password():
     st.stop()
-# ==================================
+# =======================================================
 
 def set_cell_background(cell, hex_color):
     """Задава цвят на фона на клетка от таблица."""
