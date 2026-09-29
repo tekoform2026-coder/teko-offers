@@ -47,13 +47,19 @@ def analyze_blueprint(image_input, api_key):
     """
 
     # Последователен хронологичен списък с приоритет от най-новия към по-стари модели
-    preferred_models = [
-        'gemini-3.6-flash',
-        'gemini-3.5-flash',
-        'gemini-2.5-flash',
-        'gemini-2.0-flash',
-        'gemini-1.5-flash'
-    ]
+   preferred_models = [
+    # --- PRO модели (Първи избор за максимална точност при чертежи) ---
+    "gemini-3.1-pro-preview",  # Най-силният модел за комплексен анализ
+    "gemini-2.5-pro",  # Доказан Pro модел с отлично визуално разпознаване
+    # --- FLASH модели (Бързи алтернативи, ако Pro моделите са заети) ---
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
+ 
+   
+]
 
     candidate_models = list(preferred_models)
     try:
