@@ -125,7 +125,7 @@ def process_uploaded_file(uploaded_file):
     if uploaded_file.type == "application/pdf":
         doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
         page = doc.load_page(0)
-        pix = page.get_pixmap(dpi=150)
+        pix = page.get_pixmap(dpi=200)
         img = Image.open(io.BytesIO(pix.tobytes("png")))
         return img
     else:
