@@ -1,18 +1,23 @@
 import json
-from PIL import Image
 import google.generativeai as genai
+from PIL import Image
+
 
 def analyze_blueprint(image_input, api_key):
-    """
-    Разчита чертежа, като приоритетно използва Pro моделите за максимална прецизност
-    при четене на размери и геометрия. При натовареност преминава към Flash модели.
-    """
-    if isinstance(image_input, Image.Image):
-        img = image_input
-    elif hasattr(image_input, 'read'):
-        img = Image.open(image_input)
-    else:
-        img = Image.open(image_input)
+    # 1. Конвертиране в RGB и справяне със Streamlit файловия поток
+    try:
+        if isinstance(image_input, Image.Image):
+            img = image_input
+        elif hasattr(image_input, "read"):
+            image_input.seek(0)
+            img = Image.open(image_input)
+        else:
+            img = Image.open(image_input)
+
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+    except Exception as e:
+        raise Exception(f"Грешка при зареждане на изображението: {e}")
 
     genai.configure(api_key=api_key)
 
@@ -52,41 +57,30 @@ def analyze_blueprint(image_input, api_key):
     - Прочети с най-висока точност цифрите от котите на чертежа. Ако някоя стойност липсва, сложи стандартна разумна стойност (напр. height_m=3.0, thickness_m=0.25).
     """
 
-    # Подредба: Първо Pro модели за максимално точно визуално разпознаване,
-    # след това Flash модели като бърз резервен вариант.
-    preferred_models = [
-        'gemini-3.1-pro',
-        'gemini-2.5-pro',
-        'gemini-3.8-flash',
-        'gemini-3.6-flash'
+    # 2. Актуален списък с Gemini 3.x модели
+    candidate_models = [
+        "gemini-3.6-flash",  # Бърз и изключително прецизен за визуален анализ
+        "gemini-3.1-pro",  # За по-сложни чертежи и детайлно логическо мислене
+        "gemini-2.0-flash",
+        "gemini-1.5-pro",
     ]
-
-    candidate_models = list(preferred_models)
-    
-    # Добавяне на допълнително налични модели от API
-    try:
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                clean_name = m.name.replace('models/', '')
-                if clean_name not in candidate_models:
-                    candidate_models.append(clean_name)
-    except Exception:
-        pass
 
     raw_text = None
     last_error = None
     used_model = None
 
+    # 3. Обхождане на моделите
     for model_name in candidate_models:
         try:
             model = genai.GenerativeModel(
                 model_name=model_name,
                 generation_config={
                     "response_mime_type": "application/json",
-                    "temperature": 0.1  # Ниска температура за максимално точни и фактологични резултати
-                }
+                    "temperature": 0.1,
+                },
             )
             response = model.generate_content([img, prompt])
+
             if response and response.text:
                 raw_text = response.text.strip()
                 used_model = model_name
@@ -96,13 +90,16 @@ def analyze_blueprint(image_input, api_key):
             continue
 
     if not raw_text:
-        raise Exception(f"Не можа да се осъществи връзка с Gemini API. Последна грешка: {last_error}")
+        raise Exception(
+            f"Не можа да се осъществи връзка с Gemini API. Последна грешка: {last_error}"
+        )
 
-    start_idx = raw_text.find('{')
-    end_idx = raw_text.rfind('}')
+    # 4. Валидиране и парсване на JSON отговора
+    start_idx = raw_text.find("{")
+    end_idx = raw_text.rfind("}")
 
     if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-        json_str = raw_text[start_idx:end_idx + 1]
+        json_str = raw_text[start_idx : end_idx + 1]
     else:
         json_str = raw_text
 
@@ -110,7 +107,10 @@ def analyze_blueprint(image_input, api_key):
         parsed_json = json.loads(json_str)
         return parsed_json, used_model
     except json.JSONDecodeError as e:
-        raise Exception(f"Грешка при обработка на JSON отговора: {e}\nПолучен текст: {raw_text[:200]}")
+        raise Exception(
+            f"Грешка при обработка на JSON отговора: {e}\nПолучен текст: {raw_text[:200]}"
+        )
+
 
 def analyze_blueprint_with_agent2(image_input, api_key):
     res, _ = analyze_blueprint(image_input, api_key)
