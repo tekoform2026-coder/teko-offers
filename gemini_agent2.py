@@ -4,8 +4,8 @@ import google.generativeai as genai
 
 def analyze_blueprint(image_input, api_key):
     """
-    Разчита чертежа, като приоритетно използва най-новия модел gemini-3.6-flash.
-    При натовареност преминава последователно през по-старите версии (3.5 -> 2.5 -> 2.0 -> 1.5).
+    Разчита чертежа, като приоритетно използва Pro моделите за максимална прецизност
+    при четене на размери и геометрия. При натовареност преминава към Flash модели.
     """
     if isinstance(image_input, Image.Image):
         img = image_input
@@ -17,7 +17,13 @@ def analyze_blueprint(image_input, api_key):
     genai.configure(api_key=api_key)
 
     prompt = """
-    Анализирай чертежа/плана и разпознай всички конструктивни елементи (колони, прави стени, L-образни стени, U-образни стени).
+    Ти си опитен конструктор и инженер по кофражни системи.
+    Анализирай внимателно предоставения чертеж/план и разпознай всички вертикални конструктивни елементи:
+    - Колони ("column")
+    - Прави стени ("wall")
+    - L-образни стени ("l_wall")
+    - U-образни стени / ядра ("u_wall")
+
     Върни САМО валиден JSON обект със следната структура:
 
     {
@@ -38,24 +44,26 @@ def analyze_blueprint(image_input, api_key):
       ]
     }
 
-    Инструкции за размерите:
+    Инструкции за размерите (всички стойности в метри):
     - За "column" (колона): задай "width_m", "length_m", "height_m".
     - За "wall" (права стена): задай "length_m", "thickness_m", "height_m".
     - За "l_wall" (L-образна стена): задай "l1_m", "l2_m", "thickness_m", "height_m".
     - За "u_wall" (U-образна стена): задай "l1_m", "l2_m", "l3_m", "thickness_m", "height_m".
-    - Ако някоя стойност липсва, сложи разумно отгатната стойност (напр. height_m=3.0, thickness_m=0.25).
+    - Прочети с най-висока точност цифрите от котите на чертежа. Ако някоя стойност липсва, сложи стандартна разумна стойност (напр. height_m=3.0, thickness_m=0.25).
     """
 
-    # Последователен хронологичен списък с приоритет от най-новия към по-стари модели
+    # Подредба: Първо Pro модели за максимално точно визуално разпознаване,
+    # след това Flash модели като бърз резервен вариант.
     preferred_models = [
-        'gemini-3.6-flash',
-        'gemini-3.5-flash',
-        'gemini-2.5-flash',
-        'gemini-2.0-flash',
-        'gemini-1.5-flash'
+        'gemini-3.1-pro',
+        'gemini-2.5-pro',
+        'gemini-3.8-flash',
+        'gemini-3.6-flash'
     ]
 
     candidate_models = list(preferred_models)
+    
+    # Добавяне на допълнително налични модели от API
     try:
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
@@ -73,7 +81,10 @@ def analyze_blueprint(image_input, api_key):
         try:
             model = genai.GenerativeModel(
                 model_name=model_name,
-                generation_config={"response_mime_type": "application/json"}
+                generation_config={
+                    "response_mime_type": "application/json",
+                    "temperature": 0.1  # Ниска температура за максимално точни и фактологични резултати
+                }
             )
             response = model.generate_content([img, prompt])
             if response and response.text:
