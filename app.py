@@ -15,7 +15,7 @@ from drawing_generator import generate_pdf_drawings
 
 st.set_page_config(
     page_title="TEKO - Вертикален Кофраж и Оферти",
-    page_icon="🏗️",
+    page_icon="🏗️️",
     layout="wide"
 )
 
@@ -335,14 +335,14 @@ with tab1:
         with col_actions:
             st.subheader("🤖 AI Разчитане")
             
-            # Избор на AI модел за разчитане (Gemini 3.8 Flash е избран по подразбиране)
+            # Избор на AI модел за разчитане
             selected_model = st.selectbox(
                 "Избери AI модел за разчитане:",
                 options=[
-                    "gemini-3.8-flash",
+                    "gemini-3.1-pro",
                     "gemini-2.5-pro",
-                    "gemini-2.5-flash",
-                    "gemini-1.5-pro"
+                    "gemini-3.8-flash",
+                    "gemini-3.6-flash"
                 ],
                 index=0,
                 help="Изберете кой модел на Gemini да анализира чертежа."
@@ -540,7 +540,7 @@ with tab4:
     df_calc = st.session_state["edited_df"]
 
     if df_calc.empty:
-        st.info("ℹ️️ Няма въведени елементи за изчисляване на оферта. Качете чертеж или въведете данни в Таб 1.")
+        st.info("ℹ Няма въведени елементи за изчисляване на оферта. Качете чертеж или въведете данни в Таб 1.")
     else:
         detailed_rows = []
         total_a = 0.0
