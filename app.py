@@ -310,6 +310,20 @@ with tab1:
 
         with col_actions:
             st.subheader("🤖 AI Разчитане")
+            
+            # Избор на AI модел за разчитане
+            selected_model = st.selectbox(
+                "Избери AI модел за разчитане:",
+                options=[
+                    "gemini-3.1-pro",
+                    "gemini-2.5-pro",
+                    "gemini-3.8-flash",
+                    "gemini-3.6-flash"
+                ],
+                index=0,
+                help="Изберете кой модел на Gemini да анализира чертежа."
+            )
+
             if not api_key:
                 st.warning("⚠️ Моля, въведете Gemini API Key в страничното меню.")
             else:
@@ -317,11 +331,11 @@ with tab1:
                     if processed_img:
                         with st.spinner("Извличане на вертикални кофражни елементи..."):
                             try:
-                                res = analyze_blueprint(processed_img, api_key)
+                                res = analyze_blueprint(processed_img, api_key, model_choice=selected_model)
                                 if isinstance(res, tuple):
                                     blueprint_data, used_model = res
                                 else:
-                                    blueprint_data, used_model = res, "Gemini Vision"
+                                    blueprint_data, used_model = res, selected_model
 
                                 st.session_state["blueprint_data"] = blueprint_data
                                 st.session_state["used_model"] = used_model
