@@ -46,12 +46,9 @@ def analyze_blueprint(image_input, api_key, model_choice=None):
     - Ако някоя стойност липсва, сложи разумно отгатната стойност (напр. height_m=3.0, thickness_m=0.25).
     """
 
-    # Последователен хронологичен списък с приоритет от най-новия към по-стари модели
     preferred_models = [
-        # --- PRO модели (Първи избор за максимална точност при чертежи) ---
         "gemini-3.1-pro-preview",
         "gemini-2.5-pro",
-        # --- FLASH модели (Бързи алтернативи, ако Pro моделите са заети) ---
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.6-flash",
@@ -64,7 +61,7 @@ def analyze_blueprint(image_input, api_key, model_choice=None):
 
     candidate_models = list(preferred_models)
     
-    # Ако потребителят е избрал модел от падащото меню, го слагаме на първо място
+    # Поставя избрания от потребителя модел на първо място
     if model_choice:
         if model_choice in candidate_models:
             candidate_models.remove(model_choice)
