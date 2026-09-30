@@ -33,7 +33,7 @@ def set_cell_background(cell, hex_color):
     shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{hex_color}"/>')
     cell._tc.get_or_add_tcPr().append(shading_elm)
 
- def calculate_height_breakdown(height_cm):
+def calculate_height_breakdown(height_cm):
     """
     Разбива височината САМО на стандартни TEKO височини: 150, 120, 60 cm.
     Всеки остатък под 60 cm се закръглява към стандартен модул от 60 cm.
@@ -335,14 +335,14 @@ with tab1:
         with col_actions:
             st.subheader("🤖 AI Разчитане")
             
-            # Избор на AI модел за разчитане
+            # Избор на AI модел за разчитане (Gemini 3.8 Flash е избран по подразбиране)
             selected_model = st.selectbox(
                 "Избери AI модел за разчитане:",
                 options=[
-                    "gemini-3.1-pro",
-                    "gemini-2.5-pro",
                     "gemini-3.8-flash",
-                    "gemini-3.6-flash"
+                    "gemini-2.5-pro",
+                    "gemini-2.5-flash",
+                    "gemini-1.5-pro"
                 ],
                 index=0,
                 help="Изберете кой модел на Gemini да анализира чертежа."
@@ -540,7 +540,7 @@ with tab4:
     df_calc = st.session_state["edited_df"]
 
     if df_calc.empty:
-        st.info("ℹ️ Няма въведени елементи за изчисляване на оферта. Качете чертеж или въведете данни в Таб 1.")
+        st.info("ℹ️️ Няма въведени елементи за изчисляване на оферта. Качете чертеж или въведете данни в Таб 1.")
     else:
         detailed_rows = []
         total_a = 0.0
