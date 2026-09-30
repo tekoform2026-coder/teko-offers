@@ -3,10 +3,6 @@ from PIL import Image
 import google.generativeai as genai
 
 def analyze_blueprint(image_input, api_key, model_choice=None):
-    """
-    Разчита чертежа. Ако е зададен `model_choice`, го използва като първи избор.
-    При натовареност преминава последователно през останалите налични модели.
-    """
     if isinstance(image_input, Image.Image):
         img = image_input
     elif hasattr(image_input, 'read'):
@@ -46,26 +42,28 @@ def analyze_blueprint(image_input, api_key, model_choice=None):
     - Ако някоя стойност липсва, сложи разумно отгатната стойност (напр. height_m=3.0, thickness_m=0.25).
     """
 
-    preferred_models = [
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-pro",
+    # Стандартен списък с резервни модели
+    fallback_models = [
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.6-flash",
         "gemini-3.5-flash",
         "gemini-2.5-flash",
+        "gemini-2.5-pro",
         "gemini-2.0-flash",
         "gemini-1.5-pro",
         "gemini-1.5-flash"
     ]
 
-    candidate_models = list(preferred_models)
+    candidate_models = []
     
-    # Поставя избрания от потребителя модел на първо място
+    # Ако има избран модел от падащото меню, той застава твърдо на първо място
     if model_choice:
-        if model_choice in candidate_models:
-            candidate_models.remove(model_choice)
-        candidate_models.insert(0, model_choice)
+        candidate_models.append(model_choice)
+
+    for m in fallback_models:
+        if m not in candidate_models:
+            candidate_models.append(m)
 
     try:
         for m in genai.list_models():
