@@ -33,41 +33,65 @@ def set_cell_background(cell, hex_color):
     shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{hex_color}"/>')
     cell._tc.get_or_add_tcPr().append(shading_elm)
 
-def calculate_height_breakdown(height_cm):
+ def calculate_height_breakdown(height_cm):
+    """
+    Разбива височината САМО на стандартни TEKO височини: 150, 120, 60 cm.
+    Всеки остатък под 60 cm се закръглява към стандартен модул от 60 cm.
+    """
+    height_cm = round(height_cm)
     height_levels = []
     rem = height_cm
+    
+    # 1. Приоритетно използване на най-големите панели (150 см)
     while rem >= 150:
         height_levels.append(150)
         rem -= 150
+        
+    # 2. Допълване с 120 см
     while rem >= 120:
         height_levels.append(120)
         rem -= 120
+        
+    # 3. Допълване с 60 см
     while rem >= 60:
         height_levels.append(60)
         rem -= 60
+        
+    # 4. Закръгляне на остатъка под 60 см към минималния стандартен модул от 60 см
     if rem > 0:
-        height_levels.append(rem)
+        height_levels.append(60)
+        
     return height_levels
 
 def calculate_panel_width_breakdown(width_cm):
+    """
+    Разбива ширината с приоритет към основните големи панели (60 см).
+    """
+    width_cm = round(width_cm)
     panel_widths = [60, 35, 30, 25, 20]
     compensators = [15, 10, 5]
     
     remaining = width_cm
     result_panels = {}
     
+    # 1. Първи приоритет: Основни панели (TK 60 е с най-висок приоритет)
     for w in panel_widths:
         count = remaining // w
         if count > 0:
             result_panels[f"TK _{int(w)}"] = int(count)
             remaining -= count * w
             
+    # 2. Втори приоритет: Компенсатори (TC)
     for c in compensators:
         count = remaining // c
         if count > 0:
             result_panels[f"TC _{int(c)}"] = int(count)
             remaining -= count * c
             
+    # 3. Минимално напасване за остатък
+    if remaining > 0 and "TC _5" not in result_panels:
+        result_panels["TC _5"] = 1
+        
     return result_panels
 
 def get_element_teko_panels(elem_type, row):
