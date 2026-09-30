@@ -2,10 +2,10 @@ import json
 from PIL import Image
 import google.generativeai as genai
 
-def analyze_blueprint(image_input, api_key):
+def analyze_blueprint(image_input, api_key, model_choice=None):
     """
-    Разчита чертежа, като приоритетно използва най-новия модел gemini-3.6-flash.
-    При натовареност преминава последователно през по-старите версии (3.5 -> 2.5 -> 2.0 -> 1.5).
+    Разчита чертежа. Ако е зададен `model_choice`, го използва като първи избор.
+    При натовареност преминава последователно през останалите налични модели.
     """
     if isinstance(image_input, Image.Image):
         img = image_input
@@ -49,17 +49,27 @@ def analyze_blueprint(image_input, api_key):
     # Последователен хронологичен списък с приоритет от най-новия към по-стари модели
     preferred_models = [
         # --- PRO модели (Първи избор за максимална точност при чертежи) ---
-        "gemini-3.1-pro-preview",  # Най-силният модел за комплексен анализ
-        "gemini-2.5-pro",  # Доказан Pro модел с отлично визуално разпознаване
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-pro",
         # --- FLASH модели (Бързи алтернативи, ако Pro моделите са заети) ---
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.6-flash",
         "gemini-3.5-flash",
         "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-pro",
+        "gemini-1.5-flash"
     ]
 
     candidate_models = list(preferred_models)
+    
+    # Ако потребителят е избрал модел от падащото меню, го слагаме на първо място
+    if model_choice:
+        if model_choice in candidate_models:
+            candidate_models.remove(model_choice)
+        candidate_models.insert(0, model_choice)
+
     try:
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
@@ -105,6 +115,6 @@ def analyze_blueprint(image_input, api_key):
     except json.JSONDecodeError as e:
         raise Exception(f"Грешка при обработка на JSON отговора: {e}\nПолучен текст: {raw_text[:200]}")
 
-def analyze_blueprint_with_agent2(image_input, api_key):
-    res, _ = analyze_blueprint(image_input, api_key)
+def analyze_blueprint_with_agent2(image_input, api_key, model_choice=None):
+    res, _ = analyze_blueprint(image_input, api_key, model_choice=model_choice)
     return res
