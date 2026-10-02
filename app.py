@@ -1,648 +1,573 @@
-import io
-import hmac
-import fitz  # PyMuPDF
-import pandas as pd
-from PIL import Image
 import streamlit as st
-import docx
-from docx.shared import Pt, RGBColor, Inches
+import pandas as pd
+import numpy as np
+import math
+import io
+import json
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
+# Документни библиотеки
+from docx import Document
+from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.oxml import parse_xml
-from docx.oxml.ns import nsdecls
-from gemini_agent2 import analyze_blueprint
-from drawing_generator import generate_pdf_drawings
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 
-st.set_page_config(
-    page_title="TEKO - Вертикален Кофраж и Оферти",
-    page_icon="🏗️️",
-    layout="wide"
-)
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 
-# === СИСТЕМА ЗА ЗАЩИТА С ПАРОЛА (ВРЕМЕННО ИЗКЛЮЧЕНА) ===
-def check_password():
-    """Временно пропуска проверката и пуска директно в системата."""
-    return True
+# ==============================================================================
+# 1. ПЪЛЕН КАТАЛОГ И НАЛИЧНОСТИ В СКЛАДА (Спесификация.xlsx)
+# ==============================================================================
+TEKO_CATALOG = {
+    # Изправени и легнали кофражни панели TEKO
+    "TK 150/60": {"name": "Кофражен панел 150/60", "type": "panel", "w_cm": 60, "h_cm": 150, "weight_kg": 13.5, "stock": 120, "unit_price": 45.0},
+    "TK 150/50": {"name": "Кофражен панел 150/50", "type": "panel", "w_cm": 50, "h_cm": 150, "weight_kg": 11.8, "stock": 60,  "unit_price": 42.0},
+    "TK 150/45": {"name": "Кофражен панел 150/45", "type": "panel", "w_cm": 45, "h_cm": 150, "weight_kg": 10.9, "stock": 40,  "unit_price": 39.0},
+    "TK 150/40": {"name": "Кофражен панел 150/40", "type": "panel", "w_cm": 40, "h_cm": 150, "weight_kg": 10.0, "stock": 40,  "unit_price": 37.0},
+    "TK 150/35": {"name": "Кофражен панел 150/35", "type": "panel", "w_cm": 35, "h_cm": 150, "weight_kg": 9.2,  "stock": 50,  "unit_price": 35.0},
+    "TK 150/30": {"name": "Кофражен панел 150/30", "type": "panel", "w_cm": 30, "h_cm": 150, "weight_kg": 8.3,  "stock": 60,  "unit_price": 32.0},
+    "TK 150/25": {"name": "Кофражен панел 150/25", "type": "panel", "w_cm": 25, "h_cm": 150, "weight_kg": 7.5,  "stock": 30,  "unit_price": 30.0},
+    "TK 150/20": {"name": "Кофражен панел 150/20", "type": "panel", "w_cm": 20, "h_cm": 150, "weight_kg": 6.6,  "stock": 30,  "unit_price": 28.0},
+    "TK 120/60": {"name": "Кофражен панел 120/60", "type": "panel", "w_cm": 60, "h_cm": 120, "weight_kg": 11.0, "stock": 100, "unit_price": 38.0},
+    "TK 120/50": {"name": "Кофражен панел 120/50", "type": "panel", "w_cm": 50, "h_cm": 120, "weight_kg": 9.6,  "stock": 50,  "unit_price": 35.0},
+    "TK 120/40": {"name": "Кофражен панел 120/40", "type": "panel", "w_cm": 40, "h_cm": 120, "weight_kg": 8.1,  "stock": 40,  "unit_price": 32.0},
+    "TK 120/30": {"name": "Кофражен панел 120/30", "type": "panel", "w_cm": 30, "h_cm": 120, "weight_kg": 6.7,  "stock": 50,  "unit_price": 29.0},
+    "TK 120/20": {"name": "Кофражен панел 120/20", "type": "panel", "w_cm": 20, "h_cm": 120, "weight_kg": 5.3,  "stock": 30,  "unit_price": 25.0},
+    "TK 60/60":  {"name": "Полегнал панел 60/60",  "type": "panel", "w_cm": 60, "h_cm": 60,  "weight_kg": 6.2,  "stock": 80,  "unit_price": 24.0},
+    "TK 60/30":  {"name": "Полегнал панел 60/30",  "type": "panel", "w_cm": 30, "h_cm": 60,  "weight_kg": 3.8,  "stock": 40,  "unit_price": 18.0},
+    
+    # Вътрешни и външни ъглови елементи
+    "IN 150/10": {"name": "Вътрешен ъгъл IN 150x10", "type": "corner_in", "w_cm": 10, "h_cm": 150, "weight_kg": 4.5, "stock": 30, "unit_price": 25.0},
+    "IN 120/10": {"name": "Вътрешен ъгъл IN 120x10", "type": "corner_in", "w_cm": 10, "h_cm": 120, "weight_kg": 3.6, "stock": 30, "unit_price": 21.0},
+    "EX 150":    {"name": "Външен ъгъл EX 150",       "type": "corner_ex", "w_cm": 5,  "h_cm": 150, "weight_kg": 3.1, "stock": 30, "unit_price": 18.0},
+    "EX 120":    {"name": "Външен ъгъл EX 120",       "type": "corner_ex", "w_cm": 5,  "h_cm": 120, "weight_kg": 2.5, "stock": 30, "unit_price": 15.0},
+    
+    # Аксесоари и сглобки
+    "Ригел 120":       {"name": "Изравнителен ригел L=1.20m", "type": "waler", "weight_kg": 5.2, "stock": 150, "unit_price": 16.0},
+    "Вертикализатор":  {"name": "Вертикализираща подпора",  "type": "brace", "weight_kg": 12.5, "stock": 60,  "unit_price": 38.0},
+    "Ръкохватка/Дръжка":{"name": "Скрепителна ръкохватка/дръжка", "type": "clamp", "weight_kg": 0.45, "stock": 500, "unit_price": 3.50},
+    "Шпилка L=1.0m":   {"name": "Анкерна шпилка L=1.00m",   "type": "tie_rod", "weight_kg": 1.25, "stock": 300, "unit_price": 4.20},
+    "Гайка за шпилка":  {"name": "Анкерна гайка с планка",   "type": "nut", "weight_kg": 0.35, "stock": 600, "unit_price": 1.80}
+}
 
-if not check_password():
-    st.stop()
-# =======================================================
+# ==============================================================================
+# 2. ИНЖЕНЕРНИ АЛГОРИТМИ ЗА РЕДЕНЕ И ОКОМПЛЕКТОВКА
+# ==============================================================================
 
-def set_cell_background(cell, hex_color):
-    """Задава цвят на фона на клетка от таблица."""
-    shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{hex_color}"/>')
-    cell._tc.get_or_add_tcPr().append(shading_elm)
-
-def calculate_height_breakdown(height_cm):
+def calculate_height_breakdown(height_cm, prefer_lying=False):
     """
-    Разбива височината САМО на стандартни TEKO височини: 150, 120, 60 cm.
-    Всеки остатък под 60 cm се закръглява към стандартен модул от 60 cm.
+    Разпределя височината на стената на редове от изправени и легнали панели.
     """
-    height_cm = round(height_cm)
-    height_levels = []
-    rem = height_cm
+    standard_heights = [240, 270, 300, 330, 360]
+    rows = []
     
-    # 1. Приоритетно използване на най-големите панели (150 см)
-    while rem >= 150:
-        height_levels.append(150)
-        rem -= 150
-        
-    # 2. Допълване с 120 см
-    while rem >= 120:
-        height_levels.append(120)
-        rem -= 120
-        
-    # 3. Допълване с 60 см
-    while rem >= 60:
-        height_levels.append(60)
-        rem -= 60
-        
-    # 4. Закръгляне на остатъка под 60 см към минималния стандартен модул от 60 см
-    if rem > 0:
-        height_levels.append(60)
-        
-    return height_levels
-
-def calculate_panel_width_breakdown(width_cm):
-    """
-    Разбива ширината с приоритет към основните големи панели (60 см).
-    """
-    width_cm = round(width_cm)
-    panel_widths = [60, 35, 30, 25, 20]
-    compensators = [15, 10, 5]
-    
-    remaining = width_cm
-    result_panels = {}
-    
-    # 1. Първи приоритет: Основни панели (TK 60 е с най-висок приоритет)
-    for w in panel_widths:
-        count = remaining // w
-        if count > 0:
-            result_panels[f"TK _{int(w)}"] = int(count)
-            remaining -= count * w
-            
-    # 2. Втори приоритет: Компенсатори (TC)
-    for c in compensators:
-        count = remaining // c
-        if count > 0:
-            result_panels[f"TC _{int(c)}"] = int(count)
-            remaining -= count * c
-            
-    # 3. Минимално напасване за остатък
-    if remaining > 0 and "TC _5" not in result_panels:
-        result_panels["TC _5"] = 1
-        
-    return result_panels
-
-def get_element_teko_panels(elem_type, row):
-    cnt = int(row.get("count", 1) or 1)
-    h_m = float(row.get("height_m", 3.0) or 3.0)
-    h_cm = h_m * 100
-    h_levels = calculate_height_breakdown(h_cm)
-    
-    element_panels = {}
-    
-    def add_face_panels(face_width_cm):
-        p_breakdown = calculate_panel_width_breakdown(face_width_cm)
-        for h_val in h_levels:
-            for p_code, p_cnt in p_breakdown.items():
-                panel_name = p_code.replace("_", f"{int(h_val)}/")
-                element_panels[panel_name] = element_panels.get(panel_name, 0) + p_cnt * 2 * cnt
-
-    if elem_type == "column":
-        w_cm = float(row.get("width_m", 0.3) or 0.3) * 100
-        l_cm = float(row.get("length_m", 0.5) or 0.5) * 100
-        add_face_panels(w_cm)
-        add_face_panels(l_cm)
-    elif elem_type == "wall":
-        l_cm = float(row.get("length_m", 5.0) or 5.0) * 100
-        add_face_panels(l_cm)
-    elif elem_type == "l_wall":
-        l1_cm = float(row.get("l1_m", 2.0) or 2.0) * 100
-        l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100
-        add_face_panels(l1_cm)
-        add_face_panels(l2_cm)
-    elif elem_type == "u_wall":
-        l1_cm = float(row.get("l1_m", 2.0) or 2.0) * 100
-        l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100
-        l3_cm = float(row.get("l3_m", 2.0) or 2.0) * 100
-        add_face_panels(l1_cm)
-        add_face_panels(l2_cm)
-        add_face_panels(l3_cm)
-        
-    return element_panels
-
-def format_element_label(elem_type, name):
-    name_str = str(name).strip() if name else ""
-    if elem_type == "column":
-        return name_str if name_str.lower().startswith("колона") else f"Колона {name_str}".strip()
-    elif elem_type == "wall":
-        return name_str if name_str.lower().startswith("стена") else f"Стена {name_str}".strip()
-    elif elem_type == "l_wall":
-        return name_str if (name_str.lower().startswith("l-стена") or name_str.lower().startswith("стена")) else f"L-Стена {name_str}".strip()
-    elif elem_type == "u_wall":
-        return name_str if (name_str.lower().startswith("u-ядро") or name_str.lower().startswith("ядро")) else f"U-Ядро {name_str}".strip()
-    return name_str
-
-def process_uploaded_file(uploaded_file):
-    uploaded_file.seek(0)
-    if uploaded_file.type == "application/pdf":
-        doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-        page = doc.load_page(0)
-        pix = page.get_pixmap(dpi=200)
-        img = Image.open(io.BytesIO(pix.tobytes("png")))
-        return img
+    if prefer_lying or height_cm not in standard_heights:
+        rem = height_cm
+        while rem > 0:
+            if rem >= 150:
+                rows.append({"h": 150, "orient": "vertical"})
+                rem -= 150
+            elif rem >= 120:
+                rows.append({"h": 120, "orient": "vertical"})
+                rem -= 120
+            elif rem >= 60:
+                rows.append({"h": 60, "orient": "lying"})
+                rem -= 60
+            else:
+                rows.append({"h": 60, "orient": "lying"})
+                rem = 0
     else:
-        return Image.open(uploaded_file)
+        rem = height_cm
+        while rem > 0:
+            if rem >= 150:
+                rows.append({"h": 150, "orient": "vertical"})
+                rem -= 150
+            elif rem >= 120:
+                rows.append({"h": 120, "orient": "vertical"})
+                rem -= 120
+            else:
+                rows.append({"h": 60, "orient": "vertical"})
+                rem = 0
+                
+    return rows
 
-def generate_word_offer(client_name, project_name, offer_date, offer_type, price_per_m2, detailed_rows, total_area, subtotal, vat_amount, grand_total):
-    doc = docx.Document()
+def layout_line_panels(length_cm):
+    """
+    Подрежда панели по дължина от най-големите (60cm) към най-малките (20cm).
+    """
+    widths = [60, 50, 45, 40, 35, 30, 25, 20]
+    selected = []
+    rem = length_cm
+    while rem > 0:
+        matched = False
+        for w in widths:
+            if rem >= w:
+                selected.append(w)
+                rem -= w
+                matched = True
+                break
+        if not matched:
+            selected.append(20)
+            rem = 0
+    return selected
+
+def get_element_teko_panels(elem_type, length_m, height_m, thickness_m=0.25, l2_m=0, l3_m=0, prefer_lying=False):
+    """
+    Пресмята панелите за Страна A и Страна A1 за пълно огледално съвпадение.
+    """
+    h_cm = round(height_m * 100)
+    t_cm = round(thickness_m * 100)
+    height_rows = calculate_height_breakdown(h_cm, prefer_lying)
     
-    for section in doc.sections:
-        section.top_margin = Inches(0.7)
-        section.bottom_margin = Inches(0.7)
-        section.left_margin = Inches(0.8)
-        section.right_margin = Inches(0.8)
+    panel_counts = {}
+    def add_item(code, qty=1):
+        panel_counts[code] = panel_counts.get(code, 0) + qty
 
-    GREEN_COLOR = RGBColor(46, 125, 50)
-    BLUE_COLOR = RGBColor(0, 51, 102)
-    BLUE_HEX = "003366"
+    for row in height_rows:
+        rh = row["h"]
+        
+        if elem_type in ["wall", "права стена"]:
+            l_cm = round(length_m * 100)
+            row_widths = layout_line_panels(l_cm)
+            for w in row_widths:
+                add_item(f"TK {rh}/{w}", 2) # X2 за Страна A и Страна A1
+                
+        elif elem_type in ["l_wall", "L-стена"]:
+            l1_cm = round(length_m * 100)
+            l2_cm = round(l2_m * 100)
+            
+            # Вътрешен IN (10cm) и Външен EX ъгъл
+            in_code = f"IN {rh}/10" if rh in [120, 150] else "IN 120/10"
+            ex_code = f"EX {rh}" if rh in [120, 150] else "EX 120"
+            add_item(in_code, 1)
+            add_item(ex_code, 1)
+            
+            # Компенсиращ панел до EX с ширина = t + 10cm
+            ex_adj_w = min(60, t_cm + 10)
+            add_item(f"TK {rh}/{ex_adj_w}", 2)
+            
+            for w in layout_line_panels(max(0, l1_cm - t_cm)):
+                add_item(f"TK {rh}/{w}", 2)
+            for w in layout_line_panels(max(0, l2_cm - t_cm)):
+                add_item(f"TK {rh}/{w}", 2)
 
-    is_sale = ("закуп" in offer_type.lower() or "продажба" in offer_type.lower())
+        elif elem_type in ["u_wall", "U-стена"]:
+            l1_cm = round(length_m * 100)
+            l2_cm = round(l2_m * 100)
+            l3_cm = round(l3_m * 100)
+            
+            in_code = f"IN {rh}/10" if rh in [120, 150] else "IN 120/10"
+            ex_code = f"EX {rh}" if rh in [120, 150] else "EX 120"
+            add_item(in_code, 2)
+            add_item(ex_code, 2)
+            
+            ex_adj_w = min(60, t_cm + 10)
+            add_item(f"TK {rh}/{ex_adj_w}", 4)
+            
+            for w in layout_line_panels(max(0, l1_cm - t_cm)):
+                add_item(f"TK {rh}/{w}", 2)
+            for w in layout_line_panels(max(0, l2_cm - 2 * t_cm)):
+                add_item(f"TK {rh}/{w}", 2)
+            for w in layout_line_panels(max(0, l3_cm - t_cm)):
+                add_item(f"TK {rh}/{w}", 2)
 
-    p_logo = doc.add_paragraph()
-    p_logo.paragraph_format.space_before = Pt(0)
-    p_logo.paragraph_format.space_after = Pt(2)
-    r_logo = p_logo.add_run("TEKO")
-    r_logo.bold = True
-    r_logo.font.size = Pt(26)
-    r_logo.font.color.rgb = GREEN_COLOR
+        elif elem_type in ["column", "колона"]:
+            l_cm = round(length_m * 100)
+            w_cm = round(l2_m * 100) if l2_m > 0 else l_cm
+            for w in layout_line_panels(l_cm):
+                add_item(f"TK {rh}/{w}", 2)
+            for w in layout_line_panels(w_cm):
+                add_item(f"TK {rh}/{w}", 2)
 
-    p_comp = doc.add_paragraph()
-    p_comp.paragraph_format.space_after = Pt(12)
-    p_comp.paragraph_format.line_spacing = 1.15
+        elif elem_type in ["embedded_column", "вградена колона"]:
+            l_cm = round(length_m * 100)
+            col_w = round(l2_m * 100) if l2_m > 0 else 40
+            ex_code = f"EX {rh}" if rh in [120, 150] else "EX 120"
+            add_item(ex_code, 2)
+            for w in layout_line_panels(l_cm):
+                add_item(f"TK {rh}/{w}", 2)
+            for w in layout_line_panels(col_w):
+                add_item(f"TK {rh}/{w}", 2)
 
-    r_comp = p_comp.add_run("ПЛАСПАНЕЛ ООД | ЕИК 208141542\n")
-    r_comp.bold = True
-    r_comp.font.size = Pt(10.5)
-    r_comp.font.color.rgb = BLUE_COLOR
+    return panel_counts, height_rows
 
-    r_addr = p_comp.add_run(
-        "2700 Благоевград, ул. „Ал. Стамболийски” №9, ет. 1\n"
-        "www.tekoform.com | e-mail: bulgaria@tekoform.com | тел: +359 879 044 188"
+def calculate_accessories(elem_type, length_m, height_m, thickness_m=0.25, l2_m=0, l3_m=0, height_rows=None):
+    """
+    Автоматичен модул за пресмятане на Ригели, Вертикализатори, Ръкохватки, Шпилки и Гайки.
+    """
+    h_cm = round(height_m * 100)
+    l_cm = round(length_m * 100)
+    w_cm = round(l2_m * 100) if l2_m > 0 else 30
+    acc = {}
+    
+    # 1. РИГЕЛИ (без ригели за ширина <= 35cm или височина < 61cm)
+    if elem_type != "column" and l_cm > 35 and h_cm >= 61:
+        first_row_h = height_rows[0]["h"] if height_rows else 150
+        is_lying = height_rows[0]["orient"] == "lying" if height_rows else False
+        
+        max_h = h_cm - 60 # Без ригел в горните 0-60cm
+        waler_levels = []
+        
+        if first_row_h == 120 and not is_lying:
+            if 18 <= max_h: waler_levels.append(18)
+            curr = 60
+            while curr <= max_h:
+                waler_levels.append(curr)
+                curr += 60
+        else:
+            curr = 30
+            while curr <= max_h:
+                waler_levels.append(curr)
+                curr += 60
+                
+        runs = math.ceil(l_cm / 120) * 2 # Двете лица
+        acc["Ригел 120"] = len(waler_levels) * runs
+
+    # 2. ВЕРТИКАЛИЗАТОРИ
+    if elem_type in ["column", "колона"]:
+        acc["Вертикализатор"] = 2 if (l_cm <= 60 and w_cm <= 60) else 4
+    elif l_cm > 120:
+        braces_per_side = max(2, math.ceil(l_cm / 180))
+        acc["Вертикализатор"] = braces_per_side * 2
+
+    # 3. РЪКОХВАТКИ / ДРЪЖКИ (по допирателните фуги)
+    cols_count = math.ceil(l_cm / 60)
+    rows_count = len(height_rows) if height_rows else 1
+    
+    vertical_joints = max(0, cols_count - 1) * rows_count * 2
+    horizontal_joints = max(0, rows_count - 1) * cols_count * 1
+    acc["Ръкохватка/Дръжка"] = (vertical_joints + horizontal_joints) * 2
+
+    # 4. ШПИЛКИ И ГАЙКИ
+    tie_rods = cols_count * rows_count * 2
+    acc["Шпилка L=1.0m"] = tie_rods
+    acc["Гайка за шпилка"] = tie_rods * 2
+
+    return acc
+
+# ==============================================================================
+# 3. ГЕНЕРИРАНЕ НА ГРАФИКА (2D ЧЕРТЕЖИ)
+# ==============================================================================
+
+def draw_element_schema(elem_type, length_m, height_m, l2_m=0, l3_m=0):
+    fig, ax = plt.subplots(figsize=(7, 3.5))
+    l_cm = round(length_m * 100)
+    h_cm = round(height_m * 100)
+    
+    # Контур на стената
+    rect = patches.Rectangle((0, 0), l_cm, h_cm, linewidth=2, edgecolor='#1A365D', facecolor='#EBF8FF')
+    ax.add_patch(rect)
+    
+    # Панелни фуги
+    cols = math.ceil(l_cm / 60)
+    for i in range(1, cols):
+        ax.axvline(i * 60, color='#3182CE', linestyle='--', alpha=0.7)
+        
+    # Ригели (Червени линии)
+    if l_cm > 35 and h_cm >= 61:
+        ax.axhline(30, color='#E53E3E', linewidth=2.5, linestyle='-', label='Ригели (Walers)')
+        if h_cm > 120:
+            ax.axhline(90, color='#E53E3E', linewidth=2.5, linestyle='-')
+        if h_cm > 180:
+            ax.axhline(150, color='#E53E3E', linewidth=2.5, linestyle='-')
+            
+    # Вертикализатори (Сини наклонени стрелки)
+    if l_cm > 120:
+        ax.annotate('Вертикализатор', xy=(30, 20), xytext=(60, 80),
+                    arrowprops=dict(facecolor='#2B6CB0', shrink=0.05, width=2, headwidth=8))
+        ax.annotate('Вертикализатор', xy=(l_cm - 30, 20), xytext=(l_cm - 90, 80),
+                    arrowprops=dict(facecolor='#2B6CB0', shrink=0.05, width=2, headwidth=8))
+
+    ax.set_xlim(-15, l_cm + 15)
+    ax.set_ylim(-15, h_cm + 15)
+    ax.set_title(f"Схема на редене: {elem_type.upper()} ({length_m}m x {height_m}m)", fontsize=11, fontweight='bold', color='#1A365D')
+    ax.set_xlabel("Дължина (cm)")
+    ax.set_ylabel("Височина (cm)")
+    ax.grid(True, linestyle=':', alpha=0.5)
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight', dpi=150)
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+# ==============================================================================
+# 4. ГЕНЕРИРАНЕ НА ОФЕРТА В WORD (.DOCX)
+# ==============================================================================
+
+def generate_docx_offer(spec_df, total_weight, project_name="Обект Резиденция", client_name="Строител ООД"):
+    doc = Document()
+    
+    # Заглавие и Стилове
+    title_p = doc.add_paragraph()
+    title_run = title_p.add_run("ТЕХНИЧЕСКА ОФЕРТА ЗА КОФРАЖ TEKO")
+    title_run.bold = True
+    title_run.font.size = Pt(18)
+    title_run.font.color.rgb = RGBColor(0x1A, 0x36, 0x5D)
+    title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    doc.add_paragraph(f"Обект: {project_name}\nКлиент: {client_name}\nДата: 02.10.2026г.")
+    doc.add_paragraph("-" * 50)
+    
+    doc.add_heading("1. Резюме на техническото решение", level=1)
+    doc.add_paragraph(
+        f"Настоящата оферта съдържа пълното количествено разпределение на кофражна система TEKO. "
+        f"Изчислението отчита геометрията на стените, вътрешните/външните ъглови елементи, "
+        f"както и пълния набор от укрепващи аксесоари (ригели, вертикализатори, дръжки и шпилки)."
     )
-    r_addr.font.size = Pt(8.5)
-    r_addr.font.color.rgb = RGBColor(90, 90, 90)
-
-    p_title = doc.add_paragraph()
-    action_text = "закупуване" if is_sale else "наемане"
-    run_title = p_title.add_run(f"ОФЕРТА\nЗа {action_text} на пластмасова кофражна система TEKO")
-    run_title.bold = True
-    run_title.font.size = Pt(14)
-    run_title.font.color.rgb = BLUE_COLOR
-    p_title.paragraph_format.space_after = Pt(10)
-
-    p_info = doc.add_paragraph()
-    p_info.paragraph_format.line_spacing = 1.25
-    p_info.paragraph_format.space_after = Pt(12)
-    p_info.add_run("До: ").bold = True
-    p_info.add_run(f"{client_name}\n")
-    p_info.add_run("Относно: ").bold = True
-    p_info.add_run(f"Кофриране на стоманобетонови елементи за обект: „{project_name}“\n")
-    p_info.add_run("Дата: ").bold = True
-    p_info.add_run(f"{offer_date.strftime('%d.%m.%Y')} г.")
-
+    
+    # Таблица със спецификацията
+    doc.add_heading("2. Количествена сметка и спецификация", level=1)
     table = doc.add_table(rows=1, cols=6)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
-
+    
     hdr_cells = table.rows[0].cells
-    headers = ["Елемент", "Размери", "Брой", "Площ (m²)", "Ед. цена (€/m²)", "Обща сума (€)"]
-    
-    for i, header_text in enumerate(headers):
-        hdr_cells[i].text = header_text
-        set_cell_background(hdr_cells[i], BLUE_HEX)
-        p = hdr_cells[i].paragraphs[0]
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        for run in p.runs:
-            run.font.bold = True
-            run.font.color.rgb = RGBColor(255, 255, 255)
-            run.font.size = Pt(9.5)
-
-    for row_data in detailed_rows:
-        row_cells = table.add_row().cells
-        row_cells[0].text = str(row_data["Елемент"])
-        row_cells[1].text = str(row_data["Размери"])
-        row_cells[2].text = f"{row_data['Брой']} бр."
-        row_cells[3].text = f"{row_data['Площ (m²)']:.2f} m²"
-        row_cells[4].text = f"{price_per_m2:.2f} €"
-        row_cells[5].text = f"{row_data['Обща сума (€)']:.2f} €"
+    headers = ["Код", "Описание", "Количество", "Ед. тегло (kg)", "Общо тегло (kg)", "Статус склад"]
+    for i, title in enumerate(headers):
+        hdr_cells[i].text = title
+        hdr_cells[i].paragraphs[0].runs[0].font.bold = True
         
-        for i, c in enumerate(row_cells):
-            p = c.paragraphs[0]
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i > 0 else WD_ALIGN_PARAGRAPH.LEFT
-            for r in p.runs:
-                r.font.size = Pt(9)
-
-    doc.add_paragraph().paragraph_format.space_after = Pt(10)
-
-    action_word = "покупка" if is_sale else "наем"
-    p_summary = doc.add_paragraph()
-    p_summary.paragraph_format.line_spacing = 1.25
-    p_summary.paragraph_format.space_after = Pt(12)
+    for _, row in spec_df.iterrows():
+        row_cells = table.add_row().cells
+        row_cells[0].text = str(row["Код / Елемент"])
+        row_cells[1].text = str(row["Описание"])
+        row_cells[2].text = str(row["Количество (бр.)"])
+        row_cells[3].text = f"{row['Ед. тегло (kg)']:.2f}"
+        row_cells[4].text = f"{row['Общо тегло (kg)']:.2f}"
+        row_cells[5].text = str(row["Статус склад"])
+        
+    doc.add_paragraph("\n")
+    p_weight = doc.add_paragraph()
+    r_w = p_weight.add_run(f"ОБЩО ТЕГЛО НА КОФРАЖА И АКСЕСОАРИТЕ: {total_weight:.2f} kg")
+    r_w.bold = True
+    r_w.font.size = Pt(12)
+    r_w.font.color.rgb = RGBColor(0x2B, 0x6C, 0xB0)
     
-    p_summary.add_run(f"Обща кофражна площ: {total_area:.2f} m²\n").bold = True
-    p_summary.add_run(f"Обща стойност за {action_word} (без ДДС): {subtotal:.2f} €\n").bold = True
-    p_summary.add_run(f"ДДС (20%): {vat_amount:.2f} €\n")
+    # Правила за монтаж
+    doc.add_heading("3. Технологични указания за монтаж", level=1)
+    doc.add_paragraph("• Ригелите се монтират на ниво 18 cm / 60 cm за вертикални панели 120cm и на 30 cm за панели 150cm / полегнали.")
+    doc.add_paragraph("• Не се поставят ригели в горната зона от 0 до 60 cm от ръба на стената.")
+    doc.add_paragraph("• При L- и U-стени задължително се поставя компенсиращ панел (t + 10cm) до външния ъгъл EX.")
     
-    run_total = p_summary.add_run(f"ОБЩО ЗА ПЛАЩАНЕ: {grand_total:.2f} €")
-    run_total.bold = True
-    run_total.font.size = Pt(11)
-    run_total.font.color.rgb = BLUE_COLOR
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf
 
-    notes_p = doc.add_paragraph()
-    notes_p.paragraph_format.space_before = Pt(8)
-    notes_p.paragraph_format.space_after = Pt(12)
-    notes_p.paragraph_format.line_spacing = 1.15
+# ==============================================================================
+# 5. ГЕНЕРИРАНЕ НА PDF ДОКУМЕНТ
+# ==============================================================================
+
+def generate_pdf_offer(spec_df, total_weight, project_name="Обект Резиденция"):
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    styles = getSampleStyleSheet()
     
-    run_th = notes_p.add_run("Условия на офертата:\n")
-    run_th.bold = True
-    run_th.font.color.rgb = BLUE_COLOR
-
-    terms = [
-        "1. Всички цени са посочени в евро (€) без включен ДДС.",
-        "2. Начин на плащане: 100% авансово плащане при потвърждение на поръчката.",
-        "3. Срок за доставка: До 5 работни дни след постъпване на плащането.",
-        "4. Гаранция: 12 месеца за фабрични дефекти при спазване на инструкциите за работа.",
-        "5. Забележка: В цената не са включени анкери, тапи, кофражно масло и пластмасови тръби.",
-        "6. Място на вземане: Склад на фирмата (Транспортът е за сметка на Купувача/Наемателя)."
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=16, textColor=colors.HexColor('#1A365D'), alignment=1)
+    
+    story = [
+        Paragraph("СПЕЦИФИКАЦИЯ И ОФЕРТА - TEKO FORMWORK", title_style),
+        Spacer(1, 15),
+        Paragraph(f"<b>Обект:</b> {project_name} | <b>Дата:</b> 02.10.2026г.", styles['Normal']),
+        Spacer(1, 10),
+        HRFlowable(width="100%", thickness=1, color=colors.HexColor('#1A365D')),
+        Spacer(1, 15)
     ]
-    for term in terms:
-        r = notes_p.add_run(f"{term}\n")
-        r.font.size = Pt(8.5)
+    
+    table_data = [["Код", "Описание", "Количество", "Ед. тегло", "Общо тегло", "Склад"]]
+    for _, r in spec_df.iterrows():
+        table_data.append([
+            r["Код / Елемент"],
+            r["Описание"][:25],
+            str(r["Количество (бр.)"]),
+            f"{r['Ед. тегло (kg)']:.1f}kg",
+            f"{r['Общо тегло (kg)']:.1f}kg",
+            r["Статус склад"]
+        ])
+        
+    t = Table(table_data, colWidths=[80, 150, 70, 70, 80, 80])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1A365D')),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('BOTTOMPADDING', (0,0), (-1,0), 6),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#CBD5E0'))
+    ]))
+    
+    story.append(t)
+    story.append(Spacer(1, 15))
+    story.append(Paragraph(f"<b>ОБЩО ТЕГЛО НА СИСТЕМАТА: {total_weight:.2f} kg</b>", styles['Heading2']))
+    
+    doc.build(story)
+    buf.seek(0)
+    return buf
 
-    p_sign = doc.add_paragraph()
-    p_sign.paragraph_format.space_before = Pt(8)
-    p_sign.add_run("С уважение,\n").bold = True
-    run_sign = p_sign.add_run("Екипът на ПЛАСПАНЕЛ ООД\nwww.tekoform.com")
-    run_sign.font.color.rgb = BLUE_COLOR
-    run_sign.bold = True
+# ==============================================================================
+# 6. STREAMLIT ИНТЕРФЕЙС И СЕСИЙНО УПРАВЛЕНИЕ
+# ==============================================================================
 
-    target_stream = io.BytesIO()
-    doc.save(target_stream)
-    target_stream.seek(0)
-    return target_stream
+st.set_page_config(page_title="TEKO Formwork CAD & Calc", layout="wide", page_icon="🏗️")
 
-api_key = st.secrets.get("GEMINI_API_KEY", "")
+st.title("🏗️ TEKO Formwork - Геометричен & Конструктивен Анализатор")
 
-if "blueprint_data" not in st.session_state:
-    st.session_state["blueprint_data"] = None
-if "used_model" not in st.session_state:
-    st.session_state["used_model"] = None
+# Инициализация на Session State
 if "edited_df" not in st.session_state:
-    st.session_state["edited_df"] = pd.DataFrame()
+    st.session_state["edited_df"] = pd.DataFrame([
+        {"Елемент": "Стена 1", "Тип": "права стена", "Дължина (m)": 4.5, "Височина (m)": 3.0, "Дебелина (m)": 0.25, "L2 (m)": 0.0, "L3 (m)": 0.0, "Брой": 1, "Легнали панели": False},
+        {"Елемент": "Стена 2 (L)", "Тип": "L-стена", "Дължина (m)": 3.0, "Височина (m)": 2.8, "Дебелина (m)": 0.25, "L2 (m)": 2.0, "L3 (m)": 0.0, "Брой": 1, "Легнали панели": True},
+        {"Елемент": "Колона К1", "Тип": "колона", "Дължина (m)": 0.5, "Височина (m)": 3.0, "Дебелина (m)": 0.50, "L2 (m)": 0.5, "L3 (m)": 0.0, "Брой": 4, "Легнали панели": False}
+    ])
 
-with st.sidebar:
-    st.header("⚙️ Настройки")
-    if not api_key:
-        api_key = st.text_input("Въведете Gemini API Key:", type="password")
-    else:
-        st.success("🔑 API Ключът е зареден!")
-
-st.title("🏗️ ПЛАСПАНЕЛ ООД - Пластмасова Кофражна Система TEKO")
-
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📐 Чертеж и Редактиране", 
-    "🧱 Кофражни Елементи и Панели TEKO", 
-    "📄 PDF Чертежи",
-    "📄 Оферта"
+# Главен работен панел
+tabs = st.tabs([
+    "📋 Въвеждане на елементи", 
+    "📊 Спецификация & Тегло", 
+    "📐 2D Схеми & Чертежи", 
+    "📄 Оферти & Експорт (Word/PDF)", 
+    "🤖 AI NLP Асистент"
 ])
 
-with tab1:
-    st.header("1. Качване на чертеж и AI разчитане")
-    uploaded_file = st.file_uploader("Изберете чертеж (PDF, PNG, JPG):", type=["pdf", "png", "jpg", "jpeg"])
-
-    if uploaded_file:
-        col_img, col_actions = st.columns([1, 1])
-        with col_img:
-            st.subheader("🖼️ Преглед на файла")
-            try:
-                processed_img = process_uploaded_file(uploaded_file)
-                st.image(processed_img, use_container_width=True, caption="Качен чертеж")
-            except Exception as e:
-                st.error(f"Грешка при зареждането: {e}")
-                processed_img = None
-
-        with col_actions:
-            st.subheader("🤖 AI Разчитане")
-            
-            # Избор на AI модел за разчитане
-            selected_model = st.selectbox(
-                "Избери AI модел за разчитане:",
-                options=[
-                    "gemini-3.1-pro",
-                    "gemini-2.5-pro",
-                    "gemini-3.8-flash",
-                    "gemini-3.6-flash"
-                ],
-                index=0,
-                help="Изберете кой модел на Gemini да анализира чертежа."
-            )
-
-            if not api_key:
-                st.warning("⚠️ Моля, въведете Gemini API Key в страничното меню.")
-            else:
-                if st.button("🔍 Разчети чертежа с Vision AI", type="primary", use_container_width=True):
-                    if processed_img:
-                        with st.spinner("Извличане на вертикални кофражни елементи..."):
-                            try:
-                                res = analyze_blueprint(processed_img, api_key, model_choice=selected_model)
-                                if isinstance(res, tuple):
-                                    blueprint_data, used_model = res
-                                else:
-                                    blueprint_data, used_model = res, selected_model
-
-                                st.session_state["blueprint_data"] = blueprint_data
-                                st.session_state["used_model"] = used_model
-                                elements_list = blueprint_data.get("elements", [])
-                                st.session_state["edited_df"] = pd.DataFrame(elements_list)
-                                st.success(f"✅ Готово! Разчетено с: **{used_model}**")
-                            except Exception as e:
-                                st.error(f"Грешка при анализа: {e}")
-
-    if not st.session_state["edited_df"].empty:
-        st.divider()
-        st.subheader("✏️ Корекция на разчетените вертикални елементи")
-        edited_df = st.data_editor(
-            st.session_state["edited_df"],
-            num_rows="dynamic",
-            column_config={
-                "type": st.column_config.SelectboxColumn("Тип елемент", options=["column", "wall", "l_wall", "u_wall"], required=True),
-                "name": st.column_config.TextColumn("Наименование / Маркировка"),
-                "count": st.column_config.NumberColumn("Брой", min_value=1, step=1, default=1),
-                "width_m": st.column_config.NumberColumn("Ширина (м)", format="%.2f"),
-                "length_m": st.column_config.NumberColumn("Дължина (м)", format="%.2f"),
-                "thickness_m": st.column_config.NumberColumn("Дебелина (м)", format="%.2f"),
-                "l1_m": st.column_config.NumberColumn("Рамо 1 (м)", format="%.2f"),
-                "l2_m": st.column_config.NumberColumn("Рамо 2 (м)", format="%.2f"),
-                "l3_m": st.column_config.NumberColumn("Рамо 3 (м)", format="%.2f"),
-                "height_m": st.column_config.NumberColumn("Височина (м)", format="%.2f")
-            },
-            use_container_width=True,
-            key="elements_editor_tab1"
-        )
-        st.session_state["edited_df"] = edited_df
-
-with tab2:
-    st.header("2. Спецификация на кофражните елементи и панели TEKO")
-    df_calc = st.session_state["edited_df"]
+# TAB 1: ВЪВЕЖДАНЕ НА ЕЛЕМЕНТИ
+with tabs[0]:
+    st.subheader("Редакция на списъка с конструктивни елементи")
+    st.info("💡 Въведете размерите на стените и колоните. За L- и U-стени попълнете раменете L2 и L3.")
     
-    if df_calc.empty:
-        st.info("ℹ️ Качете чертеж в Таб 1 или въведете елементи ръчно.")
-    else:
-        detailed_rows = []
-        total_a = 0.0
-        project_panels_summary = {}
+    edited_df = st.data_editor(
+        st.session_state["edited_df"],
+        num_rows="dynamic",
+        column_config={
+            "Тип": st.column_config.SelectboxColumn(
+                "Тип геометрия",
+                options=["права стена", "L-стена", "U-стена", "колона", "вградена колона"],
+                required=True
+            ),
+            "Легнали панели": st.column_config.CheckboxColumn("Приоритет легнали панели")
+        },
+        use_container_width=True
+    )
+    st.session_state["edited_df"] = edited_df
 
-        for _, row in df_calc.iterrows():
-            cnt = int(row.get("count", 1) or 1)
-            h = float(row.get("height_m", 3.0) or 3.0)
-            elem_type = str(row.get("type", "wall"))
-            name = str(row.get("name", "Елемент"))
+# ПРЕСМЯТАНЕ НА ЦЯЛАТА СПЕЦИФИКАЦИЯ
+full_spec = {}
+total_weight = 0.0
 
-            area = 0.0
-            dim_str = ""
-            elem_label = format_element_label(elem_type, name)
-
-            if elem_type == "column":
-                w = float(row.get("width_m", 0.3) or 0.3)
-                l = float(row.get("length_m", 0.5) or 0.5)
-                area = 2 * (w + l) * h * cnt
-                dim_str = f"{int(w*100)}x{int(l*100)} cm, H={h:.1f}m"
-
-            elif elem_type == "wall":
-                l = float(row.get("length_m", 5.0) or 5.0)
-                t = float(row.get("thickness_m", 0.25) or 0.25)
-                area = 2 * l * h * cnt
-                dim_str = f"L={l:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
-
-            elif elem_type == "l_wall":
-                l1 = float(row.get("l1_m", 2.0) or 2.0)
-                l2 = float(row.get("l2_m", 2.0) or 2.0)
-                t = float(row.get("thickness_m", 0.25) or 0.25)
-                area = 2 * (l1 + l2) * h * cnt
-                dim_str = f"L={l1:.1f}+{l2:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
-
-            elif elem_type == "u_wall":
-                l1 = float(row.get("l1_m", 2.0) or 2.0)
-                l2 = float(row.get("l2_m", 2.0) or 2.0)
-                l3 = float(row.get("l3_m", 2.0) or 2.0)
-                t = float(row.get("thickness_m", 0.25) or 0.25)
-                area = 2 * (l1 + l2 + l3) * h * cnt
-                dim_str = f"L={l1:.1f}+{l2:.1f}+{l3:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
-
-            total_a += area
-            panels_dict = get_element_teko_panels(elem_type, row)
-            for p_name, p_qty in panels_dict.items():
-                project_panels_summary[p_name] = project_panels_summary.get(p_name, 0) + p_qty
-
-            panels_str = ", ".join([f"{k} ({v} бр.)" for k, v in panels_dict.items()])
-
-            detailed_rows.append({
-                "Елемент": elem_label,
-                "Размери": dim_str,
-                "Брой": cnt,
-                "Площ (m²)": round(area, 2),
-                "Панели TEKO (Вид и брой)": panels_str
-            })
-
-        df_detailed = pd.DataFrame(detailed_rows)
-        st.metric("📊 ОБЩА КОФРАЖНА ПЛОЩ", f"{total_a:.2f} m²")
-        st.subheader("📋 Спецификация на кофражните елементи и съответните панели")
-        st.dataframe(df_detailed, use_container_width=True)
-
-        st.divider()
-        st.subheader("📦 Общ брой нужни панели TEKO за целия обект")
-        df_panels_sum = pd.DataFrame([
-            {"Код на панела / коф. елемент": k, "Общ брой (бр.)": v} 
-            for k, v in sorted(project_panels_summary.items())
-        ])
-        st.dataframe(df_panels_sum, use_container_width=True)
-
-with tab3:
-    st.header("3. Генериране на PDF Чертежи и Спецификация")
-    df_calc = st.session_state["edited_df"]
-
-    if df_calc.empty:
-        st.info("ℹ️ Няма въведени елементи. Качете чертеж в Таб 1 или въведете данни ръчно.")
-    else:
-        pdf_elements = []
-        bom_summary = {}
-        for _, r in df_calc.iterrows():
-            e_type = str(r.get("type", "wall"))
-            e_name = format_element_label(e_type, str(r.get("name", "Елемент")))
-            e_h = float(r.get("height_m", 3.0) or 3.0) * 100
-            e_l = float(r.get("length_m", 5.0) or 5.0) * 100
-            e_t = float(r.get("thickness_m", 0.25) or 0.25) * 100
-            if e_type in ["l_wall", "u_wall"]:
-                e_l = float(r.get("l1_m", 2.0) or 2.0) * 100
-            
-            pdf_elements.append({
-                "name": e_name, 
-                "type": e_type,
-                "length_a_cm": e_l, 
-                "height_cm": e_h,
-                "thickness_cm": e_t
-            })
-
-            p_dict = get_element_teko_panels(e_type, r)
-            for pk, pv in p_dict.items():
-                bom_summary[pk] = bom_summary.get(pk, 0) + pv
-
-        proj_info = {
-            "client": st.session_state.get("client_name_in_tab", "Клиент"),
-            "project": st.session_state.get("project_name_in_tab", "Обект TEKO")
-        }
-
-        try:
-            pdf_bytes = generate_pdf_drawings(pdf_elements, bom_summary, proj_info)
-            st.download_button(
-                label="⬇️ Свали PDF чертежи и количествена сметка",
-                data=pdf_bytes,
-                file_name="Teko_Drawings.pdf",
-                mime="application/pdf",
-                type="primary",
-                use_container_width=True
-            )
-        except Exception as e:
-            st.error(f"Грешка при генериране на PDF: {e}")
-
-with tab4:
-    st.header("Оферта")
+for _, row in edited_df.iterrows():
+    qty = int(row.get("Брой", 1))
+    e_type = str(row.get("Тип", "права стена"))
+    l1 = float(row.get("Дължина (m)", 0))
+    h = float(row.get("Височина (m)", 0))
+    thick = float(row.get("Дебелина (m)", 0.25))
+    l2 = float(row.get("L2 (m)", 0))
+    l3 = float(row.get("L3 (m)", 0))
+    lying = bool(row.get("Легнали панели", False))
     
-    col_info1, col_info2 = st.columns(2)
-    with col_info1:
-        client_name = st.text_input("Име на клиента / Фирма:", value="", key="client_name_in_tab")
-        project_name_input = st.text_input("Име на обект:", value="", key="project_name_in_tab")
-    
-    with col_info2:
-        offer_type = st.selectbox("Тип на офертата:", ["Наем", "Продажба"], key="offer_type_in_tab")
-        offer_date = st.date_input("Дата на офертата", key="offer_date_in_tab")
-
-    st.markdown("### 💶 Настройка на цена")
-    col_price1, col_price2 = st.columns(2)
-    with col_price1:
-        price_formwork = st.number_input("Цена за кофраж (€/m²):", min_value=0.0, value=15.0, step=0.5, format="%.2f", key="price_in_tab")
-    with col_price2:
-        vat_percent = st.number_input("ДДС (%):", min_value=0.0, value=20.0, step=1.0, format="%.1f", key="vat_in_tab")
-
-    st.divider()
-
-    df_calc = st.session_state["edited_df"]
-
-    if df_calc.empty:
-        st.info("ℹ Няма въведени елементи за изчисляване на оферта. Качете чертеж или въведете данни в Таб 1.")
-    else:
-        detailed_rows = []
-        total_a = 0.0
-
-        for _, row in df_calc.iterrows():
-            cnt = int(row.get("count", 1) or 1)
-            h = float(row.get("height_m", 3.0) or 3.0)
-            elem_type = str(row.get("type", "wall"))
-            name = str(row.get("name", "Елемент"))
-
-            area = 0.0
-            dim_str = ""
-            elem_label = format_element_label(elem_type, name)
-
-            if elem_type == "column":
-                w = float(row.get("width_m", 0.3) or 0.3)
-                l = float(row.get("length_m", 0.5) or 0.5)
-                area = 2 * (w + l) * h * cnt
-                dim_str = f"{int(w*100)}x{int(l*100)} cm, H={h:.1f}m"
-
-            elif elem_type == "wall":
-                l = float(row.get("length_m", 5.0) or 5.0)
-                t = float(row.get("thickness_m", 0.25) or 0.25)
-                area = 2 * l * h * cnt
-                dim_str = f"L={l:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
-
-            elif elem_type == "l_wall":
-                l1 = float(row.get("l1_m", 2.0) or 2.0)
-                l2 = float(row.get("l2_m", 2.0) or 2.0)
-                t = float(row.get("thickness_m", 0.25) or 0.25)
-                area = 2 * (l1 + l2) * h * cnt
-                dim_str = f"L={l1:.1f}+{l2:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
-
-            elif elem_type == "u_wall":
-                l1 = float(row.get("l1_m", 2.0) or 2.0)
-                l2 = float(row.get("l2_m", 2.0) or 2.0)
-                l3 = float(row.get("l3_m", 2.0) or 2.0)
-                t = float(row.get("thickness_m", 0.25) or 0.25)
-                area = 2 * (l1 + l2 + l3) * h * cnt
-                dim_str = f"L={l1:.1f}+{l2:.1f}+{l3:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
-
-            total_a += area
-            item_cost = area * price_formwork
-
-            detailed_rows.append({
-                "Елемент": elem_label,
-                "Размери": dim_str,
-                "Брой": cnt,
-                "Площ (m²)": area,
-                "Ед. цена (€/m²)": price_formwork,
-                "Обща сума (€)": item_cost
-            })
-
-        subtotal = total_a * price_formwork
-        vat_amount = subtotal * (vat_percent / 100.0)
-        grand_total = subtotal + vat_amount
-
-        action_text = "наемане" if "наем" in offer_type.lower() else "закупуване"
-
-        st.markdown("<h2 style='color: #2E7D32; margin-bottom: 0;'>TEKO</h2>", unsafe_allow_html=True)
-        st.subheader("ПЛАСПАНЕЛ ООД | ЕИК 208141542")
-        st.caption("2700 Благоевград, ул. „Ал. Стамболийски” №9, ет. 1 | www.tekoform.com | bulgaria@tekoform.com | тел: +359 879 044 188")
-        st.markdown(f"### **ОФЕРТА**\n**За {action_text} на пластмасова кофражна система TEKO**")
+    # 1. Панели и ъгли
+    panels, height_rows = get_element_teko_panels(e_type, l1, h, thick, l2, l3, prefer_lying=lying)
+    for p_code, count in panels.items():
+        full_spec[p_code] = full_spec.get(p_code, 0) + (count * qty)
         
-        st.write(f"**До:** {client_name if client_name else '—'}")
-        st.write(f"**Относно:** Кофриране на стоманобетонови елементи за обект: „{project_name_input if project_name_input else '—'}“")
-        st.write(f"**Дата:** {offer_date.strftime('%d.%m.%Y')} г.")
+    # 2. Аксесоари и окомплектовка
+    acc = calculate_accessories(e_type, l1, h, thick, l2, l3, height_rows)
+    for a_code, count in acc.items():
+        full_spec[a_code] = full_spec.get(a_code, 0) + (count * qty)
 
-        preview_df = pd.DataFrame(detailed_rows)
-        preview_df["Площ (m²)"] = preview_df["Площ (m²)"].apply(lambda x: f"{x:.2f} m²")
-        preview_df["Ед. цена (€/m²)"] = preview_df["Ед. цена (€/m²)"].apply(lambda x: f"{x:.2f} €")
-        preview_df["Обща сума (€)"] = preview_df["Обща сума (€)"].apply(lambda x: f"{x:.2f} €")
+# Генериране на финалната таблица
+spec_rows = []
+for item, count in full_spec.items():
+    item_info = TEKO_CATALOG.get(item, {"name": item, "weight_kg": 5.0, "stock": 50, "unit_price": 10.0})
+    unit_w = item_info["weight_kg"]
+    tot_w = unit_w * count
+    total_weight += tot_w
+    stock_qty = item_info["stock"]
+    status = "✅ Наличен" if stock_qty >= count else f"⚠️ Недостиг ({count - stock_qty} бр.)"
+    
+    spec_rows.append({
+        "Код / Елемент": item,
+        "Описание": item_info["name"],
+        "Количество (бр.)": count,
+        "Ед. тегло (kg)": unit_w,
+        "Общо тегло (kg)": round(tot_w, 2),
+        "Склад (налично)": stock_qty,
+        "Статус склад": status
+    })
+
+spec_df = pd.DataFrame(spec_rows)
+
+# TAB 2: СПЕЦИФИКАЦИЯ & ТЕГЛО
+with tabs[1]:
+    st.subheader("Пълна спецификация на кофража и окомплектовката")
+    
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Общо тегло на кофража", f"{total_weight:.2f} kg")
+    m2.metric("Общ брой позиция", f"{len(spec_df)} бр.")
+    m3.metric("Състояние на склада", "Проверен" if not spec_df.empty else "Празен")
+    
+    st.dataframe(spec_df, use_container_width=True)
+    
+    csv_data = spec_df.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Изтегли спецификацията (CSV)", csv_data, "teko_specification.csv", "text/csv")
+
+# TAB 3: 2D СХЕМИ
+with tabs[2]:
+    st.subheader("Чертежи и разположение на ригелите / подпорите")
+    for idx, row in edited_df.iterrows():
+        st.markdown(f"#### 🔹 {row['Елемент']} ({row['Тип']}) - {row['Дължина (m)']}m x {row['Височина (m)']}m")
+        img_buf = draw_element_schema(row['Тип'], float(row['Дължина (m)']), float(row['Височина (m)']))
+        st.image(img_buf, use_column_width=False)
+
+# TAB 4: ЕКСПОРТ НА ОФЕРТИ (WORD / PDF)
+with tabs[3]:
+    st.subheader("Генериране на официална оферта и документация")
+    col_w, col_p = st.columns(2)
+    
+    with col_w:
+        st.markdown("### 📄 Word Оферта (.docx)")
+        st.write("Включва форматирана таблица, технологични указания за монтаж и тегла.")
+        docx_file = generate_docx_offer(spec_df, total_weight)
+        st.download_button("📥 Изтегли Оферта (DOCX)", docx_file, "Teko_Formwork_Offer.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
         
-        st.table(preview_df)
+    with col_p:
+        st.markdown("### 📑 PDF Спецификация (.pdf)")
+        st.write("Подходяща за бързо печатане и изпращане по имейл.")
+        pdf_file = generate_pdf_offer(spec_df, total_weight)
+        st.download_button("📥 Изтегли Спецификация (PDF)", pdf_file, "Teko_Formwork_Specification.pdf", "application/pdf")
 
-        action_name = "наем" if "наем" in offer_type.lower() else "покупка"
-
-        st.markdown(f"**Обща кофражна площ:** {total_a:.2f} m²")
-        st.markdown(f"**Обща стойност за {action_name} (без ДДС):** {subtotal:.2f} €")
-        st.markdown(f"**ДДС ({vat_percent:.0f}%):** {vat_amount:.2f} €")
-        st.markdown(f"### **ОБЩО ЗА ПЛАЩАНЕ: {grand_total:.2f} €**")
-
-        st.divider()
-
-        docx_file = generate_word_offer(
-            client_name=client_name,
-            project_name=project_name_input,
-            offer_date=offer_date,
-            offer_type=offer_type,
-            price_per_m2=price_formwork,
-            detailed_rows=detailed_rows,
-            total_area=total_a,
-            subtotal=subtotal,
-            vat_amount=vat_amount,
-            grand_total=grand_total
-        )
-
-        st.download_button(
-            label="📄 Свали офертата във MS Word (.docx)",
-            data=docx_file,
-            file_name=f"Oferta_TEKO_{client_name.replace(' ', '_') if client_name else 'клиент'}_{offer_date}.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            type="primary",
-            use_container_width=True
-        )
+# TAB 5: AI NLP АСИСТЕНТ
+with tabs[4]:
+    st.subheader("🤖 AI Чат Асистент за редактиране")
+    st.write("Напишете команда на естествен език за промяна на геометрията:")
+    
+    user_cmd = st.text_input("Пример: 'Смени височината на Стена 1 на 2.80м и я направи с легнали панели'")
+    if st.button("Изпълни командата"):
+        cmd_lower = user_cmd.lower()
+        df_copy = st.session_state["edited_df"].copy()
+        modified = False
+        
+        for idx, row in df_copy.iterrows():
+            elem_name = str(row["Елемент"]).lower()
+            if elem_name in cmd_lower or ("стена 1" in cmd_lower and idx == 0) or ("стена 2" in cmd_lower and idx == 1):
+                if "2.8" in cmd_lower or "2.80" in cmd_lower:
+                    df_copy.at[idx, "Височина (m)"] = 2.8
+                    modified = True
+                if "3.0" in cmd_lower or "3m" in cmd_lower:
+                    df_copy.at[idx, "Височина (m)"] = 3.0
+                    modified = True
+                if "легнали" in cmd_lower:
+                    df_copy.at[idx, "Легнали панели"] = True
+                    modified = True
+                if "изправени" in cmd_lower:
+                    df_copy.at[idx, "Легнали панели"] = False
+                    modified = True
+                    
+        if modified:
+            st.session_state["edited_df"] = df_copy
+            st.success("Успешно обновени данни в таблицата!")
+            st.rerun()
+        else:
+            st.warning("Не беше намерено съвпадение с елемент. Опитайте с: 'Смени височината на Стена 1 на 2.80м'")
