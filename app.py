@@ -74,21 +74,18 @@ def calculate_panel_width_breakdown(width_cm):
     remaining = width_cm
     result_panels = {}
     
-    # 1. Първи приоритет: Основни панели (TK 60 е с най-висок приоритет)
     for w in panel_widths:
         count = remaining // w
         if count > 0:
             result_panels[f"TK _{int(w)}"] = int(count)
             remaining -= count * w
             
-    # 2. Втори приоритет: Компенсатори (TC)
     for c in compensators:
         count = remaining // c
         if count > 0:
             result_panels[f"TC _{int(c)}"] = int(count)
             remaining -= count * c
             
-    # 3. Минимално напасване за остатък
     if remaining > 0 and "TC _5" not in result_panels:
         result_panels["TC _5"] = 1
         
@@ -106,7 +103,19 @@ def get_element_teko_panels(elem_type, row):
         p_breakdown = calculate_panel_width_breakdown(face_width_cm)
         for h_val in h_levels:
             for p_code, p_cnt in p_breakdown.items():
-                panel_name = p_code.replace("_", f"{int(h_val)}/")
+                # Извличаме цифрата на ширината от кода (напр. "TK _60" -> 60)
+                w_val = int(p_code.split("_")[1])
+                
+                # Строга защита срещу несъществуващ панел 60/60
+                if int(h_val) == 60 and w_val == 60:
+                    panel_name = "TK 150/60 (полегнал)"
+                elif int(h_val) == 60:
+                    panel_name = f"TK 60/{w_val}"
+                elif "TC" in p_code and w_val <= 15:
+                    panel_name = f"TC {int(h_val)}/{w_val}"
+                else:
+                    panel_name = f"TK {int(h_val)}/{w_val}"
+                    
                 element_panels[panel_name] = element_panels.get(panel_name, 0) + p_cnt * 2 * cnt
 
     if elem_type == "column":
