@@ -5,11 +5,11 @@ MAIN_WIDTHS_CM = [60, 35, 30, 25, 20]
 COMPENSATOR_WIDTHS_CM = [15, 10, 5]
 
 STANDARD_HEIGHT_MAP = {
-    240: [120, 120],
-    270: [150, 120],
-    300: [150, 150],
-    330: [150, 120, 60],
-    360: [150, 150, 60]
+    240: [{"height": 120, "orientation": "vertical", "panel_h": 120}, {"height": 120, "orientation": "vertical", "panel_h": 120}],
+    270: [{"height": 150, "orientation": "vertical", "panel_h": 150}, {"height": 120, "orientation": "vertical", "panel_h": 120}],
+    300: [{"height": 150, "orientation": "vertical", "panel_h": 150}, {"height": 150, "orientation": "vertical", "panel_h": 150}],
+    330: [{"height": 150, "orientation": "vertical", "panel_h": 150}, {"height": 120, "orientation": "vertical", "panel_h": 120}, {"height": 60, "orientation": "vertical", "panel_h": 60}],
+    360: [{"height": 150, "orientation": "vertical", "panel_h": 150}, {"height": 150, "orientation": "vertical", "panel_h": 150}, {"height": 60, "orientation": "vertical", "panel_h": 60}]
 }
 
 OPTIMAL_REMAINDERS = {
@@ -38,18 +38,45 @@ def format_panel_code(width_cm, height_cm):
     return f"TK {height_cm}/{width_cm}"
 
 def solve_height_cm(height_cm):
+    """
+    Пресмята височинното разпределение на редовете панели.
+    При стандартни височини използва твърдия състав.
+    При нестандартни височини приоритетно запълва с големите вертикални панели (150 см, 120 см),
+    а остатъкът се кофрира с полегнали панели (широки/високи 60 см).
+    """
     if height_cm in STANDARD_HEIGHT_MAP:
         return STANDARD_HEIGHT_MAP[height_cm]
     
     remaining = height_cm
     levels = []
-    for h in [150, 120, 60]:
-        while remaining >= h:
-            levels.append(h)
-            remaining -= h
+    
+    # 1. Първи приоритет: Максимално запълване с големи вертикални панели 150 см
+    while remaining >= 150:
+        levels.append({"height": 150, "orientation": "vertical", "panel_h": 150})
+        remaining -= 150
+        
+    # 2. Втори приоритет: Запълване с вертикални панели 120 см
+    while remaining >= 120:
+        levels.append({"height": 120, "orientation": "vertical", "panel_h": 120})
+        remaining -= 120
+
+    # 3. При остатък под 120 см: Използване на полегнали панели с височина 60 см
+    while remaining > 0:
+        if remaining >= 60:
+            levels.append({"height": 60, "orientation": "lying", "panel_h": 60})
+            remaining -= 60
+        else:
+            # При остатък под 60 см се поставя 1 ред полегнал панел 60 см за доуплътняване
+            levels.append({"height": remaining, "orientation": "lying", "panel_h": 60})
+            remaining = 0
+            
     return levels
 
 def solve_width_cm(width_cm):
+    """
+    Пресмята разпределението по ширина, като приоритетно поставя
+    най-големите панели 60 см, а по-малките само за остатъка.
+    """
     count_60 = width_cm // 60
     rem = width_cm % 60
     fit_rem = (rem // 5) * 5
@@ -79,7 +106,8 @@ def calculate_column(width_m, length_m, height_m, count=1):
     side_b_panels, _ = solve_width_cm(length_cm)
     
     detailed_panels = {}
-    for h in height_levels:
+    for lvl in height_levels:
+        h = lvl["panel_h"]
         for w, c in side_a_panels.items():
             key = format_panel_code(w, h)
             detailed_panels[key] = detailed_panels.get(key, 0) + (c * 2 * count)
@@ -117,7 +145,8 @@ def calculate_wall(length_m, thickness_m, height_m, count=1):
     side_panels, remainder = solve_width_cm(length_cm)
     
     detailed_panels = {}
-    for h in height_levels:
+    for lvl in height_levels:
+        h = lvl["panel_h"]
         for w, c in side_panels.items():
             key = format_panel_code(w, h)
             detailed_panels[key] = detailed_panels.get(key, 0) + (c * 2 * count)
@@ -158,7 +187,8 @@ def calculate_l_wall(l1_m, l2_m, thickness_m, height_m, count=1):
     in2_panels, _ = solve_width_cm(max(0, l2_cm - thickness_cm))
     
     detailed_panels = {}
-    for h in height_levels:
+    for lvl in height_levels:
+        h = lvl["panel_h"]
         for side in [out1_panels, out2_panels, in1_panels, in2_panels]:
             for w, c in side.items():
                 key = format_panel_code(w, h)
@@ -206,7 +236,8 @@ def calculate_u_wall(l1_m, l2_m, l3_m, thickness_m, height_m, count=1):
     in3_panels, _ = solve_width_cm(max(0, l3_cm - thickness_cm))
     
     detailed_panels = {}
-    for h in height_levels:
+    for lvl in height_levels:
+        h = lvl["panel_h"]
         for side in [out1_panels, out2_panels, out3_panels, in1_panels, in2_panels, in3_panels]:
             for w, c in side.items():
                 key = format_panel_code(w, h)
