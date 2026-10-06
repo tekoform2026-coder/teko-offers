@@ -500,6 +500,9 @@ with tab2:
             })
 
         df_detailed = pd.DataFrame(detailed_rows)
+        if not df_detailed.empty:
+            df_detailed.index = range(1, len(df_detailed) + 1)
+
         st.metric("📊 ОБЩА КОФРАЖНА ПЛОЩ", f"{total_a:.2f} m²")
         st.subheader("📋 Спецификация на кофражните елементи и съответните панели")
         st.dataframe(df_detailed, use_container_width=True)
@@ -513,6 +516,8 @@ with tab2:
                 {"Код на панела / коф. елемент": k, "Общ брой (бр.)": v} 
                 for k, v in sorted(project_panels_summary.items())
             ])
+            if not df_panels_sum.empty:
+                df_panels_sum.index = range(1, len(df_panels_sum) + 1)
             st.dataframe(df_panels_sum, use_container_width=True)
 
         with col_p2:
@@ -521,6 +526,8 @@ with tab2:
                 {"Аксесоар / Окомплектовка": k, "Общ брой (бр.)": v} 
                 for k, v in sorted(project_accessories_summary.items())
             ])
+            if not df_acc_sum.empty:
+                df_acc_sum.index = range(1, len(df_acc_sum) + 1)
             st.dataframe(df_acc_sum, use_container_width=True)
 
 with tab3:
@@ -528,7 +535,7 @@ with tab3:
     df_calc = st.session_state["edited_df"]
 
     if df_calc.empty:
-        st.info("ℹ️ Няма въведени елементи. Качете чертеж в Таб 1 или въведете данни ръчно.")
+        st.info("ℹ️️ Няма въведени елементи. Качете чертеж в Таб 1 или въведете данни ръчно.")
     else:
         pdf_elements = []
         bom_summary = {}
@@ -669,6 +676,9 @@ with tab4:
         st.write(f"**Дата:** {offer_date.strftime('%d.%m.%Y')} г.")
 
         preview_df = pd.DataFrame(detailed_rows)
+        if not preview_df.empty:
+            preview_df.index = range(1, len(preview_df) + 1)
+
         preview_df["Площ (m²)"] = preview_df["Площ (m²)"].apply(lambda x: f"{x:.2f} m²")
         preview_df["Ед. цена (€/m²)"] = preview_df["Ед. цена (€/m²)"].apply(lambda x: f"{x:.2f} €")
         preview_df["Обща сума (€)"] = preview_df["Обща сума (€)"].apply(lambda x: f"{x:.2f} €")
