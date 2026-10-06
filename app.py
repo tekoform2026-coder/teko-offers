@@ -12,10 +12,11 @@ from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 from gemini_agent2 import analyze_blueprint
 from drawing_generator import generate_pdf_drawings
+from accessories_calculator import calculate_accessories
 
 st.set_page_config(
     page_title="TEKO - Вертикален Кофраж и Оферти",
-    page_icon="🏗️️",
+    page_icon="🏗",
     layout="wide"
 )
 
@@ -42,22 +43,18 @@ def calculate_height_breakdown(height_cm):
     height_levels = []
     rem = height_cm
     
-    # 1. Приоритетно използване на най-големите панели (150 см)
     while rem >= 150:
         height_levels.append(150)
         rem -= 150
         
-    # 2. Допълване с 120 см
     while rem >= 120:
         height_levels.append(120)
         rem -= 120
         
-    # 3. Допълване с 60 см
     while rem >= 60:
         height_levels.append(60)
         rem -= 60
         
-    # 4. Закръгляне на остатъка под 60 см към минималния стандартен модул от 60 см
     if rem > 0:
         height_levels.append(60)
         
@@ -103,10 +100,8 @@ def get_element_teko_panels(elem_type, row):
         p_breakdown = calculate_panel_width_breakdown(face_width_cm)
         for h_val in h_levels:
             for p_code, p_cnt in p_breakdown.items():
-                # Извличаме цифрата на ширината от кода (напр. "TK _60" -> 60)
                 w_val = int(p_code.split("_")[1])
                 
-                # Строга защита срещу несъществуващ панел 60/60
                 if int(h_val) == 60 and w_val == 60:
                     panel_name = "TK 150/60 (полегнал)"
                 elif int(h_val) == 60:
@@ -140,6 +135,39 @@ def get_element_teko_panels(elem_type, row):
         add_face_panels(l3_cm)
         
     return element_panels
+
+def get_element_accessories(elem_type, row):
+    cnt = int(row.get("count", 1) or 1)
+    h_m = float(row.get("height_m", 3.0) or 3.0)
+    h_cm = h_m * 100
+    h_levels = calculate_height_breakdown(h_cm)
+    
+    if elem_type == "column":
+        w_cm = float(row.get("width_m", 0.3) or 0.3) * 100
+        l_cm = float(row.get("length_m", 0.5) or 0.5) * 100
+        acc = calculate_accessories("column", w_cm, l_cm, h_cm, [w_cm, l_cm], h_levels)
+    elif elem_type == "wall":
+        l_cm = float(row.get("length_m", 5.0) or 5.0) * 100
+        t_cm = float(row.get("thickness_m", 0.25) or 0.25) * 100
+        acc = calculate_accessories("wall", l_cm, t_cm, h_cm, [l_cm], h_levels)
+    elif elem_type == "l_wall":
+        l1_cm = float(row.get("l1_m", 2.0) or 2.0) * 100
+        l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100
+        t_cm = float(row.get("thickness_m", 0.25) or 0.25) * 100
+        acc = calculate_accessories("L-образна стена", l1_cm, l2_cm, h_cm, [l1_cm, l2_cm], h_levels)
+    elif elem_type == "u_wall":
+        l1_cm = float(row.get("l1_m", 2.0) or 2.0) * 100
+        l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100
+        l3_cm = float(row.get("l3_m", 2.0) or 2.0) * 100
+        t_cm = float(row.get("thickness_m", 0.25) or 0.25) * 100
+        acc = calculate_accessories("U-образна стена", l1_cm + l2_cm + l3_cm, t_cm, h_cm, [l1_cm, l2_cm, l3_cm], h_levels)
+    else:
+        acc = {"bom_summary": {}}
+
+    res = {}
+    for code, qty in acc["bom_summary"].items():
+        res[code] = qty * cnt
+    return res
 
 def format_element_label(elem_type, name):
     name_str = str(name).strip() if name else ""
@@ -344,7 +372,6 @@ with tab1:
         with col_actions:
             st.subheader("🤖 AI Разчитане")
             
-            # Избор на AI модел за разчитане
             selected_model = st.selectbox(
                 "Избери AI модел за разчитане:",
                 options=[
@@ -411,6 +438,7 @@ with tab2:
         detailed_rows = []
         total_a = 0.0
         project_panels_summary = {}
+        project_accessories_summary = {}
 
         for _, row in df_calc.iterrows():
             cnt = int(row.get("count", 1) or 1)
@@ -450,11 +478,18 @@ with tab2:
                 dim_str = f"L={l1:.1f}+{l2:.1f}+{l3:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
 
             total_a += area
+            
+            # Панели
             panels_dict = get_element_teko_panels(elem_type, row)
             for p_name, p_qty in panels_dict.items():
                 project_panels_summary[p_name] = project_panels_summary.get(p_name, 0) + p_qty
 
             panels_str = ", ".join([f"{k} ({v} бр.)" for k, v in panels_dict.items()])
+
+            # Аксесоари
+            acc_dict = get_element_accessories(elem_type, row)
+            for acc_name, acc_qty in acc_dict.items():
+                project_accessories_summary[acc_name] = project_accessories_summary.get(acc_name, 0) + acc_qty
 
             detailed_rows.append({
                 "Елемент": elem_label,
@@ -470,12 +505,23 @@ with tab2:
         st.dataframe(df_detailed, use_container_width=True)
 
         st.divider()
-        st.subheader("📦 Общ брой нужни панели TEKO за целия обект")
-        df_panels_sum = pd.DataFrame([
-            {"Код на панела / коф. елемент": k, "Общ брой (бр.)": v} 
-            for k, v in sorted(project_panels_summary.items())
-        ])
-        st.dataframe(df_panels_sum, use_container_width=True)
+        col_p1, col_p2 = st.columns(2)
+        
+        with col_p1:
+            st.subheader("📦 Общ брой нужни панели TEKO за целия обект")
+            df_panels_sum = pd.DataFrame([
+                {"Код на панела / коф. елемент": k, "Общ брой (бр.)": v} 
+                for k, v in sorted(project_panels_summary.items())
+            ])
+            st.dataframe(df_panels_sum, use_container_width=True)
+
+        with col_p2:
+            st.subheader("🛠️ Общ брой аксесоари и окомплектовка")
+            df_acc_sum = pd.DataFrame([
+                {"Аксесоар / Окомплектовка": k, "Общ брой (бр.)": v} 
+                for k, v in sorted(project_accessories_summary.items())
+            ])
+            st.dataframe(df_acc_sum, use_container_width=True)
 
 with tab3:
     st.header("3. Генериране на PDF Чертежи и Спецификация")
@@ -506,6 +552,10 @@ with tab3:
             p_dict = get_element_teko_panels(e_type, r)
             for pk, pv in p_dict.items():
                 bom_summary[pk] = bom_summary.get(pk, 0) + pv
+
+            a_dict = get_element_accessories(e_type, r)
+            for ak, av in a_dict.items():
+                bom_summary[ak] = bom_summary.get(ak, 0) + av
 
         proj_info = {
             "client": st.session_state.get("client_name_in_tab", "Клиент"),
