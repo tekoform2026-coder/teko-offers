@@ -19,12 +19,6 @@ def calculate_walers(
 ) -> Dict[str, Any]:
     """
     Изчислява точния брой, тип и височинни позиции на ригелите (AW).
-    
-    Правила от документация:
-    1. На колони и стени до 35 cm ширина НЕ се поставят ригели.
-    2. Първи ред от изправени 120x60: h1 = 18 cm, h2 = 60 cm, след това през 60 cm.
-    3. Първи ред от изправени 150x60 или полегнали (120x60/150x60): h1 = 30 cm, след това през 60 cm.
-    4. В горните 0-60 cm от стената НЕ се монтира ригел (top margin >= 60 cm).
     """
     a = float(dim_a_cm or 0)
     b = float(dim_b_cm or a)
@@ -36,25 +30,22 @@ def calculate_walers(
     requires_walers_a = a > 35.0
     requires_walers_b = b > 35.0
     
-    # Генериране на височинните нива за ригелите
     waler_heights = []
     
     if "120x60_standing" in first_row_panel_type:
-        # Вариант А: 120x60 изправен панел на първи ред
         candidate_heights = [18.0, 60.0]
         curr_h = 120.0
         while curr_h < h:
             candidate_heights.append(curr_h)
             curr_h += 60.0
     else:
-        # Вариант Б: 150x60 изправен или полегнал панел
         candidate_heights = []
         curr_h = 30.0
         while curr_h < h:
             candidate_heights.append(curr_h)
             curr_h += 60.0
             
-    # Прилагане на правилото за горните 60 cm без ригел
+    # В горните 0-60 cm от стената НЕ се монтира ригел
     for wh in candidate_heights:
         if (h - wh) >= 60.0:
             waler_heights.append(wh)
@@ -66,7 +57,7 @@ def calculate_walers(
     if is_column:
         if requires_walers_a or requires_walers_b:
             waler_code = "Ригел AW 100" if max(a, b) <= 100 else "Ригел AW 150"
-            count = num_levels * 4  # 4 ригела на ниво за затягане
+            count = num_levels * 4
             bom[waler_code] = count
             
             for level_h in waler_heights:
@@ -74,7 +65,7 @@ def calculate_walers(
     else:
         if requires_walers_a:
             code_a = f"Ригел AW {200 if a >= 200 else 150 if a >= 150 else 100}"
-            count_a = num_levels * 2  # Двустранно
+            count_a = num_levels * 2
             bom[code_a] = bom.get(code_a, 0) + count_a
             
             for level_h in waler_heights:
@@ -102,10 +93,6 @@ def calculate_walers(
 def calculate_push_pull_props(wall_type: str, dim_a_cm: float, dim_b_cm: float, height_cm: float) -> Dict[str, Any]:
     """
     Изчислява броя и позиционирането на вертикализаторите.
-    
-    Правила:
-    - За колони до 60x60 cm -> по 2 вертикализатора (на 2 съседни страни).
-    - За стени с H > 120 cm: отстояние от ръб <= 90 cm, стъпка между тях <= 180 cm.
     """
     h = float(height_cm or 0)
     a = float(dim_a_cm or 0)
@@ -134,7 +121,7 @@ def calculate_push_pull_props(wall_type: str, dim_a_cm: float, dim_b_cm: float, 
 
     if is_column:
         if a <= 60 and b <= 60:
-            total_props = 2  # По 2 вертикализатора на колона до 60x60
+            total_props = 2
             details.append({"side": "Страна A", "count": 1, "positions_cm": [round(a / 2, 1)]})
             details.append({"side": "Страна B (съседна)", "count": 1, "positions_cm": [round(b / 2, 1)]})
         else:
@@ -144,7 +131,6 @@ def calculate_push_pull_props(wall_type: str, dim_a_cm: float, dim_b_cm: float, 
             details.append({"side": "Страни A1, A2", "count": count_a * 2, "positions_cm": pos_a})
             details.append({"side": "Страни B1, B2", "count": count_b * 2, "positions_cm": pos_b})
     else:
-        # При стени - монтаж от двете страни (двустранно)
         count_a, pos_a = get_props_count_for_length(a)
         total_props += count_a * 2
         details.append({"side": "Страна A (двустранно)", "count": count_a * 2, "positions_cm": pos_a})
@@ -165,51 +151,47 @@ def calculate_push_pull_props(wall_type: str, dim_a_cm: float, dim_b_cm: float, 
 
 
 # ==========================================
-# 3. ИЗЧИСЛЯВАНЕ НА СТЕГИ И РЪКОХВАТКИ
+# 3. ИЗЧИСЛЯВАНЕ НА РЪКОХВАТКИ (HANDLES)
 # ==========================================
 def calculate_panel_clamps(width_breakdown: List[float], height_breakdown: List[float], sides_count: int = 2) -> Dict[str, Any]:
     """
-    Алгоритъм за броене само на допирателните вертикални и хоризонтални фуги между панелите.
+    Алгоритъм за преброяване на пластмасовите ръкохватки по допирателните фуги между панелите.
     """
     cols = len(width_breakdown)
     rows = len(height_breakdown)
     
     if cols == 0 or rows == 0:
-        return {"bom": {}, "vert_joints": 0, "horiz_joints": 0, "total_clamps": 0}
+        return {"bom": {}, "vert_joints": 0, "horiz_joints": 0, "total_handles": 0}
 
-    # 1. Вертикални фуги (между панелите)
+    # 1. Вертикални фуги (между съседни панели)
     vert_joints_per_row = max(0, cols - 1)
     total_vert_joints = vert_joints_per_row * rows * sides_count
     
-    vert_clamps = 0
+    vert_handles = 0
     for h_val in height_breakdown:
-        clamps_per_joint = max(2, int(math.ceil(h_val / 60.0)))
-        vert_clamps += vert_joints_per_row * clamps_per_joint * sides_count
+        handles_per_joint = max(2, int(math.ceil(h_val / 60.0)))
+        vert_handles += vert_joints_per_row * handles_per_joint * sides_count
 
     # 2. Хоризонтални фуги (между редовете панели)
     horiz_joints_count = max(0, rows - 1)
     total_horiz_joints = horiz_joints_count * cols * sides_count
     
-    horiz_clamps = 0
+    horiz_handles = 0
     if horiz_joints_count > 0:
         for w_val in width_breakdown:
-            clamps_per_w = max(1, int(math.ceil(w_val / 40.0)))
-            horiz_clamps += horiz_joints_count * clamps_per_w * sides_count
+            handles_per_w = max(1, int(math.ceil(w_val / 40.0)))
+            horiz_handles += horiz_joints_count * handles_per_w * sides_count
 
-    total_clamps = vert_clamps + horiz_clamps
-    total_panels = cols * rows * sides_count
-    total_handles = total_panels * 2
+    total_handles = vert_handles + horiz_handles
 
     bom = {
-        "Бърза стега TEKO": total_clamps,
-        "Монтажна ръкохватка": total_handles
+        "Пластмасови ръкохватки": total_handles
     }
 
     return {
         "bom": bom,
         "vert_joints_count": total_vert_joints,
         "horiz_joints_count": total_horiz_joints,
-        "total_clamps": total_clamps,
         "total_handles": total_handles
     }
 
