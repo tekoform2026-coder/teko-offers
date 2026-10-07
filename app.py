@@ -61,7 +61,7 @@ def calculate_height_breakdown(height_cm):
         
     return height_levels
 
-# === ДОБАВЕНО ЗА СТЪПКА 3: Описание на редовете по височина ===
+# === СТЪПКА 3: Описание на редовете по височина ===
 def format_height_breakdown_text(height_m):
     """
     Форматира височината на елемента в ясен текст за използваните нива от панели.
@@ -75,7 +75,43 @@ def format_height_breakdown_text(height_m):
         else:
             parts.append(f"Ред {idx}: Изправен ({h_val} cm)")
     return " | ".join(parts)
-# ==============================================================
+
+# === СТЪПКА 4: Проверка за нестандартни размери ===
+def check_element_dimensions(row):
+    """
+    Проверява дали въведените размери са кратни на стандартните модули на TEKO (5 cm за ширина, 10 cm за височина).
+    """
+    warnings = []
+    h_m = float(row.get("height_m", 3.0) or 3.0)
+    h_cm = round(h_m * 100)
+    elem_type = str(row.get("type", "wall"))
+    name = format_element_label(elem_type, str(row.get("name", "Елемент")))
+
+    if h_cm % 10 != 0:
+        warnings.append(f"• **{name}**: Височина {h_cm} cm не е кратна на 10 cm (закръгля се към най-близкия модул).")
+
+    if elem_type == "column":
+        w_cm = round(float(row.get("width_m", 0.3) or 0.3) * 100)
+        l_cm = round(float(row.get("length_m", 0.5) or 0.5) * 100)
+        if w_cm % 5 != 0 or l_cm % 5 != 0:
+            warnings.append(f"• **{name}**: Размерите ({w_cm}x{l_cm} cm) не са кратни на 5 cm. Запълва се с компенсатор TC 5.")
+    elif elem_type == "wall":
+        l_cm = round(float(row.get("length_m", 5.0) or 5.0) * 100)
+        if l_cm % 5 != 0:
+            warnings.append(f"• **{name}**: Дължината {l_cm} cm не е кратна на 5 cm. Запълва се с компенсатор TC 5.")
+    elif elem_type == "l_wall":
+        l1_cm = round(float(row.get("l1_m", 2.0) or 2.0) * 100)
+        l2_cm = round(float(row.get("l2_m", 2.0) or 2.0) * 100)
+        if l1_cm % 5 != 0 or l2_cm % 5 != 0:
+            warnings.append(f"• **{name}**: Раменете ({l1_cm} cm / {l2_cm} cm) съдържат стойности некратни на 5 cm.")
+    elif elem_type == "u_wall":
+        l1_cm = round(float(row.get("l1_m", 2.0) or 2.0) * 100)
+        l2_cm = round(float(row.get("l2_m", 2.0) or 2.0) * 100)
+        l3_cm = round(float(row.get("l3_m", 2.0) or 2.0) * 100)
+        if l1_cm % 5 != 0 or l2_cm % 5 != 0 or l3_cm % 5 != 0:
+            warnings.append(f"• **{name}**: Раменете ({l1_cm}/{l2_cm}/{l3_cm} cm) съдържат стойности некратни на 5 cm.")
+
+    return warnings
 
 def calculate_panel_width_breakdown(width_cm):
     """
@@ -492,6 +528,7 @@ with tab2:
         st.info("ℹ️ Качете чертеж в Таб 1 или въведете елементи ръчно.")
     else:
         detailed_rows = []
+        all_warnings = []
         total_a = 0.0
         project_panels_summary = {}
         project_accessories_summary = {}
@@ -501,6 +538,10 @@ with tab2:
             h = float(row.get("height_m", 3.0) or 3.0)
             elem_type = str(row.get("type", "wall"))
             name = str(row.get("name", "Елемент"))
+
+            # Проверка за нестандартни размери (Стъпка 4)
+            row_warns = check_element_dimensions(row)
+            all_warnings.extend(row_warns)
 
             area = 0.0
             dim_str = ""
@@ -604,15 +645,21 @@ with tab2:
         with col_m2:
             st.metric("⚖️ ОБЩО ТЕГЛО НА КОФРАЖА", f"{total_formwork_weight:.2f} kg ({total_formwork_weight/1000.0:.2f} t)")
 
+        # Покажи предупреждения за размери, ако има такива (Стъпка 4)
+        if all_warnings:
+            with st.expander("⚠️ Предупреждения за нестандартни размери в кофражните елементи", expanded=True):
+                for w_msg in all_warnings:
+                    st.markdown(w_msg)
+
         st.subheader("📋 Спецификация на кофражните елементи и съответните панели")
         st.dataframe(df_detailed, use_container_width=True)
 
         with st.expander("ℹ️ Правила за редене на панелите по височина (Модули 150 cm / 120 cm / 60 cm)"):
             st.markdown("""
-            * **При стандартни височини (1.50 м, 2.70 м, 3.00 м):** Използват се изправени основни панели (150/60 или 120/60)[cite: 3].
+            * **При стандартни височини (1.50 м, 2.70 м, 3.00 м):** Използват се изправени основни панели (150/60 или 120/60).
             * **При междинни и нестандартни височини:**
-              * Допълването до крайната височина започва с **полегнали панели (60 cm)** в най-горния ред[cite: 3].
-              * При остатъци под 60 cm се използва най-близкият стандартен модул от 60 cm[cite: 3].
+              * Допълването до крайната височина започва с **полегнали панели (60 cm)** в най-горния ред.
+              * При остатъци под 60 cm се използва най-близкият стандартен модул от 60 cm.
             """)
 
         st.divider()
