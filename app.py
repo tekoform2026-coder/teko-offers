@@ -61,6 +61,22 @@ def calculate_height_breakdown(height_cm):
         
     return height_levels
 
+# === ДОБАВЕНО ЗА СТЪПКА 3: Описание на редовете по височина ===
+def format_height_breakdown_text(height_m):
+    """
+    Форматира височината на елемента в ясен текст за използваните нива от панели.
+    """
+    h_cm = round(float(height_m or 3.0) * 100)
+    h_levels = calculate_height_breakdown(h_cm)
+    parts = []
+    for idx, h_val in enumerate(h_levels, 1):
+        if h_val == 60:
+            parts.append(f"Ред {idx}: Полегнал (60 cm)")
+        else:
+            parts.append(f"Ред {idx}: Изправен ({h_val} cm)")
+    return " | ".join(parts)
+# ==============================================================
+
 def calculate_panel_width_breakdown(width_cm):
     """
     Разбива ширината с приоритет към основните големи панели (60 см).
@@ -137,7 +153,7 @@ def get_element_teko_panels(elem_type, row):
         corner_w = t_cm + 10.0
         add_face_panels(corner_w)
         
-        # 3. Огледално подреждане на остатъка от раменете[cite: 3]
+        # 3. Огледално подреждане на остатъка от раменете
         rem_l1 = max(0, l1_cm - corner_w)
         rem_l2 = max(0, l2_cm - corner_w)
         if rem_l1 > 0:
@@ -151,18 +167,18 @@ def get_element_teko_panels(elem_type, row):
         l3_cm = float(row.get("l3_m", 2.0) or 2.0) * 100
         t_cm = float(row.get("thickness_m", 0.25) or 0.25) * 100
         
-        # 1. Начисляване на ъгловите профили (2 вътрешни, 4 външни)[cite: 3]
+        # 1. Начисляване на ъгловите профили (2 вътрешни, 4 външни)
         in_corner = f"Вътрешен ъгъл IN{int(h_levels[0])}" if h_levels else "Вътрешен ъгъл IN"
         ex_corner = "Външен ъгъл EX"
         element_panels[in_corner] = element_panels.get(in_corner, 0) + 2 * cnt
         element_panels[ex_corner] = element_panels.get(ex_corner, 0) + 4 * cnt
         
-        # 2. Поставяне на ъгловите панели (Дебелина на стената + 10 cm) при всеки ъгъл[cite: 3]
+        # 2. Поставяне на ъгловите панели (Дебелина на стената + 10 cm) при всеки ъгъл
         corner_w = t_cm + 10.0
         add_face_panels(corner_w)
         add_face_panels(corner_w)
         
-        # 3. Огледално подреждане на остатъка от раменете[cite: 3]
+        # 3. Огледално подреждане на остатъка от раменете
         rem_l1 = max(0, l1_cm - corner_w)
         rem_l2 = max(0, l2_cm - 2 * corner_w)
         rem_l3 = max(0, l3_cm - corner_w)
@@ -519,6 +535,9 @@ with tab2:
 
             total_a += area
             
+            # Разпис по височина (Стъпка 3)
+            h_breakdown_str = format_height_breakdown_text(h)
+
             # Панели
             panels_dict = get_element_teko_panels(elem_type, row)
             for p_name, p_qty in panels_dict.items():
@@ -536,6 +555,7 @@ with tab2:
                 "Размери": dim_str,
                 "Брой": cnt,
                 "Площ (m²)": round(area, 2),
+                "Разпределение по височина": h_breakdown_str,
                 "Панели TEKO (Вид и брой)": panels_str
             })
 
@@ -586,6 +606,14 @@ with tab2:
 
         st.subheader("📋 Спецификация на кофражните елементи и съответните панели")
         st.dataframe(df_detailed, use_container_width=True)
+
+        with st.expander("ℹ️ Правила за редене на панелите по височина (Модули 150 cm / 120 cm / 60 cm)"):
+            st.markdown("""
+            * **При стандартни височини (1.50 м, 2.70 м, 3.00 м):** Използват се изправени основни панели (150/60 или 120/60)[cite: 3].
+            * **При междинни и нестандартни височини:**
+              * Допълването до крайната височина започва с **полегнали панели (60 cm)** в най-горния ред[cite: 3].
+              * При остатъци под 60 cm се използва най-близкият стандартен модул от 60 cm[cite: 3].
+            """)
 
         st.divider()
         col_p1, col_p2 = st.columns(2)
