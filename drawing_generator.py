@@ -227,17 +227,56 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
                                facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2)
         ax.add_patch(poly)
         
+        # Ъглови елементи
         ax.add_patch(patches.Rectangle((-15, -15), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
-        ax.text(-7.5, -7.5, "EX", ha='center', va='center', fontsize=6, fontweight='bold')
+        ax.text(-7.5, -7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
         
+        ax.add_patch(patches.Rectangle((a, -15), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
+        ax.text(a + 7.5, -7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
+        
+        ax.add_patch(patches.Rectangle((-15, b), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
+        ax.text(-7.5, b + 7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
+
         ax.add_patch(patches.Rectangle((t, t), 15, 15, facecolor=COLOR_CORNER_IN, edgecolor='black', linewidth=0.8))
-        ax.text(t+7.5, t+7.5, "IN", ha='center', va='center', fontsize=6, fontweight='bold', color='white')
+        ax.text(t + 7.5, t + 7.5, "IN", ha='center', va='center', fontsize=5.5, fontweight='bold', color='white')
+
+        # Платна по страна A (външна)
+        w_a = calculate_panel_width_breakdown(a)
+        curr_x = 0
+        for w in w_a:
+            ax.add_patch(patches.Rectangle((curr_x, -15), w, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
+            ax.text(curr_x + w/2, -7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
+            curr_x += w
+
+        # Платна по страна A1 (вътрешна, огледално/съответстващо на външните)
+        curr_x = t + 15
+        for w in w_a:
+            if curr_x + w <= a:
+                ax.add_patch(patches.Rectangle((curr_x, t), w, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
+                ax.text(curr_x + w/2, t + 7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
+                curr_x += w
+
+        # Платна по страна B (външна)
+        w_b = calculate_panel_width_breakdown(b)
+        curr_y = 0
+        for w in w_b:
+            ax.add_patch(patches.Rectangle((-15, curr_y), 15, w, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
+            ax.text(-7.5, curr_y + w/2, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
+            curr_y += w
+
+        # Платна по страна B1 (вътрешна, огледално/съответстващо на външните)
+        curr_y = t + 15
+        for w in w_b:
+            if curr_y + w <= b:
+                ax.add_patch(patches.Rectangle((t, curr_y), 15, w, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
+                ax.text(t + 7.5, curr_y + w/2, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
+                curr_y += w
 
         ax.set_xlim(-25, a + 25)
         ax.set_ylim(-25, b + 25)
 
     else:
-        # Прав стенен кофраж
+        # Прав стенен кофраж (с огледално подреждане на платната от двете страни)
         ax.add_patch(patches.Rectangle((0, 0), a, t, facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2))
         w_a = calculate_panel_width_breakdown(a)
         curr_x = 0
@@ -280,9 +319,12 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
         ax.add_patch(patches.Rectangle((-10, 0), 10, h_cm, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
         ax.add_patch(patches.Rectangle((side_len, 0), 10, h_cm, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
 
-        # 2. Ригели AW по точните позиции от accessories_calculator
-        walers_info = calculate_walers(wall_type, side_len, side_len, h_cm)
-        waler_positions = walers_info.get("height_positions_cm", [18, 60, 120, 180, 240])
+        # 2. Ригели AW по точните височинни коти от accessories_calculator
+        first_row_h = h_levels[0] if h_levels else 150
+        first_row_type = "120x60_standing" if first_row_h == 120 else "150x60_standing"
+        
+        walers_info = calculate_walers(wall_type, side_len, side_len, h_cm, first_row_panel_type=first_row_type)
+        waler_positions = walers_info.get("height_positions_cm", [])
         for w_y in waler_positions:
             if w_y < h_cm:
                 ax.add_patch(patches.Rectangle((-14, w_y - 4), side_len + 28, 8, 
@@ -401,10 +443,15 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name=""):
 
     for h in h_levels:
         for w in w_a + w_b:
-            if h == 60 and w == 60:
-                code = "Панел ТК 150/60 (полегнал)"
-            elif h == 60:
-                code = f"Панел ТК 60/{int(w)}"
+            if h == 60:
+                if w == 150:
+                    code = "Панел ТК 150/60 (полегнал)"
+                elif w == 120:
+                    code = "Панел ТК 120/60 (полегнал)"
+                elif w <= 15:
+                    code = f"Компенсатор ТС 60/{int(w)}"
+                else:
+                    code = f"Панел ТК 60/{int(w)}"
             elif w <= 15:
                 code = f"Компенсатор ТС {int(h)}/{int(w)}"
             else:
