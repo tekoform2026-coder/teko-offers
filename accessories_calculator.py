@@ -155,38 +155,75 @@ def calculate_push_pull_props(wall_type: str, dim_a_cm: float, dim_b_cm: float, 
 # ==========================================
 def calculate_panel_clamps(width_breakdown: List[float], height_breakdown: List[float], sides_count: int = 2) -> Dict[str, Any]:
     """
-    Алгоритъм за преброяване на пластмасовите ръкохватки по допирателните фуги между панелите.
+    Алгоритъм за преброяване на пластмасовите ръкохватки (H8, H6, H5, H4)
+    по допирателните фуги между панелите според Спесификация.xlsx.
     """
     cols = len(width_breakdown)
     rows = len(height_breakdown)
     
     if cols == 0 or rows == 0:
-        return {"bom": {}, "vert_joints": 0, "horiz_joints": 0, "total_handles": 0}
+        return {"bom": {}, "vert_joints_count": 0, "horiz_joints_count": 0, "total_handles": 0}
 
-    # 1. Вертикални фуги (между съседни панели)
+    def classify_panel_type(w: float, h: float) -> str:
+        """Определя категорията на елемента: 'MAIN', 'SMALL' или 'METAL'."""
+        if w in [5.0, 10.0, 15.0]:
+            return 'METAL'
+        if w in [20.0, 25.0, 30.0, 35.0, 60.0] and h in [120.0, 150.0]:
+            return 'MAIN'
+        if h <= 40.0 or w <= 25.0:
+            return 'SMALL'
+        return 'MAIN'
+
+    def get_handle_code(type1: str, type2: str) -> str:
+        """Избира точния модел ръкохватка за фугата."""
+        if type1 == 'METAL' or type2 == 'METAL':
+            return "Ръкохватка H4"
+        if type1 == 'MAIN' and type2 == 'MAIN':
+            return "Ръкохватка H8"
+        if (type1 == 'MAIN' and type2 == 'SMALL') or (type1 == 'SMALL' and type2 == 'MAIN'):
+            return "Ръкохватка H6"
+        if type1 == 'SMALL' and type2 == 'SMALL':
+            return "Ръкохватка H5"
+        return "Ръкохватка H8"
+
+    bom = {}
+    
+    # 1. Вертикални фуги (между съседни панели по ширина)
     vert_joints_per_row = max(0, cols - 1)
     total_vert_joints = vert_joints_per_row * rows * sides_count
     
-    vert_handles = 0
-    for h_val in height_breakdown:
+    vert_handles_count = 0
+    for r_idx, h_val in enumerate(height_breakdown):
         handles_per_joint = max(2, int(math.ceil(h_val / 60.0)))
-        vert_handles += vert_joints_per_row * handles_per_joint * sides_count
+        for c_idx in range(vert_joints_per_row):
+            w_left = width_breakdown[c_idx]
+            w_right = width_breakdown[c_idx + 1]
+            t_left = classify_panel_type(w_left, h_val)
+            t_right = classify_panel_type(w_right, h_val)
+            code = get_handle_code(t_left, t_right)
+            qty = handles_per_joint * sides_count
+            bom[code] = bom.get(code, 0) + qty
+            vert_handles_count += qty
 
-    # 2. Хоризонтални фуги (между редовете панели)
+    # 2. Хоризонтални фуги (между редовете панели по височина)
     horiz_joints_count = max(0, rows - 1)
     total_horiz_joints = horiz_joints_count * cols * sides_count
     
-    horiz_handles = 0
+    horiz_handles_count = 0
     if horiz_joints_count > 0:
-        for w_val in width_breakdown:
-            handles_per_w = max(1, int(math.ceil(w_val / 40.0)))
-            horiz_handles += horiz_joints_count * handles_per_w * sides_count
+        for r_idx in range(horiz_joints_count):
+            h_bottom = height_breakdown[r_idx]
+            h_top = height_breakdown[r_idx + 1]
+            for c_idx, w_val in enumerate(width_breakdown):
+                handles_per_w = max(1, int(math.ceil(w_val / 40.0)))
+                t_bottom = classify_panel_type(w_val, h_bottom)
+                t_top = classify_panel_type(w_val, h_top)
+                code = get_handle_code(t_bottom, t_top)
+                qty = handles_per_w * sides_count
+                bom[code] = bom.get(code, 0) + qty
+                horiz_handles_count += qty
 
-    total_handles = vert_handles + horiz_handles
-
-    bom = {
-        "Пластмасови ръкохватки": total_handles
-    }
+    total_handles = vert_handles_count + horiz_handles_count
 
     return {
         "bom": bom,
