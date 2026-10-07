@@ -248,7 +248,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(curr_x + w/2, -7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
             curr_x += w
 
-        # Платна по страна A1 (вътрешна, огледално/съответстващо на външните)
+        # Платна по страна A1 (вътрешна)
         curr_x = t + 15
         for w in w_a:
             if curr_x + w <= a:
@@ -264,7 +264,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(-7.5, curr_y + w/2, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
             curr_y += w
 
-        # Платна по страна B1 (вътрешна, огледално/съответстващо на външните)
+        # Платна по страна B1 (вътрешна)
         curr_y = t + 15
         for w in w_b:
             if curr_y + w <= b:
@@ -276,7 +276,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
         ax.set_ylim(-25, b + 25)
 
     else:
-        # Прав стенен кофраж (с огледално подреждане на платната от двете страни)
+        # Прав стенен кофраж
         ax.add_patch(patches.Rectangle((0, 0), a, t, facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2))
         w_a = calculate_panel_width_breakdown(a)
         curr_x = 0
@@ -302,7 +302,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
     return buf
 
 # ==========================================
-# 3. ИЗГЛЕД ОТПРЕД (FRONT VIEW)
+# 3. ИЗГЛЕД ОТПРЕД (FRONT VIEW) - КОРИГИРАНА ЛОГИКА ЗА НАДПИСИТЕ
 # ==========================================
 def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елемент"):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.5, 3.2), dpi=DPI_RESOLUTION)
@@ -319,7 +319,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
         ax.add_patch(patches.Rectangle((-10, 0), 10, h_cm, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
         ax.add_patch(patches.Rectangle((side_len, 0), 10, h_cm, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
 
-        # 2. Ригели AW по точните височинни коти от accessories_calculator
+        # 2. Ригели AW по точните височинни коти
         first_row_h = h_levels[0] if h_levels else 150
         first_row_type = "120x60_standing" if first_row_h == 120 else "150x60_standing"
         
@@ -330,7 +330,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                 ax.add_patch(patches.Rectangle((-14, w_y - 4), side_len + 28, 8, 
                                              facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.6, alpha=0.9, zorder=2))
 
-        # 3. Платна и Текст
+        # 3. Платна и Текст (Корекция за полегнал панел 150/60)
         curr_y = 0
         for h_val in h_levels:
             curr_x = 0
@@ -339,7 +339,12 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                                          linewidth=0.8, edgecolor=COLOR_PANEL_BORDER, facecolor=COLOR_PANEL, zorder=1)
                 ax.add_patch(rect)
                 
-                text_str = f"{int(w_val)}/{int(h_val)}"
+                # КОРЕКЦИЯ НА НАДПИСА: При ред с височина 60 cm и ширина 60 cm -> полегнал панел 150/60
+                if int(h_val) == 60 and int(w_val) == 60:
+                    text_str = "150/60"
+                else:
+                    text_str = f"{int(w_val)}/{int(h_val)}"
+
                 font_sz = 6.5 if w_val >= 35 else (5.5 if w_val >= 20 else 4.5)
                 
                 ax.text(curr_x + w_val / 2, curr_y + h_val / 2, text_str,
@@ -431,7 +436,7 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     return buf
 
 # ==========================================
-# 5. СПЕЦИФИКАЦИЯ ЗА ЕЛЕМЕНТА
+# 5. СПЕЦИФИКАЦИЯ ЗА ЕЛЕМЕНТА - КОРИГИРАНА ЛОГИКА ЗА ИМЕНАТА
 # ==========================================
 def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name=""):
     bom = {}
@@ -444,7 +449,9 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name=""):
     for h in h_levels:
         for w in w_a + w_b:
             if h == 60:
-                if w == 150:
+                if w == 60:
+                    code = "Панел ТК 150/60 (полегнал)"
+                elif w == 150:
                     code = "Панел ТК 150/60 (полегнал)"
                 elif w == 120:
                     code = "Панел ТК 120/60 (полегнал)"
@@ -456,7 +463,7 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name=""):
                 code = f"Компенсатор ТС {int(h)}/{int(w)}"
             else:
                 code = f"Панел ТК {int(h)}/{int(w)}"
-            bom[code] = bom.get(code, 0) + (2 if is_column else 2)
+            bom[code] = bom.get(code, 0) + 1
 
     if wall_type == "L-образна стена":
         bom["Външен ъгъл EX"] = len(h_levels)
