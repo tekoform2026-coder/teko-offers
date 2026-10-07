@@ -125,15 +125,54 @@ def get_element_teko_panels(elem_type, row):
     elif elem_type == "l_wall":
         l1_cm = float(row.get("l1_m", 2.0) or 2.0) * 100
         l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100
-        add_face_panels(l1_cm)
-        add_face_panels(l2_cm)
+        t_cm = float(row.get("thickness_m", 0.25) or 0.25) * 100
+        
+        # 1. Начисляване на ъгловите профили (1 вътрешен, 3 външни)
+        in_corner = f"Вътрешен ъгъл IN{int(h_levels[0])}" if h_levels else "Вътрешен ъгъл IN"
+        ex_corner = "Външен ъгъл EX"
+        element_panels[in_corner] = element_panels.get(in_corner, 0) + 1 * cnt
+        element_panels[ex_corner] = element_panels.get(ex_corner, 0) + 3 * cnt
+        
+        # 2. Поставяне на ъгловия панел (Дебелина на стената + 10 cm) до EX
+        corner_w = t_cm + 10.0
+        add_face_panels(corner_w)
+        
+        # 3. Огледално подреждане на остатъка от раменете[cite: 3]
+        rem_l1 = max(0, l1_cm - corner_w)
+        rem_l2 = max(0, l2_cm - corner_w)
+        if rem_l1 > 0:
+            add_face_panels(rem_l1)
+        if rem_l2 > 0:
+            add_face_panels(rem_l2)
+
     elif elem_type == "u_wall":
         l1_cm = float(row.get("l1_m", 2.0) or 2.0) * 100
         l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100
         l3_cm = float(row.get("l3_m", 2.0) or 2.0) * 100
-        add_face_panels(l1_cm)
-        add_face_panels(l2_cm)
-        add_face_panels(l3_cm)
+        t_cm = float(row.get("thickness_m", 0.25) or 0.25) * 100
+        
+        # 1. Начисляване на ъгловите профили (2 вътрешни, 4 външни)[cite: 3]
+        in_corner = f"Вътрешен ъгъл IN{int(h_levels[0])}" if h_levels else "Вътрешен ъгъл IN"
+        ex_corner = "Външен ъгъл EX"
+        element_panels[in_corner] = element_panels.get(in_corner, 0) + 2 * cnt
+        element_panels[ex_corner] = element_panels.get(ex_corner, 0) + 4 * cnt
+        
+        # 2. Поставяне на ъгловите панели (Дебелина на стената + 10 cm) при всеки ъгъл[cite: 3]
+        corner_w = t_cm + 10.0
+        add_face_panels(corner_w)
+        add_face_panels(corner_w)
+        
+        # 3. Огледално подреждане на остатъка от раменете[cite: 3]
+        rem_l1 = max(0, l1_cm - corner_w)
+        rem_l2 = max(0, l2_cm - 2 * corner_w)
+        rem_l3 = max(0, l3_cm - corner_w)
+        
+        if rem_l1 > 0:
+            add_face_panels(rem_l1)
+        if rem_l2 > 0:
+            add_face_panels(rem_l2)
+        if rem_l3 > 0:
+            add_face_panels(rem_l3)
         
     return element_panels
 
