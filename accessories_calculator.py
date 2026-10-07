@@ -88,7 +88,89 @@ def calculate_walers(
 
 
 # ==========================================
-# 2. ИЗЧИСЛЯВАНЕ НА ВЕРТИКАЛИЗАТОРИ (PUSH-PULL PROPS)
+# 2. ИЗЧИСЛЯВАНЕ НА ШПИЛКИ И ГАЙКИ (TIE RODS & NUTS)
+# ==========================================
+def calculate_tie_rods(
+    wall_type: str,
+    dim_a_cm: float,
+    dim_b_cm: float,
+    height_cm: float,
+    width_breakdown_a: List[float] = None,
+    first_row_panel_type: str = "150x60_standing"
+) -> Dict[str, Any]:
+    """
+    Изчислява броя анкерни шпилки и затягащи гайки според нивата на анкериране (30, 90, 150 cm и т.н.)
+    и броя вертикални модули по дължината на стената.
+    """
+    a = float(dim_a_cm or 0)
+    b = float(dim_b_cm or a)
+    h = float(height_cm or 0)
+    
+    is_column = "Колона" in wall_type or "колона" in wall_type.lower()
+
+    # 1. Тесни елементи (<= 35 cm) нямат нужда от преминаващи шпилки
+    if a <= 35.0 and (is_column or b <= 35.0):
+        return {"bom": {}, "rods_count": 0, "nuts_count": 0, "levels_count": 0}
+
+    # 2. Опроделяне на височинните нива за анкериране (съвпадащи с ригелите)
+    if "120x60_standing" in first_row_panel_type:
+        candidate_heights = [18.0, 60.0]
+        curr_h = 120.0
+        while curr_h < h:
+            candidate_heights.append(curr_h)
+            curr_h += 60.0
+    else:
+        candidate_heights = []
+        curr_h = 30.0
+        while curr_h < h:
+            candidate_heights.append(curr_h)
+            curr_h += 60.0
+
+    # Без анкериране в горните 0-60 cm
+    tie_heights = [wh for wh in candidate_heights if (h - wh) >= 60.0]
+    num_levels = len(tie_heights)
+
+    if num_levels == 0:
+        return {"bom": {}, "rods_count": 0, "nuts_count": 0, "levels_count": 0}
+
+    # 3. Преброяване на анкерните оси по дължината
+    def get_tie_cols(width_cm, w_breakdown):
+        if width_cm <= 35.0:
+            return 0
+        if w_breakdown and len(w_breakdown) > 0:
+            return len(w_breakdown)
+        return max(1, int(math.ceil(width_cm / 60.0)))
+
+    if is_column:
+        cols_a = get_tie_cols(a, width_breakdown_a)
+        total_rods = num_levels * cols_a
+    elif wall_type == "L-образна стена":
+        cols_a = get_tie_cols(a, width_breakdown_a)
+        cols_b = get_tie_cols(b, None)
+        total_rods = num_levels * (cols_a + cols_b)
+    else:
+        cols_a = get_tie_cols(a, width_breakdown_a)
+        total_rods = num_levels * cols_a
+
+    # За всяка шпилка са необходими 2 броя гайки
+    total_nuts = total_rods * 2
+
+    bom = {}
+    if total_rods > 0:
+        bom["Анкерни шпилки"] = total_rods
+        bom["Затягащи гайки"] = total_nuts
+
+    return {
+        "bom": bom,
+        "rods_count": total_rods,
+        "nuts_count": total_nuts,
+        "levels_count": num_levels,
+        "height_positions_cm": tie_heights
+    }
+
+
+# ==========================================
+# 3. ИЗЧИСЛЯВАНЕ НА ВЕРТИКАЛИЗАТОРИ (PUSH-PULL PROPS)
 # ==========================================
 def calculate_push_pull_props(wall_type: str, dim_a_cm: float, dim_b_cm: float, height_cm: float) -> Dict[str, Any]:
     """
@@ -151,7 +233,7 @@ def calculate_push_pull_props(wall_type: str, dim_a_cm: float, dim_b_cm: float, 
 
 
 # ==========================================
-# 3. ИЗЧИСЛЯВАНЕ НА РЪКОХВАТКИ (HANDLES)
+# 4. ИЗЧИСЛЯВАНЕ НА РЪКОХВАТКИ (HANDLES)
 # ==========================================
 def calculate_panel_clamps(width_breakdown: List[float], height_breakdown: List[float], sides_count: int = 2) -> Dict[str, Any]:
     """
@@ -234,14 +316,14 @@ def calculate_panel_clamps(width_breakdown: List[float], height_breakdown: List[
 
 
 # ==========================================
-# 4. ГЛАВНА ФУНКЦИЯ: CALCULATE_ACCESSORIES
+# 5. ГЛАВНА ФУНКЦИЯ: CALCULATE_ACCESSORIES
 # ==========================================
 def calculate_accessories(wall_type: str, dim_a_cm: float, dim_b_cm: float, height_cm: float,
                           width_breakdown_a: List[float] = None, 
                           height_breakdown: List[float] = None,
                           first_row_panel_type: str = "150x60_standing") -> Dict[str, Any]:
     """
-    Обединяваща функция за аксесоарите.
+    Обединяваща функция за аксесоарите (включва и шпилки и гайки).
     """
     a = float(dim_a_cm or 0)
     b = float(dim_b_cm or a)
@@ -256,17 +338,19 @@ def calculate_accessories(wall_type: str, dim_a_cm: float, dim_b_cm: float, heig
         height_breakdown = [h]
 
     walers_res = calculate_walers(wall_type, a, b, h, first_row_panel_type=first_row_panel_type)
+    ties_res = calculate_tie_rods(wall_type, a, b, h, width_breakdown_a=width_breakdown_a, first_row_panel_type=first_row_panel_type)
     props_res = calculate_push_pull_props(wall_type, a, b, h)
     clamps_res = calculate_panel_clamps(width_breakdown_a, height_breakdown, sides_count=sides_count)
 
     combined_bom = {}
-    for sub_res in [walers_res["bom"], props_res["bom"], clamps_res["bom"]]:
+    for sub_res in [walers_res["bom"], ties_res["bom"], props_res["bom"], clamps_res["bom"]]:
         for code, qty in sub_res.items():
             combined_bom[code] = combined_bom.get(code, 0) + qty
 
     return {
         "bom_summary": combined_bom,
         "walers": walers_res,
+        "tie_rods": ties_res,
         "push_pull_props": props_res,
         "clamps_and_handles": clamps_res
     }
