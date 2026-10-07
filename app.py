@@ -13,6 +13,7 @@ from docx.oxml.ns import nsdecls
 from gemini_agent2 import analyze_blueprint
 from drawing_generator import generate_pdf_drawings
 from accessories_calculator import calculate_accessories
+from weights_db import get_item_weight
 
 st.set_page_config(
     page_title="TEKO - Вертикален Кофраж и Оферти",
@@ -503,7 +504,47 @@ with tab2:
         if not df_detailed.empty:
             df_detailed.index = range(1, len(df_detailed) + 1)
 
-        st.metric("📊 ОБЩА КОФРАЖНА ПЛОЩ", f"{total_a:.2f} m²")
+        # Пресмятане на общо тегло за панели и аксесоари
+        panels_sum_data = []
+        total_panels_weight = 0.0
+        for k, v in sorted(project_panels_summary.items()):
+            unit_w = get_item_weight(k)
+            tot_w = unit_w * v
+            total_panels_weight += tot_w
+            panels_sum_data.append({
+                "Код на панела / коф. елемент": k,
+                "Общ брой (бр.)": v,
+                "Ед. тегло (kg)": round(unit_w, 2),
+                "Общо тегло (kg)": round(tot_w, 2)
+            })
+        df_panels_sum = pd.DataFrame(panels_sum_data)
+        if not df_panels_sum.empty:
+            df_panels_sum.index = range(1, len(df_panels_sum) + 1)
+
+        acc_sum_data = []
+        total_acc_weight = 0.0
+        for k, v in sorted(project_accessories_summary.items()):
+            unit_w = get_item_weight(k)
+            tot_w = unit_w * v
+            total_acc_weight += tot_w
+            acc_sum_data.append({
+                "Аксесоар / Окомплектовка": k,
+                "Общ брой (бр.)": v,
+                "Ед. тегло (kg)": round(unit_w, 2),
+                "Общо тегло (kg)": round(tot_w, 2)
+            })
+        df_acc_sum = pd.DataFrame(acc_sum_data)
+        if not df_acc_sum.empty:
+            df_acc_sum.index = range(1, len(df_acc_sum) + 1)
+
+        total_formwork_weight = total_panels_weight + total_acc_weight
+
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            st.metric("📊 ОБЩА КОФРАЖНА ПЛОЩ", f"{total_a:.2f} m²")
+        with col_m2:
+            st.metric("⚖️ ОБЩО ТЕГЛО НА КОФРАЖА", f"{total_formwork_weight:.2f} kg ({total_formwork_weight/1000.0:.2f} t)")
+
         st.subheader("📋 Спецификация на кофражните елементи и съответните панели")
         st.dataframe(df_detailed, use_container_width=True)
 
@@ -511,23 +552,11 @@ with tab2:
         col_p1, col_p2 = st.columns(2)
         
         with col_p1:
-            st.subheader("📦 Общ брой нужни панели TEKO за целия обект")
-            df_panels_sum = pd.DataFrame([
-                {"Код на панела / коф. елемент": k, "Общ брой (бр.)": v} 
-                for k, v in sorted(project_panels_summary.items())
-            ])
-            if not df_panels_sum.empty:
-                df_panels_sum.index = range(1, len(df_panels_sum) + 1)
+            st.subheader(f"📦 Панели TEKO (Общо: {total_panels_weight:.2f} kg)")
             st.dataframe(df_panels_sum, use_container_width=True)
 
         with col_p2:
-            st.subheader("🛠️ Общ брой аксесоари и окомплектовка")
-            df_acc_sum = pd.DataFrame([
-                {"Аксесоар / Окомплектовка": k, "Общ брой (бр.)": v} 
-                for k, v in sorted(project_accessories_summary.items())
-            ])
-            if not df_acc_sum.empty:
-                df_acc_sum.index = range(1, len(df_acc_sum) + 1)
+            st.subheader(f"🛠️ Аксесоари и окомплектовка (Общо: {total_acc_weight:.2f} kg)")
             st.dataframe(df_acc_sum, use_container_width=True)
 
 with tab3:
@@ -535,7 +564,7 @@ with tab3:
     df_calc = st.session_state["edited_df"]
 
     if df_calc.empty:
-        st.info("ℹ️️ Няма въведени елементи. Качете чертеж в Таб 1 или въведете данни ръчно.")
+        st.info("ℹ Няма въведени елементи. Качете чертеж в Таб 1 или въведете данни ръчно.")
     else:
         pdf_elements = []
         bom_summary = {}
