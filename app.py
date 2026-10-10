@@ -115,11 +115,11 @@ def check_element_dimensions(row):
 
 def calculate_panel_width_breakdown(width_cm):
     """
-    Разбива ширината с приоритет към основните големи панели (60 см).
+    Разбива ширината САМО с основни TEKO панели (60, 35, 30, 25, 20 cm).
+    Компенсаторите (15, 10, 5 cm) не се използват за основното редене по ширина.
     """
     width_cm = round(width_cm)
     panel_widths = [60, 35, 30, 25, 20]
-    compensators = [15, 10, 5]
     
     remaining = width_cm
     result_panels = {}
@@ -130,14 +130,8 @@ def calculate_panel_width_breakdown(width_cm):
             result_panels[f"TK _{int(w)}"] = int(count)
             remaining -= count * w
             
-    for c in compensators:
-        count = remaining // c
-        if count > 0:
-            result_panels[f"TC _{int(c)}"] = int(count)
-            remaining -= count * c
-            
-    if remaining > 0 and "TC _5" not in result_panels:
-        result_panels["TC _5"] = 1
+    if remaining > 0:
+        result_panels["TK _20"] = result_panels.get("TK _20", 0) + 1
         
     return result_panels
 
@@ -792,69 +786,48 @@ with tab4:
                 dim_str = f"L={l1:.1f}+{l2:.1f}+{l3:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
 
             total_a += area
-            item_cost = area * price_formwork
+            subtotal = total_a * price_formwork
+            vat_amount = subtotal * (vat_percent / 100.0)
+            grand_total = subtotal + vat_amount
 
             detailed_rows.append({
                 "Елемент": elem_label,
                 "Размери": dim_str,
                 "Брой": cnt,
-                "Площ (m²)": area,
+                "Площ (m²)": round(area, 2),
                 "Ед. цена (€/m²)": price_formwork,
-                "Обща сума (€)": item_cost
+                "Обща сума (€)": round(area * price_formwork, 2)
             })
 
-        subtotal = total_a * price_formwork
-        vat_amount = subtotal * (vat_percent / 100.0)
-        grand_total = subtotal + vat_amount
+        df_offer = pd.DataFrame(detailed_rows)
+        if not df_offer.empty:
+            df_offer.index = range(1, len(df_offer) + 1)
 
-        action_text = "наемане" if "наем" in offer_type.lower() else "закупуване"
+        st.subheader("📄 Резюме на офертата")
+        st.dataframe(df_offer, use_container_width=True)
 
-        st.markdown("<h2 style='color: #2E7D32; margin-bottom: 0;'>TEKO</h2>", unsafe_allow_html=True)
-        st.subheader("ПЛАСПАНЕЛ ООД | ЕИК 208141542")
-        st.caption("2700 Благоевград, ул. „Ал. Стамболийски” №9, ет. 1 | www.tekoform.com | bulgaria@tekoform.com | тел: +359 879 044 188")
-        st.markdown(f"### **ОФЕРТА**\n**За {action_text} на пластмасова кофражна система TEKO**")
-        
-        st.write(f"**До:** {client_name if client_name else '—'}")
-        st.write(f"**Относно:** Кофриране на стоманобетонови елементи за обект: „{project_name_input if project_name_input else '—'}“")
-        st.write(f"**Дата:** {offer_date.strftime('%d.%m.%Y')} г.")
+        st.metric("💰 ОБЩА СТОЙНОСТ (без ДДС)", f"{subtotal:.2f} €")
+        st.metric("💵 ОБЩО ЗА ПЛАЩАНЕ (с ДДС)", f"{grand_total:.2f} €")
 
-        preview_df = pd.DataFrame(detailed_rows)
-        if not preview_df.empty:
-            preview_df.index = range(1, len(preview_df) + 1)
-
-        preview_df["Площ (m²)"] = preview_df["Площ (m²)"].apply(lambda x: f"{x:.2f} m²")
-        preview_df["Ед. цена (€/m²)"] = preview_df["Ед. цена (€/m²)"].apply(lambda x: f"{x:.2f} €")
-        preview_df["Обща сума (€)"] = preview_df["Обща сума (€)"].apply(lambda x: f"{x:.2f} €")
-        
-        st.table(preview_df)
-
-        action_name = "наем" if "наем" in offer_type.lower() else "покупка"
-
-        st.markdown(f"**Обща кофражна площ:** {total_a:.2f} m²")
-        st.markdown(f"**Обща стойност за {action_name} (без ДДС):** {subtotal:.2f} €")
-        st.markdown(f"**ДДС ({vat_percent:.0f}%):** {vat_amount:.2f} €")
-        st.markdown(f"### **ОБЩО ЗА ПЛАЩАНЕ: {grand_total:.2f} €**")
-
-        st.divider()
-
-        docx_file = generate_word_offer(
-            client_name=client_name,
-            project_name=project_name_input,
-            offer_date=offer_date,
-            offer_type=offer_type,
-            price_per_m2=price_formwork,
-            detailed_rows=detailed_rows,
-            total_area=total_a,
-            subtotal=subtotal,
-            vat_amount=vat_amount,
-            grand_total=grand_total
-        )
-
-        st.download_button(
-            label="📄 Свали офертата във MS Word (.docx)",
-            data=docx_file,
-            file_name=f"Oferta_TEKO_{client_name.replace(' ', '_') if client_name else 'клиент'}_{offer_date}.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            type="primary",
-            use_container_width=True
-        )
+        if st.button("📥 Генерирай и свали оферта в Word (.docx)", type="primary"):
+            try:
+                word_stream = generate_word_offer(
+                    client_name=client_name or "Клиент",
+                    project_name=project_name_input or "Обект TEKO",
+                    offer_date=offer_date,
+                    offer_type=offer_type,
+                    price_per_m2=price_formwork,
+                    detailed_rows=detailed_rows,
+                    total_area=total_a,
+                    subtotal=subtotal,
+                    vat_amount=vat_amount,
+                    grand_total=grand_total
+                )
+                st.download_button(
+                    label="💾 Изтегли Word оферта",
+                    data=word_stream,
+                    file_name="Teko_Offer.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+            except Exception as e:
+                st.error(f"Грешка при генериране на Word оферта: {e}")
