@@ -302,7 +302,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
     return buf
 
 # ==========================================
-# 3. ИЗГЛЕД ОТПРЕД (FRONT VIEW)
+# 3. ИЗГЛЕД ОТПРЕД (FRONT VIEW) С ЛЯВА РАЗГРАФКА ЗА РИГЕЛИ
 # ==========================================
 def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елемент"):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.5, 3.2), dpi=DPI_RESOLUTION)
@@ -316,7 +316,6 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     n_str = str(name).lower()
     is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
 
-    # Ново правило за ригели при колони: ригели се слагат САМО ако максималното сечение е > 35 cm
     needs_walers = True
     if is_column:
         max_col_dim = max(a, b)
@@ -330,7 +329,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
         ax.add_patch(patches.Rectangle((-10, 0), 10, h_cm, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
         ax.add_patch(patches.Rectangle((side_len, 0), 10, h_cm, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
 
-        # 2. Ригели AW по точните височинни коти (при спазване на правилото за колони)
+        waler_positions = []
         if needs_walers:
             first_row_h = h_levels[0] if h_levels else 150
             first_row_type = "120x60_standing" if first_row_h == 120 else "150x60_standing"
@@ -342,7 +341,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                     ax.add_patch(patches.Rectangle((-14, w_y - 4), side_len + 28, 8, 
                                                  facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.6, alpha=0.9, zorder=2))
 
-        # 3. Платна и Текст (формат височина/ширина: напр. 150/30)
+        # 2. Платна и Текст
         curr_y = 0
         for h_val in h_levels:
             curr_x = 0
@@ -366,7 +365,25 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                 curr_x += w_val
             curr_y += h_val
 
-        ax.set_xlim(-20, side_len + 20)
+        # 3. ДОБАВЕНА ЛЯВА ВЕРТИКАЛНА РАЗГРАФКА ЗА РИГЕЛИ И КОТИ
+        dim_line_x = -24
+        # Основна вертикална линия на разграфката
+        ax.plot([dim_line_x, dim_line_x], [0, h_cm], color='#333333', linewidth=0.8, zorder=3)
+        
+        # Отбелязване на кота 0 и върха
+        ax.plot([dim_line_x - 2, dim_line_x + 2], [0, 0], color='#333333', linewidth=0.8)
+        ax.text(dim_line_x - 4, 0, "0", ha='right', va='center', fontsize=5, fontweight='bold', color='#333333')
+
+        ax.plot([dim_line_x - 2, dim_line_x + 2], [h_cm, h_cm], color='#333333', linewidth=0.8)
+        ax.text(dim_line_x - 4, h_cm, f"{int(h_cm)}", ha='right', va='center', fontsize=5, fontweight='bold', color='#333333')
+
+        # Отбелязване на ригелите по височина
+        for w_y in waler_positions:
+            if 0 < w_y < h_cm:
+                ax.plot([dim_line_x - 3, dim_line_x + 3], [w_y, w_y], color='#27AE60', linewidth=1.2, zorder=4)
+                ax.text(dim_line_x - 5, w_y, f"{int(w_y)}", ha='right', va='center', fontsize=5, fontweight='bold', color='#1E8449')
+
+        ax.set_xlim(-38, side_len + 20)
         ax.set_ylim(-10, h_cm + 15)
         ax.set_aspect('equal', adjustable='datalim')
         ax.axis('off')
