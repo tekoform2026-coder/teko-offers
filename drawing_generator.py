@@ -316,6 +316,13 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     n_str = str(name).lower()
     is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
 
+    # Ново правило за ригели при колони: ригели се слагат САМО ако максималното сечение е > 35 cm
+    needs_walers = True
+    if is_column:
+        max_col_dim = max(a, b)
+        if max_col_dim <= 35:
+            needs_walers = False
+
     def draw_side_front(ax, side_len, title_label):
         w_panels = calculate_panel_width_breakdown(side_len)
         
@@ -323,8 +330,8 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
         ax.add_patch(patches.Rectangle((-10, 0), 10, h_cm, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
         ax.add_patch(patches.Rectangle((side_len, 0), 10, h_cm, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
 
-        # 2. Ригели AW по точните височинни коти (САМО за стени, не и за колони)
-        if not is_column:
+        # 2. Ригели AW по точните височинни коти (при спазване на правилото за колони)
+        if needs_walers:
             first_row_h = h_levels[0] if h_levels else 150
             first_row_type = "120x60_standing" if first_row_h == 120 else "150x60_standing"
             
@@ -524,17 +531,13 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
     client = proj_info.get('client') or 'Няма посочен клиент'
     project = proj_info.get('project') or 'Обект TEKO'
     
-    # 1. СТРАНИЦА: ОБЩА СМЕТКА + ОБЩ 3D МОДЕЛ НА ЦЕЛИЯ ОБЕКТ
+    # 1. СТРАНИЦА: САМО ОБОБЩЕНА КОЛИЧЕСТВЕНА СМЕТКА (БЕЗ 3D ОБЩ ПЛАН НА ЕЛЕМЕНТИТЕ)
     story.append(Paragraph("<b>КОФРАЖНА СИСТЕМА TEKO / TEKO FORMWORK SYSTEM</b>", title_style))
     story.append(Paragraph(f"<b>Обект:</b> {project} | <b>Клиент:</b> {client}", subtitle_style))
-    story.append(Spacer(1, 4))
-    
-    overall_3d_buf = generate_overall_project_3d_buf(pdf_elements)
-    rl_overall_3d = RLImage(overall_3d_buf, width=490, height=228)
-    story.append(rl_overall_3d)
     story.append(Spacer(1, 8))
 
     story.append(Paragraph("<b>Обобщена количествена сметка (Project BOM)</b>", title_style))
+    story.append(Spacer(1, 4))
     
     table_data = [[
         Paragraph("<b>№</b>", cell_bold_style),
