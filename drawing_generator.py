@@ -272,8 +272,14 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
         ax.set_ylim(-25, b + 25)
 
     else:
-        # Прав стенен кофраж
+        # Прав стенен кофраж със затворени краища (EX ъгли от двете страни)
         ax.add_patch(patches.Rectangle((0, 0), a, t, facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2))
+        
+        # 4 Външни ъгъла (EX) за затворени краища на правата стена
+        for x_pos, y_pos in [(-15, -15), (a, -15), (a, t), (-15, t)]:
+            ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
+            ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
+
         w_a = calculate_panel_width_breakdown(a)
         curr_x = 0
         for w in w_a:
@@ -283,7 +289,14 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(curr_x + w/2, t + 7.5, f"{int(w)}", ha='center', va='center', fontsize=6, fontweight='bold')
             curr_x += w
 
-        ax.set_xlim(-20, a + 20)
+        # Странично затваряне на дебелината (краища)
+        for y_side in [0]:
+            ax.add_patch(patches.Rectangle((-15, y_side), 15, t, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
+            ax.text(-7.5, y_side + t/2, f"{int(t)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
+            ax.add_patch(patches.Rectangle((a, y_side), 15, t, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
+            ax.text(a + 7.5, y_side + t/2, f"{int(t)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
+
+        ax.set_xlim(-25, a + 25)
         ax.set_ylim(-25, t + 25)
 
     ax.set_aspect('equal', adjustable='datalim')
@@ -308,6 +321,8 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     h_cm = float(height_cm or 300)
     h_levels = calculate_height_breakdown(h_cm)
     
+    is_column = "Колона" in wall_type or "Квадратна колона" in wall_type or "колона" in name.lower()
+
     def draw_side_front(ax, side_len, title_label):
         w_panels = calculate_panel_width_breakdown(side_len)
         
@@ -315,18 +330,19 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
         ax.add_patch(patches.Rectangle((-10, 0), 10, h_cm, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
         ax.add_patch(patches.Rectangle((side_len, 0), 10, h_cm, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
 
-        # 2. Ригели AW по точните височинни коти
-        first_row_h = h_levels[0] if h_levels else 150
-        first_row_type = "120x60_standing" if first_row_h == 120 else "150x60_standing"
-        
-        walers_info = calculate_walers(wall_type, side_len, side_len, h_cm, first_row_panel_type=first_row_type)
-        waler_positions = walers_info.get("height_positions_cm", [])
-        for w_y in waler_positions:
-            if w_y < h_cm:
-                ax.add_patch(patches.Rectangle((-14, w_y - 4), side_len + 28, 8, 
-                                             facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.6, alpha=0.9, zorder=2))
+        # 2. Ригели AW по точните височинни коти (САМО за стени, не и за колони)
+        if not is_column:
+            first_row_h = h_levels[0] if h_levels else 150
+            first_row_type = "120x60_standing" if first_row_h == 120 else "150x60_standing"
+            
+            walers_info = calculate_walers(wall_type, side_len, side_len, h_cm, first_row_panel_type=first_row_type)
+            waler_positions = walers_info.get("height_positions_cm", [])
+            for w_y in waler_positions:
+                if w_y < h_cm:
+                    ax.add_patch(patches.Rectangle((-14, w_y - 4), side_len + 28, 8, 
+                                                 facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.6, alpha=0.9, zorder=2))
 
-        # 3. Платна и Текст
+        # 3. Платна и Текст (с разменен формат височина/ширина: напр. 150/35)
         curr_y = 0
         for h_val in h_levels:
             curr_x = 0
@@ -335,11 +351,11 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                                          linewidth=0.8, edgecolor=COLOR_PANEL_BORDER, facecolor=COLOR_PANEL, zorder=1)
                 ax.add_patch(rect)
                 
-                # Корекция за полегнал панел 150/60
+                # Корекция за полегнал панел 150/60 или стандартен формат височина/ширина
                 if int(h_val) == 60 and int(w_val) == 60:
                     text_str = "150/60"
                 else:
-                    text_str = f"{int(w_val)}/{int(h_val)}"
+                    text_str = f"{int(h_val)}/{int(w_val)}"
 
                 font_sz = 6.5 if w_val >= 35 else (5.5 if w_val >= 20 else 4.5)
                 
@@ -357,8 +373,6 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
         ax.axis('off')
         ax.set_title(f"Страна {title_label} ({int(side_len)}x{int(h_cm)} cm)", fontsize=8, fontweight='bold')
 
-    is_column = "Колона" in wall_type or "Квадратна колона" in wall_type or "колона" in name.lower()
-    
     draw_side_front(ax1, a, "A")
     draw_side_front(ax2, b, "B" if is_column or wall_type == "L-образна стена" else "A1")
 
@@ -459,6 +473,9 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name=""):
         bom["Външен ъгъл EX"] = len(h_levels)
         bom["Вътрешен ъгъл IN"] = len(h_levels)
     elif is_column:
+        bom["Външен ъгъл EX"] = len(h_levels) * 4
+    elif wall_type not in ["L-образна стена"] and not is_column:
+        # Затворени краища за права стена (4 броя EX ъгли по височинни нива)
         bom["Външен ъгъл EX"] = len(h_levels) * 4
 
     # Интегриране на аксесоарите от accessories_calculator
