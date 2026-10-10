@@ -67,8 +67,8 @@ def calculate_height_breakdown(height_cm):
 
 def calculate_panel_width_breakdown(width_cm):
     """
-    Разбива ширината САМО с основни TEKO панели (60, 35, 30, 25, 20 cm).
-    Без компенсатори (15, 10, 5 cm), като минималната ширина на основния панел е 20 cm.
+    Разбива ширината САМО с валидни основни TEKO панели (60, 35, 30, 25, 20 cm),
+    изключвайки напълно несъществуващи размери като 35 или 10 за малките серии.
     """
     panel_widths = [60, 35, 30, 25, 20]
     remaining = float(width_cm)
@@ -82,7 +82,7 @@ def calculate_panel_width_breakdown(width_cm):
             remaining -= count * w
             
     if remaining > 0:
-        # Запълване на остатъка с най-малкия основен панел (20 cm)
+        # Запълване на остатъка с най-малкия разрешен панел (20 cm)
         result.append(20)
         
     return result
@@ -127,10 +127,10 @@ def generate_overall_project_3d_buf(pdf_elements):
         l_b = float(elem.get('length_b_cm') or elem.get('width_cm') or l_a)
         h_cm = float(elem.get('height_cm') or 300)
         thick = float(elem.get('thickness_cm') or 30)
-        w_type = elem.get('type_bg') or elem.get('wall_type') or 'Стена'
-        e_name = elem.get('name', f'E{idx+1}')
+        w_type = str(elem.get('type_bg') or elem.get('wall_type') or 'Стена')
+        e_name = str(elem.get('name', f'E{idx+1}'))
 
-        is_column = "Колона" in w_type or "колона" in e_name.lower()
+        is_column = "колона" in w_type.lower() or "column" in w_type.lower() or "колона" in e_name.lower()
         dim_y = l_b if is_column else thick
 
         # Бетонно ядро
@@ -184,7 +184,9 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
     b = float(dim_b or 100)
     t = float(thickness or 30)
     
-    is_column = "Колона" in wall_type or "Квадратна колона" in wall_type or "колона" in name.lower()
+    w_str = str(wall_type).lower()
+    n_str = str(name).lower()
+    is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
 
     if is_column:
         # Бетонно ядро
@@ -218,25 +220,18 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
         ax.set_xlim(-25, a + 25)
         ax.set_ylim(-25, b + 25)
 
-    elif wall_type == "L-образна стена":
+    elif "l" in w_str or "l-образна" in w_str:
         poly = patches.Polygon([[0, 0], [a, 0], [a, t], [t, t], [t, b], [0, b]], 
                                facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2)
         ax.add_patch(poly)
         
-        # Ъглови елементи
-        ax.add_patch(patches.Rectangle((-15, -15), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
-        ax.text(-7.5, -7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
-        
-        ax.add_patch(patches.Rectangle((a, -15), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
-        ax.text(a + 7.5, -7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
-        
-        ax.add_patch(patches.Rectangle((-15, b), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
-        ax.text(-7.5, b + 7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
+        for x_pos, y_pos in [(-15, -15), (a, -15), (-15, b)]:
+            ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
+            ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
 
         ax.add_patch(patches.Rectangle((t, t), 15, 15, facecolor=COLOR_CORNER_IN, edgecolor='black', linewidth=0.8))
         ax.text(t + 7.5, t + 7.5, "IN", ha='center', va='center', fontsize=5.5, fontweight='bold', color='white')
 
-        # Платна по страна A (външна)
         w_a = calculate_panel_width_breakdown(a)
         curr_x = 0
         for w in w_a:
@@ -244,7 +239,6 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(curr_x + w/2, -7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
             curr_x += w
 
-        # Платна по страна A1 (вътрешна)
         curr_x = t + 15
         for w in w_a:
             if curr_x + w <= a:
@@ -252,7 +246,6 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
                 ax.text(curr_x + w/2, t + 7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
                 curr_x += w
 
-        # Платна по страна B (външна)
         w_b = calculate_panel_width_breakdown(b)
         curr_y = 0
         for w in w_b:
@@ -260,7 +253,6 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(-7.5, curr_y + w/2, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
             curr_y += w
 
-        # Платна по страна B1 (вътрешна)
         curr_y = t + 15
         for w in w_b:
             if curr_y + w <= b:
@@ -275,7 +267,6 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
         # Прав стенен кофраж със затворени краища (EX ъгли от двете страни)
         ax.add_patch(patches.Rectangle((0, 0), a, t, facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2))
         
-        # 4 Външни ъгъла (EX) за затворени краища на правата стена
         for x_pos, y_pos in [(-15, -15), (a, -15), (a, t), (-15, t)]:
             ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
             ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
@@ -321,7 +312,9 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     h_cm = float(height_cm or 300)
     h_levels = calculate_height_breakdown(h_cm)
     
-    is_column = "Колона" in wall_type or "Квадратна колона" in wall_type or "колона" in name.lower()
+    w_str = str(wall_type).lower()
+    n_str = str(name).lower()
+    is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
 
     def draw_side_front(ax, side_len, title_label):
         w_panels = calculate_panel_width_breakdown(side_len)
@@ -342,7 +335,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                     ax.add_patch(patches.Rectangle((-14, w_y - 4), side_len + 28, 8, 
                                                  facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.6, alpha=0.9, zorder=2))
 
-        # 3. Платна и Текст (с разменен формат височина/ширина: напр. 150/35)
+        # 3. Платна и Текст (формат височина/ширина: напр. 150/30)
         curr_y = 0
         for h_val in h_levels:
             curr_x = 0
@@ -351,7 +344,6 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                                          linewidth=0.8, edgecolor=COLOR_PANEL_BORDER, facecolor=COLOR_PANEL, zorder=1)
                 ax.add_patch(rect)
                 
-                # Корекция за полегнал панел 150/60 или стандартен формат височина/ширина
                 if int(h_val) == 60 and int(w_val) == 60:
                     text_str = "150/60"
                 else:
@@ -374,7 +366,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
         ax.set_title(f"Страна {title_label} ({int(side_len)}x{int(h_cm)} cm)", fontsize=8, fontweight='bold')
 
     draw_side_front(ax1, a, "A")
-    draw_side_front(ax2, b, "B" if is_column or wall_type == "L-образна стена" else "A1")
+    draw_side_front(ax2, b, "B" if is_column or "l" in w_str else "A1")
 
     fig.suptitle("Изглед отпред (Front View)", fontsize=9, fontweight='bold', y=0.98)
     plt.tight_layout()
@@ -397,7 +389,9 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     h = float(height_cm or 270)
     t = float(thickness or 30)
     
-    is_column = "Колона" in wall_type or "Квадратна колона" in wall_type or "колона" in name.lower()
+    w_str = str(wall_type).lower()
+    n_str = str(name).lower()
+    is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
     dim_y = b if is_column else t
 
     def draw_prism_3d(x0, y0, z0, dx, dy, dz, facecolor, edgecolor='#2C3E50', alpha=0.85):
@@ -454,7 +448,9 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name=""):
     w_a = calculate_panel_width_breakdown(dim_a)
     w_b = calculate_panel_width_breakdown(dim_b if dim_b else dim_a)
     
-    is_column = "Колона" in wall_type or "Квадратна колона" in wall_type or "колона" in name.lower()
+    w_str = str(wall_type).lower()
+    n_str = str(name).lower()
+    is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
 
     for h in h_levels:
         for w in w_a + w_b:
@@ -469,13 +465,12 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name=""):
                 code = f"Панел ТК {int(h)}/{int(w)}"
             bom[code] = bom.get(code, 0) + 1
 
-    if wall_type == "L-образна стена":
-        bom["Външен ъгъл EX"] = len(h_levels)
+    if "l" in w_str or "l-образна" in w_str:
+        bom["Външен ъгъл EX"] = len(h_levels) * 3
         bom["Вътрешен ъгъл IN"] = len(h_levels)
     elif is_column:
         bom["Външен ъгъл EX"] = len(h_levels) * 4
-    elif wall_type not in ["L-образна стена"] and not is_column:
-        # Затворени краища за права стена (4 броя EX ъгли по височинни нива)
+    else:
         bom["Външен ъгъл EX"] = len(h_levels) * 4
 
     # Интегриране на аксесоарите от accessories_calculator
@@ -578,7 +573,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         h_cm = elem.get('height_cm') or 300
         thick = elem.get('thickness_cm') or 30
 
-        display_type = "Колона" if ("Колона" in w_type or "колона" in e_name.lower()) else w_type
+        display_type = "Колона" if ("колона" in str(w_type).lower() or "column" in str(w_type).lower() or "колона" in str(e_name).lower()) else w_type
 
         story.append(Paragraph(f"<b>Чертеж и Спецификация: {e_name}</b>", title_style))
         story.append(Paragraph(f"Тип: {display_type} | Размери: {int(l_a)}x{int(l_b)} cm | Височина: {int(h_cm)} cm", subtitle_style))
