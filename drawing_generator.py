@@ -66,9 +66,11 @@ def calculate_height_breakdown(height_cm):
     return height_levels
 
 def calculate_panel_width_breakdown(width_cm):
-    """Разбива ширината на стандартни модули."""
+    """
+    Разбива ширината САМО с основни TEKO панели (60, 35, 30, 25, 20 cm).
+    Без компенсатори (15, 10, 5 cm), като минималната ширина на основния панел е 20 cm.
+    """
     panel_widths = [60, 35, 30, 25, 20]
-    compensators = [15, 10, 5]
     remaining = float(width_cm)
     result = []
     
@@ -79,15 +81,9 @@ def calculate_panel_width_breakdown(width_cm):
                 result.append(w)
             remaining -= count * w
             
-    for c in compensators:
-        count = int(remaining // c)
-        if count > 0:
-            for _ in range(count):
-                result.append(c)
-            remaining -= count * c
-            
     if remaining > 0:
-        result.append(remaining)
+        # Запълване на остатъка с най-малкия основен панел (20 cm)
+        result.append(20)
         
     return result
 
@@ -302,7 +298,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
     return buf
 
 # ==========================================
-# 3. ИЗГЛЕД ОТПРЕД (FRONT VIEW) - КОРИГИРАНА ЛОГИКА ЗА НАДПИСИТЕ
+# 3. ИЗГЛЕД ОТПРЕД (FRONT VIEW)
 # ==========================================
 def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елемент"):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.5, 3.2), dpi=DPI_RESOLUTION)
@@ -330,7 +326,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                 ax.add_patch(patches.Rectangle((-14, w_y - 4), side_len + 28, 8, 
                                              facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.6, alpha=0.9, zorder=2))
 
-        # 3. Платна и Текст (Корекция за полегнал панел 150/60)
+        # 3. Платна и Текст
         curr_y = 0
         for h_val in h_levels:
             curr_x = 0
@@ -339,7 +335,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                                          linewidth=0.8, edgecolor=COLOR_PANEL_BORDER, facecolor=COLOR_PANEL, zorder=1)
                 ax.add_patch(rect)
                 
-                # КОРЕКЦИЯ НА НАДПИСА: При ред с височина 60 cm и ширина 60 cm -> полегнал панел 150/60
+                # Корекция за полегнал панел 150/60
                 if int(h_val) == 60 and int(w_val) == 60:
                     text_str = "150/60"
                 else:
@@ -436,7 +432,7 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     return buf
 
 # ==========================================
-# 5. СПЕЦИФИКАЦИЯ ЗА ЕЛЕМЕНТА - КОРИГИРАНА ЛОГИКА ЗА ИМЕНАТА
+# 5. СПЕЦИФИКАЦИЯ ЗА ЕЛЕМЕНТА
 # ==========================================
 def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name=""):
     bom = {}
@@ -449,18 +445,12 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name=""):
     for h in h_levels:
         for w in w_a + w_b:
             if h == 60:
-                if w == 60:
-                    code = "Панел ТК 150/60 (полегнал)"
-                elif w == 150:
+                if w == 60 or w == 150:
                     code = "Панел ТК 150/60 (полегнал)"
                 elif w == 120:
                     code = "Панел ТК 120/60 (полегнал)"
-                elif w <= 15:
-                    code = f"Компенсатор ТС 60/{int(w)}"
                 else:
                     code = f"Панел ТК 60/{int(w)}"
-            elif w <= 15:
-                code = f"Компенсатор ТС {int(h)}/{int(w)}"
             else:
                 code = f"Панел ТК {int(h)}/{int(w)}"
             bom[code] = bom.get(code, 0) + 1
