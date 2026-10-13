@@ -49,7 +49,7 @@ def setup_pdf_fonts():
         return False
 
 def calculate_height_breakdown(height_cm):
-    """Разбива височината на стандартни модули."""
+    """Разбива височината на стандартни модули, като избира най-близкия по-висок стандартен панел при остатък."""
     height_levels = []
     rem = float(height_cm)
     while rem >= 150:
@@ -66,42 +66,12 @@ def calculate_height_breakdown(height_cm):
             height_levels.append(35)
         else:
             height_levels.append(60)
-    if not height_levels:
-        height_levels.append(60)
     return height_levels
 
-def calculate_corner_breakdown(height_cm):
-    """Разбива височината САМО с наличните стандартни ъгли TEKO (240, 150, 120 см)."""
-    h = float(height_cm)
-    if h <= 120:
-        return [120]
-    if h <= 150:
-        return [150]
-    if h <= 240:
-        return [240]
-    
-    corner_levels = []
-    rem = h
-    while rem >= 240:
-        corner_levels.append(240)
-        rem -= 240
-    while rem >= 150:
-        corner_levels.append(150)
-        rem -= 150
-    while rem >= 120:
-        corner_levels.append(120)
-        rem -= 120
-    if rem > 0:
-        if rem <= 120:
-            corner_levels.append(120)
-        else:
-            corner_levels.append(150)
-    if not corner_levels:
-        corner_levels.append(120)
-    return corner_levels
-
 def calculate_panel_width_breakdown(width_cm):
-    """Разбива ширината без празни пространства."""
+    """
+    Разбива ширината точно в рамките на наличната дължина, без да пречи на EX ъглите.
+    """
     panel_widths = [60, 35, 30, 25, 20]
     remaining = float(width_cm)
     result = []
@@ -124,7 +94,10 @@ def calculate_panel_width_breakdown(width_cm):
             
     if remaining > 0:
         closest_w = min(panel_widths, key=lambda x: abs(x - remaining))
-        result.append(closest_w)
+        if sum(result) + closest_w <= width_cm + 2:
+            result.append(closest_w)
+        elif not result:
+            result.append(20)
             
     return result
 
@@ -135,6 +108,22 @@ def generate_overall_project_3d_buf(pdf_elements):
     fig = plt.figure(figsize=(7.5, 3.5), dpi=DPI_RESOLUTION)
     ax = fig.add_subplot(111, projection='3d')
     
+    def draw_prism_3d(x0, y0, z0, dx, dy, dz, facecolor, edgecolor='#2C3E50', alpha=0.85):
+        vertices = np.array([
+            [x0, y0, z0], [x0+dx, y0, z0], [x0+dx, y0+dy, z0], [x0, y0+dy, z0],
+            [x0, y0, z0+dz], [x0+dx, y0, z0+dz], [x0+dx, y0+dy, z0+dz], [x0, y0, z0+dz]
+        ])
+        faces = [
+            [vertices[0], vertices[1], vertices[2], vertices[3]],
+            [vertices[4], vertices[5], vertices[6], vertices[7]],
+            [vertices[0], vertices[1], vertices[5], vertices[4]],
+            [vertices[2], vertices[3], vertices[7], vertices[6]],
+            [vertices[0], vertices[3], vertices[7], vertices[4]],
+            [vertices[1], vertices[2], vertices[6], vertices[5]]
+        ]
+        poly = Poly3DCollection(faces, facecolors=facecolor, edgecolors=edgecolor, linewidths=0.5, alpha=alpha)
+        ax.add_collection3d(poly)
+
     grid_cols = 3
     spacing_x = 250.0
     spacing_y = 250.0
@@ -158,28 +147,30 @@ def generate_overall_project_3d_buf(pdf_elements):
         is_column = "колона" in w_type.lower() or "column" in w_type.lower() or "колона" in e_name.lower()
         dim_y = l_b if is_column else thick
 
-        h_levels = calculate_height_breakdown(h_cm)
-        total_h = sum(h_levels)
-
-        ax.bar3d(pos_x, pos_y, 0, l_a, dim_y, total_h, color=COLOR_CONCRETE, edgecolor=COLOR_CONCRETE, alpha=1.0)
-        ax.bar3d(pos_x - 10, pos_y - 10, 0, l_a + 20, 10, total_h, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=1.0)
-        ax.bar3d(pos_x - 10, pos_y + dim_y, 0, l_a + 20, 10, total_h, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=1.0)
+        # Бетонно ядро
+        draw_prism_3d(pos_x, pos_y, 0, l_a, dim_y, h_cm, COLOR_CONCRETE, alpha=0.6)
+        
+        # Кофражни платна
+        draw_prism_3d(pos_x - 10, pos_y - 10, 0, l_a + 20, 10, h_cm, COLOR_PANEL)
+        draw_prism_3d(pos_x - 10, pos_y + dim_y, 0, l_a + 20, 10, h_cm, COLOR_PANEL)
         if is_column:
-            ax.bar3d(pos_x - 10, pos_y, 0, 10, dim_y, total_h, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=1.0)
-            ax.bar3d(pos_x + l_a, pos_y, 0, 10, dim_y, total_h, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=1.0)
+            draw_prism_3d(pos_x - 10, pos_y, 0, 10, dim_y, h_cm, COLOR_PANEL)
+            draw_prism_3d(pos_x + l_a, pos_y, 0, 10, dim_y, h_cm, COLOR_PANEL)
 
-        ax.bar3d(pos_x - 10, pos_y - 10, 0, 10, 10, total_h, color=COLOR_CORNER_EX, edgecolor='black', alpha=1.0)
-        ax.bar3d(pos_x + l_a, pos_y - 10, 0, 10, 10, total_h, color=COLOR_CORNER_EX, edgecolor='black', alpha=1.0)
+        # Ъглови профили EX
+        draw_prism_3d(pos_x - 10, pos_y - 10, 0, 10, 10, h_cm, COLOR_CORNER_EX)
+        draw_prism_3d(pos_x + l_a, pos_y - 10, 0, 10, 10, h_cm, COLOR_CORNER_EX)
         if is_column:
-            ax.bar3d(pos_x - 10, pos_y + dim_y, 0, 10, 10, total_h, color=COLOR_CORNER_EX, edgecolor='black', alpha=1.0)
-            ax.bar3d(pos_x + l_a, pos_y + dim_y, 0, 10, 10, total_h, color=COLOR_CORNER_EX, edgecolor='black', alpha=1.0)
+            draw_prism_3d(pos_x - 10, pos_y + dim_y, 0, 10, 10, h_cm, COLOR_CORNER_EX)
+            draw_prism_3d(pos_x + l_a, pos_y + dim_y, 0, 10, 10, h_cm, COLOR_CORNER_EX)
 
-        ax.text(pos_x + l_a/2, pos_y + dim_y/2, total_h + 60, e_name, 
+        # Текст над елемента
+        ax.text(pos_x + l_a/2, pos_y + dim_y/2, h_cm + 60, e_name, 
                 ha='center', va='bottom', fontsize=8, fontweight='bold', color='#111111')
 
         max_x = max(max_x, pos_x + l_a + 100)
         max_y = max(max_y, pos_y + dim_y + 100)
-        max_z = max(max_z, total_h + 100)
+        max_z = max(max_z, h_cm + 100)
 
     ax.set_xlim(-50, max_x)
     ax.set_ylim(-50, max_y)
@@ -198,7 +189,7 @@ def generate_overall_project_3d_buf(pdf_elements):
     return buf
 
 # ==========================================
-# 2. ИЗГЛЕД ОТГОРЕ (TOP VIEW)
+# 2. ИЗГЛЕД ОТГОРЕ (TOP VIEW) С ВЕРТИКАЛИЗАТОРИ
 # ==========================================
 def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемент"):
     fig, ax = plt.subplots(figsize=(3.5, 2.5), dpi=DPI_RESOLUTION)
@@ -212,12 +203,15 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
     is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
 
     if is_column:
+        # Бетонно ядро
         ax.add_patch(patches.Rectangle((0, 0), a, b, facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2))
         
+        # 4 Външни ъгъла (EX)
         for x_pos, y_pos in [(-15, -15), (a, -15), (a, b), (-15, b)]:
             ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
             ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
 
+        # Платна по A
         w_a = calculate_panel_width_breakdown(a)
         curr_x = 0
         for w in w_a:
@@ -227,6 +221,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(curr_x + w/2, b + 7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
             curr_x += w
 
+        # Платна по B
         w_b = calculate_panel_width_breakdown(b)
         curr_y = 0
         for w in w_b:
@@ -283,6 +278,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
         ax.set_ylim(-25, b + 25)
 
     else:
+        # Прав стенен кофраж със затворени краища (EX ъгли от двете страни)
         ax.add_patch(patches.Rectangle((0, 0), a, t, facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2))
         
         for x_pos, y_pos in [(-15, -15), (a, -15), (a, t), (-15, t)]:
@@ -298,20 +294,20 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(curr_x + w/2, t + 7.5, f"{int(w)}", ha='center', va='center', fontsize=6, fontweight='bold')
             curr_x += w
 
+        # Странично затваряне на дебелината (краища)
         for y_side in [0]:
             ax.add_patch(patches.Rectangle((-15, y_side), 15, t, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
             ax.text(-7.5, y_side + t/2, f"{int(t)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
             ax.add_patch(patches.Rectangle((a, y_side), 15, t, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
             ax.text(a + 7.5, y_side + t/2, f"{int(t)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
 
-        # Вертикализатори извън кофража
+        # ДОБАВЕНИ ВЕРТИКАЛИЗАТОРИ (Push-Pull Props) като зелени перпендикулярни ленти
         prop_positions = [a * 0.33, a * 0.67]
         for px in prop_positions:
-            ax.add_patch(patches.Rectangle((px - 2, -40), 4, 25, facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.5, alpha=0.9, zorder=2))
-            ax.add_patch(patches.Rectangle((px - 2, t + 15), 4, 25, facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.5, alpha=0.9, zorder=2))
+            ax.add_patch(patches.Rectangle((px - 2, -45), 4, t + 90, facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.5, alpha=0.85, zorder=2))
 
         ax.set_xlim(-25, a + 25)
-        ax.set_ylim(-45, t + 45)
+        ax.set_ylim(-50, t + 50)
 
     ax.set_aspect('equal', adjustable='datalim')
     ax.axis('off')
@@ -325,23 +321,15 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
     return buf
 
 # ==========================================
-# 3. ИЗГЛЕД ОТПРЕД (FRONT VIEW) - С ФИКСИРАН РАЗМЕР ЗА СТАНДАРТНИ И ДИНАМИЧЕН ЗА ДЪЛГИ
+# 3. ИЗГЛЕД ОТПРЕД (FRONT VIEW) - С ВЕРТИКАЛНИ НАДПИСИ
 # ==========================================
 def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елемент"):
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.5, 3.2), dpi=DPI_RESOLUTION)
+    
     a = float(dim_a or 100)
     b = float(dim_b or 100)
     h_cm = float(height_cm or 300)
     h_levels = calculate_height_breakdown(h_cm)
-    total_panel_h = sum(h_levels)
-    
-    max_side = max(a, b)
-    # Връщаме стандартния фиксиран размер (7.5) за нормални елементи, а за дълги стени над 400 см разширяваме пропорционално
-    if max_side > 400:
-        fig_w = min(16.0, max_side / 150.0 * 3.5)
-    else:
-        fig_w = 7.5
-    
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(fig_w, 3.2), dpi=DPI_RESOLUTION)
     
     w_str = str(wall_type).lower()
     n_str = str(name).lower()
@@ -356,25 +344,23 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     def draw_side_front(ax, side_len, title_label):
         w_panels = calculate_panel_width_breakdown(side_len)
         
-        corner_h_levels = calculate_corner_breakdown(total_panel_h)
-        c_curr_y = 0
-        for c_h in corner_h_levels:
-            ax.add_patch(patches.Rectangle((-10, c_curr_y), 10, c_h, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
-            ax.add_patch(patches.Rectangle((side_len, c_curr_y), 10, c_h, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
-            c_curr_y += c_h
+        # 1. Ъглови EX профили
+        ax.add_patch(patches.Rectangle((-10, 0), 10, h_cm, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
+        ax.add_patch(patches.Rectangle((side_len, 0), 10, h_cm, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
 
         waler_positions = []
         if needs_walers:
             first_row_h = h_levels[0] if h_levels else 150
             first_row_type = "120x60_standing" if first_row_h == 120 else "150x60_standing"
             
-            walers_info = calculate_walers(wall_type, side_len, side_len, total_panel_h, first_row_panel_type=first_row_type)
+            walers_info = calculate_walers(wall_type, side_len, side_len, h_cm, first_row_panel_type=first_row_type)
             waler_positions = walers_info.get("height_positions_cm", [])
             for w_y in waler_positions:
-                if w_y < total_panel_h:
+                if w_y < h_cm:
                     ax.add_patch(patches.Rectangle((-14, w_y - 4), side_len + 28, 8, 
                                                  facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.6, alpha=0.9, zorder=2))
 
+        # 2. Платна и вертикални надписи
         curr_y = 0
         for h_val in h_levels:
             curr_x = 0
@@ -398,25 +384,26 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                 curr_x += w_val
             curr_y += h_val
 
+        # 3. ЛЯВА ВЕРТИКАЛНА РАЗГРАФКА ЗА РИГЕЛИ И КОТИ
         dim_line_x = -24
-        ax.plot([dim_line_x, dim_line_x], [0, total_panel_h], color='#333333', linewidth=0.8, zorder=3)
+        ax.plot([dim_line_x, dim_line_x], [0, h_cm], color='#333333', linewidth=0.8, zorder=3)
         
         ax.plot([dim_line_x - 2, dim_line_x + 2], [0, 0], color='#333333', linewidth=0.8)
         ax.text(dim_line_x - 4, 0, "0", ha='right', va='center', fontsize=5, fontweight='bold', color='#333333')
 
-        ax.plot([dim_line_x - 2, dim_line_x + 2], [total_panel_h, total_panel_h], color='#333333', linewidth=0.8)
-        ax.text(dim_line_x - 4, total_panel_h, f"{int(total_panel_h)}", ha='right', va='center', fontsize=5, fontweight='bold', color='#333333')
+        ax.plot([dim_line_x - 2, dim_line_x + 2], [h_cm, h_cm], color='#333333', linewidth=0.8)
+        ax.text(dim_line_x - 4, h_cm, f"{int(h_cm)}", ha='right', va='center', fontsize=5, fontweight='bold', color='#333333')
 
         for w_y in waler_positions:
-            if 0 < w_y < total_panel_h:
+            if 0 < w_y < h_cm:
                 ax.plot([dim_line_x - 3, dim_line_x + 3], [w_y, w_y], color='#27AE60', linewidth=1.2, zorder=4)
                 ax.text(dim_line_x - 5, w_y, f"{int(w_y)}", ha='right', va='center', fontsize=5, fontweight='bold', color='#1E8449')
 
         ax.set_xlim(-38, side_len + 20)
-        ax.set_ylim(-10, total_panel_h + 15)
+        ax.set_ylim(-10, h_cm + 15)
         ax.set_aspect('equal', adjustable='datalim')
         ax.axis('off')
-        ax.set_title(f"Страна {title_label} ({int(side_len)}x{int(total_panel_h)} cm)", fontsize=8, fontweight='bold')
+        ax.set_title(f"Страна {title_label} ({int(side_len)}x{int(h_cm)} cm)", fontsize=8, fontweight='bold')
 
     draw_side_front(ax1, a, "A")
     draw_side_front(ax2, b, "B" if is_column or "l" in w_str else "A1")
@@ -431,7 +418,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     return buf
 
 # ==========================================
-# 4. ИНДИВИДУАЛЕН 3D КОФРАЖЕН ИЗГЛЕД (НАПЪЛНО ПЛЪТЕН БЕЗ СТЪКЛЕНИ ЕФЕКТИ)
+# 4. ИНДИВИДУАЛЕН 3D КОФРАЖЕН ИЗГЛЕД С ПЪЛНА ПАНЕЛНА РАЗГРАФКА
 # ==========================================
 def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, name="Елемент"):
     fig = plt.figure(figsize=(3.5, 2.5), dpi=DPI_RESOLUTION)
@@ -447,29 +434,44 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
     dim_y = b if is_column else t
 
-    h_levels = calculate_height_breakdown(h)
-    total_h = sum(h_levels)
+    def draw_prism_3d(x0, y0, z0, dx, dy, dz, facecolor, edgecolor=COLOR_PANEL_BORDER, alpha=0.9):
+        vertices = np.array([
+            [x0, y0, z0], [x0+dx, y0, z0], [x0+dx, y0+dy, z0], [x0, y0+dy, z0],
+            [x0, y0, z0+dz], [x0+dx, y0, z0+dz], [x0+dx, y0+dy, z0+dz], [x0, y0, z0+dz]
+        ])
+        faces = [
+            [vertices[0], vertices[1], vertices[2], vertices[3]],
+            [vertices[4], vertices[5], vertices[6], vertices[7]],
+            [vertices[0], vertices[1], vertices[5], vertices[4]],
+            [vertices[2], vertices[3], vertices[7], vertices[6]],
+            [vertices[0], vertices[3], vertices[7], vertices[4]],
+            [vertices[1], vertices[2], vertices[6], vertices[5]]
+        ]
+        poly = Poly3DCollection(faces, facecolors=facecolor, edgecolors=edgecolor, linewidths=0.4, alpha=alpha)
+        ax.add_collection3d(poly)
 
-    # Напълно плътно бетонно ядро с alpha=1.0
-    ax.bar3d(0, 0, 0, a, dim_y, total_h, color=COLOR_CONCRETE, edgecolor=COLOR_CONCRETE, alpha=1.0)
+    # Бетонно ядро
+    draw_prism_3d(0, 0, 0, a, dim_y, h, COLOR_CONCRETE, edgecolor=COLOR_CONCRETE, alpha=0.4)
 
     w_a = calculate_panel_width_breakdown(a)
     w_b = calculate_panel_width_breakdown(b) if is_column else []
+    h_levels = calculate_height_breakdown(h)
 
-    # Напълно плътни панели с alpha=1.0
+    # Предна страна с панелна разграфка
     curr_z = 0
     for h_val in h_levels:
         curr_x = 0
         for w_val in w_a:
-            ax.bar3d(curr_x, -12, curr_z, w_val, 12, h_val, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=1.0)
+            draw_prism_3d(curr_x, -12, curr_z, w_val, 12, h_val, COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER)
             curr_x += w_val
         curr_z += h_val
 
+    # Задна страна с панелна разграфка
     curr_z = 0
     for h_val in h_levels:
         curr_x = 0
         for w_val in w_a:
-            ax.bar3d(curr_x, dim_y, curr_z, w_val, 12, h_val, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=1.0)
+            draw_prism_3d(curr_x, dim_y, curr_z, w_val, 12, h_val, COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER)
             curr_x += w_val
         curr_z += h_val
 
@@ -478,22 +480,19 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
         for h_val in h_levels:
             curr_y = 0
             for w_val in w_b:
-                ax.bar3d(-12, curr_y, curr_z, 12, w_val, h_val, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=1.0)
-                ax.bar3d(a, curr_y, curr_z, 12, w_val, h_val, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=1.0)
+                draw_prism_3d(-12, curr_y, curr_z, 12, w_val, h_val, COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER)
+                draw_prism_3d(a, curr_y, curr_z, 12, w_val, h_val, COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER)
                 curr_y += w_val
             curr_z += h_val
 
-    corner_h_levels = calculate_corner_breakdown(total_h)
-    c_curr_z = 0
-    for c_h in corner_h_levels:
-        for xc, yc in [(-12, -12), (a, -12), (a, dim_y), (-12, dim_y)]:
-            ax.bar3d(xc, yc, c_curr_z, 12, 12, c_h, color=COLOR_CORNER_EX, edgecolor='black', alpha=1.0)
-        c_curr_z += c_h
+    # Ъглови профили EX
+    for xc, yc in [(-12, -12), (a, -12), (a, dim_y), (-12, dim_y)]:
+        draw_prism_3d(xc, yc, 0, 12, 12, h, COLOR_CORNER_EX, edgecolor='black')
 
     ax.set_xlim(-30, a + 30)
     ax.set_ylim(-30, dim_y + 30)
-    ax.set_zlim(0, total_h + 20)
-    ax.set_box_aspect([a + 60, dim_y + 60, total_h + 20])
+    ax.set_zlim(0, h + 20)
+    ax.set_box_aspect([a + 60, dim_y + 60, h + 20])
     
     ax.axis('off')
     ax.view_init(elev=25, azim=-55)
@@ -531,29 +530,20 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name=""):
                 code = f"Панел ТК {int(h)}/{int(w)}"
             bom[code] = bom.get(code, 0) + 1
 
-    total_h = sum(h_levels)
-    corner_h_levels = calculate_corner_breakdown(total_h)
-    num_corners = 3 if ("l" in w_str or "l-образна" in w_str) else 4
-
-    for c_h in corner_h_levels:
-        if c_h == 240:
-            c_code = "Външен ъгъл EX240"
-        elif c_h == 120:
-            c_code = "Външен ъгъл EX120"
-        else:
-            c_code = "Външен ъгъл EX"
-        bom[c_code] = bom.get(c_code, 0) + num_corners
-
     if "l" in w_str or "l-образна" in w_str:
-        for c_h in corner_h_levels:
-            in_code = f"Вътрешен ъгъл IN{int(c_h)}" if c_h != 150 else "Вътрешен ъгъл IN"
-            bom[in_code] = bom.get(in_code, 0) + 1
+        bom["Външен ъгъл EX"] = len(h_levels) * 3
+        bom["Вътрешен ъгъл IN"] = len(h_levels)
+    elif is_column:
+        bom["Външен ъгъл EX"] = len(h_levels) * 4
+    else:
+        bom["Външен ъгъл EX"] = len(h_levels) * 4
 
+    # Интегриране на аксесоарите от accessories_calculator
     acc_res = calculate_accessories(
         wall_type=wall_type,
         dim_a_cm=dim_a,
         dim_b_cm=dim_b if dim_b else dim_a,
-        height_cm=total_h,
+        height_cm=height_cm,
         width_breakdown_a=w_a,
         height_breakdown=h_levels
     )
@@ -599,6 +589,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
     client = proj_info.get('client') or 'Няма посочен клиент'
     project = proj_info.get('project') or 'Обект TEKO'
     
+    # 1. СТРАНИЦА: САМО ОБОБЩЕНА КОЛИЧЕСТВЕНА СМЕТКА (БЕЗ 3D ОБЩ ПЛАН НА ЕЛЕМЕНТИТЕ)
     story.append(Paragraph("<b>КОФРАЖНА СИСТЕМА TEKO / TEKO FORMWORK SYSTEM</b>", title_style))
     story.append(Paragraph(f"<b>Обект:</b> {project} | <b>Клиент:</b> {client}", subtitle_style))
     story.append(Spacer(1, 8))
@@ -634,6 +625,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
     story.append(t_summary)
     story.append(PageBreak())
 
+    # 2. ВСЕКИ ЕЛЕМЕНТ НА ОТДЕЛНА СТРАНИЦА
     for elem in pdf_elements:
         e_name = elem.get('name', 'Елемент')
         w_type = elem.get('type_bg') or elem.get('wall_type') or 'Стена'
