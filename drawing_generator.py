@@ -30,7 +30,7 @@ COLOR_PANEL = '#F1948A'         # Кофражен панел (розово-че
 COLOR_PANEL_BORDER = '#681910'  # Кант на панел (тъмночервен)
 COLOR_CORNER_EX = '#52BE80'     # Външен ъгъл EX (яркозелено)
 COLOR_CORNER_IN = '#1E8449'     # Вътрешен ъгъл IN (тъмнозелено)
-COLOR_WALER = '#27AE60'         # Ригел AW (зелено)
+COLOR_WALER = '#27AE60'         # Ригел AW / Вертикализатори (зелено)
 COLOR_CONCRETE = '#D5D8DC'      # Бетонно ядро (светлосиво)
 
 def setup_pdf_fonts():
@@ -189,7 +189,7 @@ def generate_overall_project_3d_buf(pdf_elements):
     return buf
 
 # ==========================================
-# 2. ИЗГЛЕД ОТГОРЕ (TOP VIEW)
+# 2. ИЗГЛЕД ОТГОРЕ (TOP VIEW) С ВЕРТИКАЛИЗАТОРИ
 # ==========================================
 def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемент"):
     fig, ax = plt.subplots(figsize=(3.5, 2.5), dpi=DPI_RESOLUTION)
@@ -211,7 +211,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
             ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
 
-        # Платна по A (разположени точно между ъглите от 0 до a)
+        # Платна по A
         w_a = calculate_panel_width_breakdown(a)
         curr_x = 0
         for w in w_a:
@@ -221,7 +221,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(curr_x + w/2, b + 7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
             curr_x += w
 
-        # Платна по B (разположени точно между ъглите от 0 до b)
+        # Платна по B
         w_b = calculate_panel_width_breakdown(b)
         curr_y = 0
         for w in w_b:
@@ -301,8 +301,13 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.add_patch(patches.Rectangle((a, y_side), 15, t, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
             ax.text(a + 7.5, y_side + t/2, f"{int(t)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
 
+        # ДОБАВЕНИ ВЕРТИКАЛИЗАТОРИ (Push-Pull Props) като зелени перпендикулярни ленти
+        prop_positions = [a * 0.33, a * 0.67]
+        for px in prop_positions:
+            ax.add_patch(patches.Rectangle((px - 2, -45), 4, t + 90, facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.5, alpha=0.85, zorder=2))
+
         ax.set_xlim(-25, a + 25)
-        ax.set_ylim(-25, t + 25)
+        ax.set_ylim(-50, t + 50)
 
     ax.set_aspect('equal', adjustable='datalim')
     ax.axis('off')
@@ -316,7 +321,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
     return buf
 
 # ==========================================
-# 3. ИЗГЛЕД ОТПРЕД (FRONT VIEW) С ЛЯВА РАЗГРАФКА ЗА РИГЕЛИ
+# 3. ИЗГЛЕД ОТПРЕД (FRONT VIEW) - С ВЕРТИКАЛНИ НАДПИСИ
 # ==========================================
 def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елемент"):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.5, 3.2), dpi=DPI_RESOLUTION)
@@ -355,7 +360,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                     ax.add_patch(patches.Rectangle((-14, w_y - 4), side_len + 28, 8, 
                                                  facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.6, alpha=0.9, zorder=2))
 
-        # 2. Платна и Текст с чисто четливо изписване и ротация при тесни панели
+        # 2. Платна и вертикални надписи
         curr_y = 0
         for h_val in h_levels:
             curr_x = 0
@@ -369,12 +374,11 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                 else:
                     text_str = f"{int(h_val)}/{int(w_val)}"
 
-                font_sz = 6.0 if w_val >= 30 else 5.0
-                should_rotate = (w_val <= 30) or (w_val < h_val and w_val < 35)
+                font_sz = 5.5
                 
                 ax.text(curr_x + w_val / 2, curr_y + h_val / 2, text_str,
                         ha='center', va='center', fontsize=font_sz, color='#111111', fontweight='bold', 
-                        rotation=90 if should_rotate else 0, zorder=5,
+                        rotation=90, zorder=5,
                         bbox=dict(boxstyle='round,pad=0.15', facecolor='white', alpha=0.9, edgecolor='none'))
                 
                 curr_x += w_val
@@ -414,7 +418,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     return buf
 
 # ==========================================
-# 4. ИНДИВИДУАЛЕН 3D КОФРАЖЕН ИЗГЛЕД
+# 4. ИНДИВИДУАЛЕН 3D КОФРАЖЕН ИЗГЛЕД С ПЪЛНА ПАНЕЛНА РАЗГРАФКА
 # ==========================================
 def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, name="Елемент"):
     fig = plt.figure(figsize=(3.5, 2.5), dpi=DPI_RESOLUTION)
@@ -430,7 +434,7 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
     dim_y = b if is_column else t
 
-    def draw_prism_3d(x0, y0, z0, dx, dy, dz, facecolor, edgecolor=None, alpha=0.9):
+    def draw_prism_3d(x0, y0, z0, dx, dy, dz, facecolor, edgecolor=COLOR_PANEL_BORDER, alpha=0.9):
         vertices = np.array([
             [x0, y0, z0], [x0+dx, y0, z0], [x0+dx, y0+dy, z0], [x0, y0+dy, z0],
             [x0, y0, z0+dz], [x0+dx, y0, z0+dz], [x0+dx, y0+dy, z0+dz], [x0, y0, z0+dz]
@@ -443,22 +447,47 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
             [vertices[0], vertices[3], vertices[7], vertices[4]],
             [vertices[1], vertices[2], vertices[6], vertices[5]]
         ]
-        poly = Poly3DCollection(faces, facecolors=facecolor, edgecolors=edgecolor, linewidths=0.3, alpha=alpha)
+        poly = Poly3DCollection(faces, facecolors=facecolor, edgecolors=edgecolor, linewidths=0.4, alpha=alpha)
         ax.add_collection3d(poly)
 
-    # Бетонно ядро (без вътрешни линии чрез съвпадащ цвят на кантовете)
+    # Бетонно ядро
     draw_prism_3d(0, 0, 0, a, dim_y, h, COLOR_CONCRETE, edgecolor=COLOR_CONCRETE, alpha=0.4)
 
-    # Кофражни платна
-    draw_prism_3d(-12, -12, 0, a + 24, 12, h, COLOR_PANEL)
-    draw_prism_3d(-12, dim_y, 0, a + 24, 12, h, COLOR_PANEL)
+    w_a = calculate_panel_width_breakdown(a)
+    w_b = calculate_panel_width_breakdown(b) if is_column else []
+    h_levels = calculate_height_breakdown(h)
+
+    # Предна страна с панелна разграфка
+    curr_z = 0
+    for h_val in h_levels:
+        curr_x = 0
+        for w_val in w_a:
+            draw_prism_3d(curr_x, -12, curr_z, w_val, 12, h_val, COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER)
+            curr_x += w_val
+        curr_z += h_val
+
+    # Задна страна с панелна разграфка
+    curr_z = 0
+    for h_val in h_levels:
+        curr_x = 0
+        for w_val in w_a:
+            draw_prism_3d(curr_x, dim_y, curr_z, w_val, 12, h_val, COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER)
+            curr_x += w_val
+        curr_z += h_val
+
     if is_column:
-        draw_prism_3d(-12, 0, 0, 12, dim_y, h, COLOR_PANEL)
-        draw_prism_3d(a, 0, 0, 12, dim_y, h, COLOR_PANEL)
+        curr_z = 0
+        for h_val in h_levels:
+            curr_y = 0
+            for w_val in w_b:
+                draw_prism_3d(-12, curr_y, curr_z, 12, w_val, h_val, COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER)
+                draw_prism_3d(a, curr_y, curr_z, 12, w_val, h_val, COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER)
+                curr_y += w_val
+            curr_z += h_val
 
     # Ъглови профили EX
     for xc, yc in [(-12, -12), (a, -12), (a, dim_y), (-12, dim_y)]:
-        draw_prism_3d(xc, yc, 0, 12, 12, h, COLOR_CORNER_EX)
+        draw_prism_3d(xc, yc, 0, 12, 12, h, COLOR_CORNER_EX, edgecolor='black')
 
     ax.set_xlim(-30, a + 30)
     ax.set_ylim(-30, dim_y + 30)
@@ -466,7 +495,7 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     ax.set_box_aspect([a + 60, dim_y + 60, h + 20])
     
     ax.axis('off')
-    ax.view_init(elev=22, azim=-45)
+    ax.view_init(elev=25, azim=-55)
     ax.set_title("3D Изометрия (3D View)", fontsize=8, fontweight='bold', pad=2)
     
     buf = io.BytesIO()
