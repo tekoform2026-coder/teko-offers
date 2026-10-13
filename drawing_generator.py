@@ -49,7 +49,7 @@ def setup_pdf_fonts():
         return False
 
 def calculate_height_breakdown(height_cm):
-    """Разбива височината на стандартни модули (150, 120, 60 cm)."""
+    """Разбива височината на стандартни модули, като избира най-близкия по-висок стандартен панел при остатък."""
     height_levels = []
     rem = float(height_cm)
     while rem >= 150:
@@ -62,17 +62,28 @@ def calculate_height_breakdown(height_cm):
         height_levels.append(60)
         rem -= 60
     if rem > 0:
-        height_levels.append(rem)
+        if rem <= 35:
+            height_levels.append(35)
+        else:
+            height_levels.append(60)
     return height_levels
 
 def calculate_panel_width_breakdown(width_cm):
     """
-    Разбива ширината САМО с валидни основни TEKO панели (60, 35, 30, 25, 20 cm),
-    изключвайки напълно несъществуващи размери като 35 или 10 за малките серии.
+    Разбива ширината точно в рамките на наличната дължина, без да пречи на EX ъглите.
     """
     panel_widths = [60, 35, 30, 25, 20]
     remaining = float(width_cm)
     result = []
+    
+    if remaining == 50:
+        return [25, 25]
+    if remaining == 40:
+        return [20, 20]
+    if remaining == 45:
+        return [25, 20]
+    if remaining == 55:
+        return [35, 20]
     
     for w in panel_widths:
         count = int(remaining // w)
@@ -82,9 +93,12 @@ def calculate_panel_width_breakdown(width_cm):
             remaining -= count * w
             
     if remaining > 0:
-        # Запълване на остатъка с най-малкия разрешен панел (20 cm)
-        result.append(20)
-        
+        closest_w = min(panel_widths, key=lambda x: abs(x - remaining))
+        if sum(result) + closest_w <= width_cm + 2:
+            result.append(closest_w)
+        elif not result:
+            result.append(20)
+            
     return result
 
 # ==========================================
@@ -197,7 +211,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
             ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
 
-        # Платна по A
+        # Платна по A (разположени точно между ъглите от 0 до a)
         w_a = calculate_panel_width_breakdown(a)
         curr_x = 0
         for w in w_a:
@@ -207,7 +221,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(curr_x + w/2, b + 7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
             curr_x += w
 
-        # Платна по B
+        # Платна по B (разположени точно между ъглите от 0 до b)
         w_b = calculate_panel_width_breakdown(b)
         curr_y = 0
         for w in w_b:
@@ -341,7 +355,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                     ax.add_patch(patches.Rectangle((-14, w_y - 4), side_len + 28, 8, 
                                                  facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.6, alpha=0.9, zorder=2))
 
-        # 2. Платна и Текст
+        # 2. Платна и Текст с чисто четливо изписване и ротация при тесни панели
         curr_y = 0
         for h_val in h_levels:
             curr_x = 0
@@ -355,29 +369,27 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                 else:
                     text_str = f"{int(h_val)}/{int(w_val)}"
 
-                font_sz = 6.5 if w_val >= 35 else (5.5 if w_val >= 20 else 4.5)
+                font_sz = 6.0 if w_val >= 30 else 5.0
+                should_rotate = (w_val <= 30) or (w_val < h_val and w_val < 35)
                 
                 ax.text(curr_x + w_val / 2, curr_y + h_val / 2, text_str,
                         ha='center', va='center', fontsize=font_sz, color='#111111', fontweight='bold', 
-                        rotation=90 if w_val < 35 else 0, zorder=5,
-                        bbox=dict(boxstyle='round,pad=0.15', facecolor='white', alpha=0.85, edgecolor='none'))
+                        rotation=90 if should_rotate else 0, zorder=5,
+                        bbox=dict(boxstyle='round,pad=0.15', facecolor='white', alpha=0.9, edgecolor='none'))
                 
                 curr_x += w_val
             curr_y += h_val
 
-        # 3. ДОБАВЕНА ЛЯВА ВЕРТИКАЛНА РАЗГРАФКА ЗА РИГЕЛИ И КОТИ
+        # 3. ЛЯВА ВЕРТИКАЛНА РАЗГРАФКА ЗА РИГЕЛИ И КОТИ
         dim_line_x = -24
-        # Основна вертикална линия на разграфката
         ax.plot([dim_line_x, dim_line_x], [0, h_cm], color='#333333', linewidth=0.8, zorder=3)
         
-        # Отбелязване на кота 0 и върха
         ax.plot([dim_line_x - 2, dim_line_x + 2], [0, 0], color='#333333', linewidth=0.8)
         ax.text(dim_line_x - 4, 0, "0", ha='right', va='center', fontsize=5, fontweight='bold', color='#333333')
 
         ax.plot([dim_line_x - 2, dim_line_x + 2], [h_cm, h_cm], color='#333333', linewidth=0.8)
         ax.text(dim_line_x - 4, h_cm, f"{int(h_cm)}", ha='right', va='center', fontsize=5, fontweight='bold', color='#333333')
 
-        # Отбелязване на ригелите по височина
         for w_y in waler_positions:
             if 0 < w_y < h_cm:
                 ax.plot([dim_line_x - 3, dim_line_x + 3], [w_y, w_y], color='#27AE60', linewidth=1.2, zorder=4)
@@ -418,7 +430,7 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
     dim_y = b if is_column else t
 
-    def draw_prism_3d(x0, y0, z0, dx, dy, dz, facecolor, edgecolor='#2C3E50', alpha=0.85):
+    def draw_prism_3d(x0, y0, z0, dx, dy, dz, facecolor, edgecolor=None, alpha=0.9):
         vertices = np.array([
             [x0, y0, z0], [x0+dx, y0, z0], [x0+dx, y0+dy, z0], [x0, y0+dy, z0],
             [x0, y0, z0+dz], [x0+dx, y0, z0+dz], [x0+dx, y0+dy, z0+dz], [x0, y0, z0+dz]
@@ -431,11 +443,11 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
             [vertices[0], vertices[3], vertices[7], vertices[4]],
             [vertices[1], vertices[2], vertices[6], vertices[5]]
         ]
-        poly = Poly3DCollection(faces, facecolors=facecolor, edgecolors=edgecolor, linewidths=0.5, alpha=alpha)
+        poly = Poly3DCollection(faces, facecolors=facecolor, edgecolors=edgecolor, linewidths=0.3, alpha=alpha)
         ax.add_collection3d(poly)
 
-    # Бетонно ядро
-    draw_prism_3d(0, 0, 0, a, dim_y, h, COLOR_CONCRETE, alpha=0.5)
+    # Бетонно ядро (без вътрешни линии чрез съвпадащ цвят на кантовете)
+    draw_prism_3d(0, 0, 0, a, dim_y, h, COLOR_CONCRETE, edgecolor=COLOR_CONCRETE, alpha=0.4)
 
     # Кофражни платна
     draw_prism_3d(-12, -12, 0, a + 24, 12, h, COLOR_PANEL)
