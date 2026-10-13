@@ -301,13 +301,16 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.add_patch(patches.Rectangle((a, y_side), 15, t, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
             ax.text(a + 7.5, y_side + t/2, f"{int(t)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
 
-        # ДОБАВЕНИ ВЕРТИКАЛИЗАТОРИ (Push-Pull Props) като зелени перпендикулярни ленти
+        # КОРИГИРАНИ ВЕРТИКАЛИЗАТОРИ (Push-Pull Props) - разположени извън панелите, без да ги пробиват
         prop_positions = [a * 0.33, a * 0.67]
         for px in prop_positions:
-            ax.add_patch(patches.Rectangle((px - 2, -45), 4, t + 90, facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.5, alpha=0.85, zorder=2))
+            # Долен вертикализатор (извън долните панели: от y = -40 до y = -15)
+            ax.add_patch(patches.Rectangle((px - 2, -40), 4, 25, facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.5, alpha=0.9, zorder=2))
+            # Горен вертикализатор (извън горните панели: от y = t + 15 до y = t + 40)
+            ax.add_patch(patches.Rectangle((px - 2, t + 15), 4, 25, facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.5, alpha=0.9, zorder=2))
 
         ax.set_xlim(-25, a + 25)
-        ax.set_ylim(-50, t + 50)
+        ax.set_ylim(-45, t + 45)
 
     ax.set_aspect('equal', adjustable='datalim')
     ax.axis('off')
