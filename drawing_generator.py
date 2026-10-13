@@ -161,7 +161,6 @@ def generate_overall_project_3d_buf(pdf_elements):
         h_levels = calculate_height_breakdown(h_cm)
         total_h = sum(h_levels)
 
-        # Плътни обеми без прозрачност (alpha=1.0)
         ax.bar3d(pos_x, pos_y, 0, l_a, dim_y, total_h, color=COLOR_CONCRETE, edgecolor=COLOR_CONCRETE, alpha=1.0)
         ax.bar3d(pos_x - 10, pos_y - 10, 0, l_a + 20, 10, total_h, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=1.0)
         ax.bar3d(pos_x - 10, pos_y + dim_y, 0, l_a + 20, 10, total_h, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=1.0)
@@ -326,7 +325,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
     return buf
 
 # ==========================================
-# 3. ИЗГЛЕД ОТПРЕД (FRONT VIEW)
+# 3. ИЗГЛЕД ОТПРЕД (FRONT VIEW) - С ФИКСИРАН РАЗМЕР ЗА СТАНДАРТНИ И ДИНАМИЧЕН ЗА ДЪЛГИ
 # ==========================================
 def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елемент"):
     a = float(dim_a or 100)
@@ -336,7 +335,11 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     total_panel_h = sum(h_levels)
     
     max_side = max(a, b)
-    fig_w = max(7.5, min(16.0, max_side / 150.0 * 3.5))
+    # Връщаме стандартния фиксиран размер (7.5) за нормални елементи, а за дълги стени над 400 см разширяваме пропорционално
+    if max_side > 400:
+        fig_w = min(16.0, max_side / 150.0 * 3.5)
+    else:
+        fig_w = 7.5
     
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(fig_w, 3.2), dpi=DPI_RESOLUTION)
     
@@ -428,7 +431,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     return buf
 
 # ==========================================
-# 4. ИНДИВИДУАЛЕН 3D КОФРАЖЕН ИЗГЛЕД (ПЛЪТЕН, БЕЗ СТЪКЛО И ТРИЪГЪЛНИЦИ)
+# 4. ИНДИВИДУАЛЕН 3D КОФРАЖЕН ИЗГЛЕД (НАПЪЛНО ПЛЪТЕН БЕЗ СТЪКЛЕНИ ЕФЕКТИ)
 # ==========================================
 def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, name="Елемент"):
     fig = plt.figure(figsize=(3.5, 2.5), dpi=DPI_RESOLUTION)
@@ -447,13 +450,13 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     h_levels = calculate_height_breakdown(h)
     total_h = sum(h_levels)
 
-    # Плътно бетонно ядро (alpha=1.0)
+    # Напълно плътно бетонно ядро с alpha=1.0
     ax.bar3d(0, 0, 0, a, dim_y, total_h, color=COLOR_CONCRETE, edgecolor=COLOR_CONCRETE, alpha=1.0)
 
     w_a = calculate_panel_width_breakdown(a)
     w_b = calculate_panel_width_breakdown(b) if is_column else []
 
-    # Плътни панели с разграфка по височина и ширина (alpha=1.0)
+    # Напълно плътни панели с alpha=1.0
     curr_z = 0
     for h_val in h_levels:
         curr_x = 0
