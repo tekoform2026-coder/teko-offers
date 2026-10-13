@@ -135,22 +135,6 @@ def generate_overall_project_3d_buf(pdf_elements):
     fig = plt.figure(figsize=(7.5, 3.5), dpi=DPI_RESOLUTION)
     ax = fig.add_subplot(111, projection='3d')
     
-    def draw_prism_3d(x0, y0, z0, dx, dy, dz, facecolor, edgecolor='#2C3E50', alpha=0.9):
-        vertices = np.array([
-            [x0, y0, z0], [x0+dx, y0, z0], [x0+dx, y0+dy, z0], [x0, y0+dy, z0],
-            [x0, y0, z0+dz], [x0+dx, y0, z0+dz], [x0+dx, y0+dy, z0+dz], [x0, y0, z0+dz]
-        ])
-        faces = [
-            [vertices[0], vertices[1], vertices[2], vertices[3]],
-            [vertices[4], vertices[5], vertices[6], vertices[7]],
-            [vertices[0], vertices[1], vertices[5], vertices[4]],
-            [vertices[2], vertices[3], vertices[7], vertices[6]],
-            [vertices[0], vertices[3], vertices[7], vertices[4]],
-            [vertices[1], vertices[2], vertices[6], vertices[5]]
-        ]
-        poly = Poly3DCollection(faces, facecolors=facecolor, edgecolors=edgecolor, linewidths=0.4, alpha=alpha)
-        ax.add_collection3d(poly)
-
     grid_cols = 3
     spacing_x = 250.0
     spacing_y = 250.0
@@ -174,25 +158,29 @@ def generate_overall_project_3d_buf(pdf_elements):
         is_column = "колона" in w_type.lower() or "column" in w_type.lower() or "колона" in e_name.lower()
         dim_y = l_b if is_column else thick
 
-        draw_prism_3d(pos_x, pos_y, 0, l_a, dim_y, h_cm, COLOR_CONCRETE, alpha=0.7)
-        draw_prism_3d(pos_x - 10, pos_y - 10, 0, l_a + 20, 10, h_cm, COLOR_PANEL)
-        draw_prism_3d(pos_x - 10, pos_y + dim_y, 0, l_a + 20, 10, h_cm, COLOR_PANEL)
-        if is_column:
-            draw_prism_3d(pos_x - 10, pos_y, 0, 10, dim_y, h_cm, COLOR_PANEL)
-            draw_prism_3d(pos_x + l_a, pos_y, 0, 10, dim_y, h_cm, COLOR_PANEL)
+        h_levels = calculate_height_breakdown(h_cm)
+        total_h = sum(h_levels)
 
-        draw_prism_3d(pos_x - 10, pos_y - 10, 0, 10, 10, h_cm, COLOR_CORNER_EX)
-        draw_prism_3d(pos_x + l_a, pos_y - 10, 0, 10, 10, h_cm, COLOR_CORNER_EX)
+        # Плътни обеми без прозрачност (alpha=1.0)
+        ax.bar3d(pos_x, pos_y, 0, l_a, dim_y, total_h, color=COLOR_CONCRETE, edgecolor=COLOR_CONCRETE, alpha=1.0)
+        ax.bar3d(pos_x - 10, pos_y - 10, 0, l_a + 20, 10, total_h, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=1.0)
+        ax.bar3d(pos_x - 10, pos_y + dim_y, 0, l_a + 20, 10, total_h, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=1.0)
         if is_column:
-            draw_prism_3d(pos_x - 10, pos_y + dim_y, 0, 10, 10, h_cm, COLOR_CORNER_EX)
-            draw_prism_3d(pos_x + l_a, pos_y + dim_y, 0, 10, 10, h_cm, COLOR_CORNER_EX)
+            ax.bar3d(pos_x - 10, pos_y, 0, 10, dim_y, total_h, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=1.0)
+            ax.bar3d(pos_x + l_a, pos_y, 0, 10, dim_y, total_h, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=1.0)
 
-        ax.text(pos_x + l_a/2, pos_y + dim_y/2, h_cm + 60, e_name, 
+        ax.bar3d(pos_x - 10, pos_y - 10, 0, 10, 10, total_h, color=COLOR_CORNER_EX, edgecolor='black', alpha=1.0)
+        ax.bar3d(pos_x + l_a, pos_y - 10, 0, 10, 10, total_h, color=COLOR_CORNER_EX, edgecolor='black', alpha=1.0)
+        if is_column:
+            ax.bar3d(pos_x - 10, pos_y + dim_y, 0, 10, 10, total_h, color=COLOR_CORNER_EX, edgecolor='black', alpha=1.0)
+            ax.bar3d(pos_x + l_a, pos_y + dim_y, 0, 10, 10, total_h, color=COLOR_CORNER_EX, edgecolor='black', alpha=1.0)
+
+        ax.text(pos_x + l_a/2, pos_y + dim_y/2, total_h + 60, e_name, 
                 ha='center', va='bottom', fontsize=8, fontweight='bold', color='#111111')
 
         max_x = max(max_x, pos_x + l_a + 100)
         max_y = max(max_y, pos_y + dim_y + 100)
-        max_z = max(max_z, h_cm + 100)
+        max_z = max(max_z, total_h + 100)
 
     ax.set_xlim(-50, max_x)
     ax.set_ylim(-50, max_y)
@@ -365,7 +353,6 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     def draw_side_front(ax, side_len, title_label):
         w_panels = calculate_panel_width_breakdown(side_len)
         
-        # Ъглите се изчертават на сегменти според НАЛИЧНИТЕ стандартни височини на ъгли TEKO (240, 150, 120 см)
         corner_h_levels = calculate_corner_breakdown(total_panel_h)
         c_curr_y = 0
         for c_h in corner_h_levels:
@@ -385,7 +372,6 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                     ax.add_patch(patches.Rectangle((-14, w_y - 4), side_len + 28, 8, 
                                                  facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.6, alpha=0.9, zorder=2))
 
-        # Платна и вертикални надписи
         curr_y = 0
         for h_val in h_levels:
             curr_x = 0
@@ -409,7 +395,6 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                 curr_x += w_val
             curr_y += h_val
 
-        # Лява вертикална разграфка
         dim_line_x = -24
         ax.plot([dim_line_x, dim_line_x], [0, total_panel_h], color='#333333', linewidth=0.8, zorder=3)
         
@@ -443,7 +428,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     return buf
 
 # ==========================================
-# 4. ИНДИВИДУАЛЕН 3D КОФРАЖЕН ИЗГЛЕД
+# 4. ИНДИВИДУАЛЕН 3D КОФРАЖЕН ИЗГЛЕД (ПЛЪТЕН, БЕЗ СТЪКЛО И ТРИЪГЪЛНИЦИ)
 # ==========================================
 def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, name="Елемент"):
     fig = plt.figure(figsize=(3.5, 2.5), dpi=DPI_RESOLUTION)
@@ -459,35 +444,21 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
     dim_y = b if is_column else t
 
-    def draw_prism_3d(x0, y0, z0, dx, dy, dz, facecolor, edgecolor=COLOR_PANEL_BORDER, alpha=0.95):
-        vertices = np.array([
-            [x0, y0, z0], [x0+dx, y0, z0], [x0+dx, y0+dy, z0], [x0, y0+dy, z0],
-            [x0, y0, z0+dz], [x0+dx, y0, z0+dz], [x0+dx, y0+dy, z0+dz], [x0, y0, z0+dz]
-        ])
-        faces = [
-            [vertices[0], vertices[1], vertices[2], vertices[3]],
-            [vertices[4], vertices[5], vertices[6], vertices[7]],
-            [vertices[0], vertices[1], vertices[5], vertices[4]],
-            [vertices[2], vertices[3], vertices[7], vertices[6]],
-            [vertices[0], vertices[3], vertices[7], vertices[4]],
-            [vertices[1], vertices[2], vertices[6], vertices[5]]
-        ]
-        poly = Poly3DCollection(faces, facecolors=facecolor, edgecolors=edgecolor, linewidths=0.4, alpha=alpha)
-        ax.add_collection3d(poly)
-
     h_levels = calculate_height_breakdown(h)
     total_h = sum(h_levels)
 
-    draw_prism_3d(0, 0, 0, a, dim_y, total_h, COLOR_CONCRETE, edgecolor=COLOR_CONCRETE, alpha=0.5)
+    # Плътно бетонно ядро (alpha=1.0)
+    ax.bar3d(0, 0, 0, a, dim_y, total_h, color=COLOR_CONCRETE, edgecolor=COLOR_CONCRETE, alpha=1.0)
 
     w_a = calculate_panel_width_breakdown(a)
     w_b = calculate_panel_width_breakdown(b) if is_column else []
 
+    # Плътни панели с разграфка по височина и ширина (alpha=1.0)
     curr_z = 0
     for h_val in h_levels:
         curr_x = 0
         for w_val in w_a:
-            draw_prism_3d(curr_x, -12, curr_z, w_val, 12, h_val, COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER)
+            ax.bar3d(curr_x, -12, curr_z, w_val, 12, h_val, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=1.0)
             curr_x += w_val
         curr_z += h_val
 
@@ -495,7 +466,7 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     for h_val in h_levels:
         curr_x = 0
         for w_val in w_a:
-            draw_prism_3d(curr_x, dim_y, curr_z, w_val, 12, h_val, COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER)
+            ax.bar3d(curr_x, dim_y, curr_z, w_val, 12, h_val, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=1.0)
             curr_x += w_val
         curr_z += h_val
 
@@ -504,13 +475,17 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
         for h_val in h_levels:
             curr_y = 0
             for w_val in w_b:
-                draw_prism_3d(-12, curr_y, curr_z, 12, w_val, h_val, COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER)
-                draw_prism_3d(a, curr_y, curr_z, 12, w_val, h_val, COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER)
+                ax.bar3d(-12, curr_y, curr_z, 12, w_val, h_val, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=1.0)
+                ax.bar3d(a, curr_y, curr_z, 12, w_val, h_val, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=1.0)
                 curr_y += w_val
             curr_z += h_val
 
-    for xc, yc in [(-12, -12), (a, -12), (a, dim_y), (-12, dim_y)]:
-        draw_prism_3d(xc, yc, 0, 12, 12, total_h, COLOR_CORNER_EX, edgecolor='black')
+    corner_h_levels = calculate_corner_breakdown(total_h)
+    c_curr_z = 0
+    for c_h in corner_h_levels:
+        for xc, yc in [(-12, -12), (a, -12), (a, dim_y), (-12, dim_y)]:
+            ax.bar3d(xc, yc, c_curr_z, 12, 12, c_h, color=COLOR_CORNER_EX, edgecolor='black', alpha=1.0)
+        c_curr_z += c_h
 
     ax.set_xlim(-30, a + 30)
     ax.set_ylim(-30, dim_y + 30)
