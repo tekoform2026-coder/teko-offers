@@ -272,38 +272,6 @@ def process_uploaded_file(uploaded_file):
     else:
         return Image.open(uploaded_file)
 
-def normalize_elements_data(elements_list):
-    """Гарантира, че всеки елемент има пълния набор от стандартни колони с валидни стойности."""
-    standard_keys = {
-        "type": "wall",
-        "name": "Елемент",
-        "count": 1,
-        "width_m": 0.3,
-        "length_m": 5.0,
-        "thickness_m": 0.25,
-        "l1_m": 2.0,
-        "l2_m": 2.0,
-        "l3_m": 2.0,
-        "height_m": 3.0
-    }
-    normalized = []
-    for el in elements_list:
-        if not isinstance(el, dict):
-            continue
-        norm_el = {}
-        for key, default_val in standard_keys.items():
-            val = el.get(key, default_val)
-            if val is None or (isinstance(val, float) and pd.isna(val)):
-                norm_el[key] = default_val
-            else:
-                norm_el[key] = val
-        normalized.append(norm_el)
-    
-    if not normalized:
-        normalized = [standard_keys.copy()]
-        
-    return pd.DataFrame(normalized, columns=list(standard_keys.keys()))
-
 def generate_word_offer(client_name, project_name, offer_date, offer_type, price_per_m2, detailed_rows, total_area, subtotal, vat_amount, grand_total):
     doc = docx.Document()
     
@@ -448,20 +416,13 @@ if "blueprint_data" not in st.session_state:
 if "used_model" not in st.session_state:
     st.session_state["used_model"] = None
 
-# Инициализираме безопасен DataFrame в сесията
+# Празен шаблон за структурата на таблицата
+EMPTY_DF = pd.DataFrame(columns=[
+    "type", "name", "count", "width_m", "length_m", "thickness_m", "l1_m", "l2_m", "l3_m", "height_m"
+])
+
 if "edited_df" not in st.session_state:
-    st.session_state["edited_df"] = normalize_elements_data([{
-        "type": "wall",
-        "name": "Стена 1",
-        "count": 1,
-        "width_m": 0.3,
-        "length_m": 5.0,
-        "thickness_m": 0.25,
-        "l1_m": 2.0,
-        "l2_m": 2.0,
-        "l3_m": 2.0,
-        "height_m": 3.0
-    }])
+    st.session_state["edited_df"] = EMPTY_DF.copy()
 
 with st.sidebar:
     st.header("⚙️ Настройки")
@@ -535,24 +496,23 @@ with tab1:
                                     st.session_state["used_model"] = used_model
                                     elements_list = blueprint_data.get("elements", [])
                                     
-                                    # Нормализираме данните от AI преди да ги подадем в таблицата
-                                    st.session_state["edited_df"] = normalize_elements_data(elements_list)
+                                    st.session_state["edited_df"] = pd.DataFrame(elements_list)
                                     st.success(f"✅ Готово! Разчетено с: **{used_model}**")
                                 except Exception as e:
                                     st.error(f"Грешка при анализа: {e}")
     else:
         st.subheader("⌨️ Ръчно въвеждане и управление на елементи в таблица")
-        st.markdown("Въведете вашите елементи директно в таблицата по-долу. Можете да добавяте и редактирате свободно.")
+        st.markdown("Въведете вашите елементи директно в таблицата по-долу. Можете да добавяте нови редове с бутона **`+`** долу в таблицата.")
 
     st.divider()
     st.subheader("✏️ Таблица с вертикални кофражни елементи")
     
-    # Стабилно управление на таблицата без излишни цикли
-    st.session_state["edited_df"] = st.data_editor(
+    # Редактор без ресетване: подаваме инициализирания DataFrame и записваме изхода без излишни callbacks
+    updated_grid = st.data_editor(
         st.session_state["edited_df"],
         num_rows="dynamic",
         column_config={
-            "type": st.column_config.SelectboxColumn("Тип елемент", options=["column", "wall", "l_wall", "u_wall"], required=True),
+            "type": st.column_config.SelectboxColumn("Тип елемент", options=["column", "wall", "l_wall", "u_wall"], required=True, default="wall"),
             "name": st.column_config.TextColumn("Наименование / Маркировка"),
             "count": st.column_config.NumberColumn("Брой", min_value=1, step=1, default=1),
             "width_m": st.column_config.NumberColumn("Ширина (м)", format="%.2f"),
@@ -564,14 +524,17 @@ with tab1:
             "height_m": st.column_config.NumberColumn("Височина (м)", format="%.2f")
         },
         use_container_width=True,
-        key="elements_editor_tab1"
+        key="elements_editor_grid"
     )
+
+    # Запазваме промените от редактора
+    st.session_state["edited_df"] = updated_grid
 
 with tab2:
     st.header("2. Спецификация на кофражните елементи и панели TEKO")
     df_calc = st.session_state["edited_df"]
     
-    if df_calc.empty:
+    if df_calc.empty or len(df_calc) == 0:
         st.info("ℹ️ Въведете елементи в Таб 1 (чрез AI разчитане или ръчно в таблицата).")
     else:
         detailed_rows = []
@@ -718,7 +681,7 @@ with tab3:
     st.header("3. Генериране на PDF Чертежи и Спецификация")
     df_calc = st.session_state["edited_df"]
 
-    if df_calc.empty:
+    if df_calc.empty or len(df_calc) == 0:
         st.info("ℹ Няма въведени елементи. Въведете данни в Таб 1.")
     else:
         pdf_elements = []
@@ -789,7 +752,7 @@ with tab4:
 
     df_calc = st.session_state["edited_df"]
 
-    if df_calc.empty:
+    if df_calc.empty or len(df_calc) == 0:
         st.info("ℹ Няма въведени елементи за изчисляване на оферта. Въведете данни в Таб 1.")
     else:
         detailed_rows = []
