@@ -328,3 +328,25 @@ def calculate_u_wall(l1_m, l2_m, l3_m, thickness_m, height_m, count=1):
             "Затягащи гайки": nuts
         }
     }
+
+# ==========================================
+# ДОБАВЕНИ ПОМОЩНИ ФУНКЦИИ ЗА ЧЕРТАЧА (LAYOUT EXPORT)
+# Те не променят никакви изчисления, а само предоставят
+# структурирани данни за визуализацията в drawing_generator.py
+# ==========================================
+
+def get_element_layout_data(wall_type, dim_a, dim_b, height_cm, thickness_cm=30):
+    """
+    Връща точна структура с разпределението по височина и ширина за всяка страна,
+    която drawing_generator.py може директно да използва за чертане.
+    """
+    h_levels = solve_height_cm(height_cm)
+    w_a = solve_width_cm(dim_a, h_levels[0] if h_levels else 150)[0]
+    w_b = solve_width_cm(dim_b if dim_b else dim_a, h_levels[0] if h_levels else 150)[0]
+    
+    return {
+        "height_levels": h_levels,
+        "width_breakdown_a": w_a,
+        "width_breakdown_b": w_b,
+        "thickness_cm": thickness_cm
+    }
