@@ -421,8 +421,21 @@ if "blueprint_data" not in st.session_state:
     st.session_state["blueprint_data"] = None
 if "used_model" not in st.session_state:
     st.session_state["used_model"] = None
+
+# Инициализираме DataFrame в сесията, ако липсва
 if "edited_df" not in st.session_state:
-    st.session_state["edited_df"] = pd.DataFrame(columns=["type", "name", "count", "width_m", "length_m", "thickness_m", "l1_m", "l2_m", "l3_m", "height_m"])
+    st.session_state["edited_df"] = pd.DataFrame([{
+        "type": "wall",
+        "name": "Стена 1",
+        "count": 1,
+        "width_m": 0.3,
+        "length_m": 5.0,
+        "thickness_m": 0.25,
+        "l1_m": 2.0,
+        "l2_m": 2.0,
+        "l3_m": 2.0,
+        "height_m": 3.0
+    }])
 
 with st.sidebar:
     st.header("⚙️ Настройки")
@@ -501,27 +514,16 @@ with tab1:
                                     st.error(f"Грешка при анализа: {e}")
     else:
         st.subheader("⌨️ Ръчно въвеждане и управление на елементи в таблица")
-        st.markdown("Въведете вашите елементи директно в таблицата по-долу. Можете да добавяте нови редове, да редактирате съществуващи или да изтривате.")
-        
-        # Уверяваме се, че таблицата има правилните колони, ако е празна
-        if st.session_state["edited_df"].empty:
-            st.session_state["edited_df"] = pd.DataFrame([{
-                "type": "wall",
-                "name": "Стена 1",
-                "count": 1,
-                "width_m": 0.3,
-                "length_m": 5.0,
-                "thickness_m": 0.25,
-                "l1_m": 2.0,
-                "l2_m": 2.0,
-                "l3_m": 2.0,
-                "height_m": 3.0
-            }])
+        st.markdown("Въведете вашите елементи директно в таблицата по-долу. Промените се запазват автоматично в сесията.")
 
     st.divider()
     st.subheader("✏️ Таблица с вертикални кофражни елементи")
     
-    edited_df = st.data_editor(
+    # Тук използваме callback (on_change), за да записваме промените веднага без излишни рефреши
+    def update_table_session():
+        st.session_state["edited_df"] = st.session_state["elements_editor_tab1"]
+
+    st.data_editor(
         st.session_state["edited_df"],
         num_rows="dynamic",
         column_config={
@@ -537,9 +539,9 @@ with tab1:
             "height_m": st.column_config.NumberColumn("Височина (м)", format="%.2f")
         },
         use_container_width=True,
-        key="elements_editor_tab1"
+        key="elements_editor_tab1",
+        on_change=update_table_session
     )
-    st.session_state["edited_df"] = edited_df
 
 with tab2:
     st.header("2. Спецификация на кофражните елементи и панели TEKO")
@@ -820,7 +822,7 @@ with tab4:
                 "Размери": dim_str,
                 "Брой": cnt,
                 "Площ (m²)": round(area, 2),
-                "Ед. цена (€/m²)": price_formwork,
+                "Ед. цена (€/m²)": price_per_m2 if 'price_per_m2' in locals() else price_formwork,
                 "Обща сума (€)": round(row_total_price, 2)
             })
 
