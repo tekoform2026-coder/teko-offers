@@ -189,7 +189,7 @@ def generate_overall_project_3d_buf(pdf_elements):
     return buf
 
 # ==========================================
-# 2. ИЗГЛЕД ОТГОРЕ (TOP VIEW) - С ГЕОМЕТРИЯ НА СТЕНА, КОЛОНА, L И U ЕЛЕМЕНТИ
+# 2. ИЗГЛЕД ОТГОРЕ (TOP VIEW)
 # ==========================================
 def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемент"):
     fig, ax = plt.subplots(figsize=(3.5, 2.5), dpi=DPI_RESOLUTION)
@@ -233,12 +233,10 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
         ax.set_ylim(-25, b + 25)
 
     elif is_l_wall:
-        # L-образна стена (рамена a и b, дебелина t)
         poly = patches.Polygon([[0, 0], [a, 0], [a, t], [t, t], [t, b], [0, b]], 
                                facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2)
         ax.add_patch(poly)
         
-        # 3 външни ъгъла EX и 1 вътрешен IN
         for x_pos, y_pos in [(-15, -15), (a, -15), (-15, b)]:
             ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
             ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
@@ -264,14 +262,11 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
         ax.set_ylim(-25, b + 25)
 
     elif is_u_wall:
-        # П/U-образна стена (ядро): ляво рамо a, основно рамо b, дясно рамо a
         m_len = b if b else a
-        
         poly = patches.Polygon([[0, 0], [m_len, 0], [m_len, a], [m_len - t, a], [m_len - t, t], [t, t], [t, a], [0, a]], 
                                facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2)
         ax.add_patch(poly)
 
-        # 4 външни ъгъла EX и 2 вътрешни IN
         for x_pos, y_pos in [(-15, -15), (m_len, -15), (-15, a), (m_len, a)]:
             ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
             ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
@@ -284,7 +279,6 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
         ax.set_ylim(-25, a + 25)
 
     else:
-        # Прав стенен кофраж със затворени краища (EX ъгли от двете страни)
         ax.add_patch(patches.Rectangle((0, 0), a, t, facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2))
         
         for x_pos, y_pos in [(-15, -15), (a, -15), (a, t), (-15, t)]:
@@ -419,7 +413,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     return buf
 
 # ==========================================
-# 4. ИНДИВИДУАЛЕН 3D КОФРАЖЕН ИЗГЛЕД (3D AXONOMETRY)
+# 4. ИНДИВИДУАЛЕН 3D КОФРАЖЕН ИЗГЛЕД (3D AXONOMETRY БЕЗ БЕТОН И БЕЗ ТРИЪГЪЛНИЦИ)
 # ==========================================
 def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, name="Елемент"):
     fig = plt.figure(figsize=(3.5, 2.5), dpi=DPI_RESOLUTION)
@@ -436,27 +430,7 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     is_l_wall = "l" in w_str or "l-образна" in w_str or "l_wall" in w_str or "l-стена" in n_str
     dim_y = b if is_column else t
 
-    def draw_prism_3d(x0, y0, z0, dx, dy, dz, facecolor, edgecolor=COLOR_PANEL_BORDER, alpha=0.9):
-        vertices = np.array([
-            [x0, y0, z0], [x0+dx, y0, z0], [x0+dx, y0+dy, z0], [x0, y0+dy, z0],
-            [x0, y0, z0+dz], [x0+dx, y0, z0+dz], [x0+dx, y0+dy, z0+dz], [x0, y0, z0+dz]
-        ])
-        faces = [
-            [vertices[0], vertices[1], vertices[2], vertices[3]],
-            [vertices[4], vertices[5], vertices[6], vertices[7]],
-            [vertices[0], vertices[1], vertices[5], vertices[4]],
-            [vertices[2], vertices[3], vertices[7], vertices[6]],
-            [vertices[0], vertices[3], vertices[7], vertices[4]],
-            [vertices[1], vertices[2], vertices[6], vertices[5]]
-        ]
-        poly = Poly3DCollection(faces, facecolors=facecolor, edgecolors=edgecolor, linewidths=0.4, alpha=alpha)
-        ax.add_collection3d(poly)
-
     if is_l_wall:
-        # 3D изглед за L-стена (комбинация от две рамена)
-        draw_prism_3d(0, 0, 0, a, t, h, COLOR_CONCRETE, edgecolor=COLOR_CONCRETE, alpha=0.4)
-        draw_prism_3d(0, t, 0, t, b - t, h, COLOR_CONCRETE, edgecolor=COLOR_CONCRETE, alpha=0.4)
-        
         w_a = calculate_panel_width_breakdown(a)
         h_levels = calculate_height_breakdown(h)
 
@@ -464,30 +438,29 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
         for h_val in h_levels:
             curr_x = 0
             for w_val in w_a:
-                draw_prism_3d(curr_x, -12, curr_z, w_val, 12, h_val, COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER)
+                ax.bar3d(curr_x, -12, curr_z, w_val, 12, h_val, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=0.9, linewidth=0.3)
                 curr_x += w_val
             curr_z += h_val
     else:
-        # Стандартен изглед за стена/колона
-        draw_prism_3d(0, 0, 0, a, dim_y, h, COLOR_CONCRETE, edgecolor=COLOR_CONCRETE, alpha=0.4)
-
         w_a = calculate_panel_width_breakdown(a)
         w_b = calculate_panel_width_breakdown(b) if is_column else []
         h_levels = calculate_height_breakdown(h)
 
+        # Предна страна (панели)
         curr_z = 0
         for h_val in h_levels:
             curr_x = 0
             for w_val in w_a:
-                draw_prism_3d(curr_x, -12, curr_z, w_val, 12, h_val, COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER)
+                ax.bar3d(curr_x, -12, curr_z, w_val, 12, h_val, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=0.9, linewidth=0.3)
                 curr_x += w_val
             curr_z += h_val
 
+        # Задна страна (панели)
         curr_z = 0
         for h_val in h_levels:
             curr_x = 0
             for w_val in w_a:
-                draw_prism_3d(curr_x, dim_y, curr_z, w_val, 12, h_val, COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER)
+                ax.bar3d(curr_x, dim_y, curr_z, w_val, 12, h_val, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=0.9, linewidth=0.3)
                 curr_x += w_val
             curr_z += h_val
 
@@ -496,13 +469,14 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
             for h_val in h_levels:
                 curr_y = 0
                 for w_val in w_b:
-                    draw_prism_3d(-12, curr_y, curr_z, 12, w_val, h_val, COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER)
-                    draw_prism_3d(a, curr_y, curr_z, 12, w_val, h_val, COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER)
+                    ax.bar3d(-12, curr_y, curr_z, 12, w_val, h_val, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=0.9, linewidth=0.3)
+                    ax.bar3d(a, curr_y, curr_z, 12, w_val, h_val, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=0.9, linewidth=0.3)
                     curr_y += w_val
                 curr_z += h_val
 
+        # Ъглови профили EX
         for xc, yc in [(-12, -12), (a, -12), (a, dim_y), (-12, dim_y)]:
-            draw_prism_3d(xc, yc, 0, 12, 12, h, COLOR_CORNER_EX, edgecolor='black')
+            ax.bar3d(xc, yc, 0, 12, 12, h, color=COLOR_CORNER_EX, edgecolor='black', alpha=0.9, linewidth=0.3)
 
     ax.set_xlim(-30, a + 30)
     ax.set_ylim(-30, (b if is_l_wall or is_column else dim_y) + 30)
