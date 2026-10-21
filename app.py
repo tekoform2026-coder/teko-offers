@@ -416,7 +416,7 @@ if "blueprint_data" not in st.session_state:
 if "used_model" not in st.session_state:
     st.session_state["used_model"] = None
 
-# Празен шаблон за структурата на таблицата
+# Празен шаблон за структурата на таблицата (без служебни редове)
 EMPTY_DF = pd.DataFrame(columns=[
     "type", "name", "count", "width_m", "length_m", "thickness_m", "l1_m", "l2_m", "l3_m", "height_m"
 ])
@@ -501,41 +501,44 @@ with tab1:
                                 except Exception as e:
                                     st.error(f"Грешка при анализа: {e}")
     else:
-        st.subheader("⌨️ Ръчно въвеждане и управление на елементи в таблица")
-        st.markdown("Въведете вашите елементи директно в таблицата по-долу. Можете да добавяте нови редове с бутона **`+`** долу в таблицата.")
+        st.subheader("⌨️ Ръчно въвеждане и управление на елементи")
+        st.markdown("Въведете вашите елементи в таблицата по-долу. Натиснете бутона **`+`** за нов ред. Когато приключите с въвеждането, натиснете бутона **„💾 Запази и Изчисли“**.")
 
     st.divider()
     st.subheader("✏️ Таблица с вертикални кофражни елементи")
     
-    # Редактор без ресетване: подаваме инициализирания DataFrame и записваме изхода без излишни callbacks
-    updated_grid = st.data_editor(
-        st.session_state["edited_df"],
-        num_rows="dynamic",
-        column_config={
-            "type": st.column_config.SelectboxColumn("Тип елемент", options=["column", "wall", "l_wall", "u_wall"], required=True, default="wall"),
-            "name": st.column_config.TextColumn("Наименование / Маркировка"),
-            "count": st.column_config.NumberColumn("Брой", min_value=1, step=1, default=1),
-            "width_m": st.column_config.NumberColumn("Ширина (м)", format="%.2f"),
-            "length_m": st.column_config.NumberColumn("Дължина (м)", format="%.2f"),
-            "thickness_m": st.column_config.NumberColumn("Дебелина (м)", format="%.2f"),
-            "l1_m": st.column_config.NumberColumn("Рамо 1 (м)", format="%.2f"),
-            "l2_m": st.column_config.NumberColumn("Рамо 2 (м)", format="%.2f"),
-            "l3_m": st.column_config.NumberColumn("Рамо 3 (м)", format="%.2f"),
-            "height_m": st.column_config.NumberColumn("Височина (м)", format="%.2f")
-        },
-        use_container_width=True,
-        key="elements_editor_grid"
-    )
-
-    # Запазваме промените от редактора
-    st.session_state["edited_df"] = updated_grid
+    # Ползваме st.form, за да спрем излишния refresh при писане
+    with st.form("manual_elements_form"):
+        edited_grid = st.data_editor(
+            st.session_state["edited_df"],
+            num_rows="dynamic",
+            column_config={
+                "type": st.column_config.SelectboxColumn("Тип елемент", options=["column", "wall", "l_wall", "u_wall"], required=True, default="wall"),
+                "name": st.column_config.TextColumn("Наименование / Маркировка"),
+                "count": st.column_config.NumberColumn("Брой", min_value=1, step=1, default=1),
+                "width_m": st.column_config.NumberColumn("Ширина (м)", format="%.2f"),
+                "length_m": st.column_config.NumberColumn("Дължина (м)", format="%.2f"),
+                "thickness_m": st.column_config.NumberColumn("Дебелина (м)", format="%.2f"),
+                "l1_m": st.column_config.NumberColumn("Рамо 1 (м)", format="%.2f"),
+                "l2_m": st.column_config.NumberColumn("Рамо 2 (м)", format="%.2f"),
+                "l3_m": st.column_config.NumberColumn("Рамо 3 (м)", format="%.2f"),
+                "height_m": st.column_config.NumberColumn("Височина (м)", format="%.2f")
+            },
+            use_container_width=True,
+            key="elements_form_editor"
+        )
+        
+        submit_btn = st.form_submit_button("💾 Запази и Изчисли", type="primary", use_container_width=True)
+        if submit_btn:
+            st.session_state["edited_df"] = edited_grid
+            st.success("✅ Данните са запазени успешно!")
 
 with tab2:
     st.header("2. Спецификация на кофражните елементи и панели TEKO")
     df_calc = st.session_state["edited_df"]
     
     if df_calc.empty or len(df_calc) == 0:
-        st.info("ℹ️ Въведете елементи в Таб 1 (чрез AI разчитане или ръчно в таблицата).")
+        st.info("ℹ️ Въведете елементи в Таб 1 и натиснете 'Запази и Изчисли'.")
     else:
         detailed_rows = []
         all_warnings = []
