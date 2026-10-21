@@ -82,7 +82,8 @@ def check_element_dimensions(row):
     Проверява дали въведените размери са кратни на стандартните модули на TEKO (5 cm за ширина, 10 cm за височина).
     """
     warnings = []
-    h_m = float(row.get("height_m", 3.0) or 3.0)
+    h_val = row.get("height_m")
+    h_m = float(h_val) if pd.notna(h_val) and h_val != "" else 3.0
     h_cm = round(h_m * 100)
     elem_type = str(row.get("type", "wall"))
     name = format_element_label(elem_type, str(row.get("name", "Елемент")))
@@ -91,23 +92,31 @@ def check_element_dimensions(row):
         warnings.append(f"• **{name}**: Височина {h_cm} cm не е кратна на 10 cm (закръгля се към най-близкия модул).")
 
     if elem_type == "column":
-        w_cm = round(float(row.get("width_m", 0.3) or 0.3) * 100)
-        l_cm = round(float(row.get("length_m", 0.5) or 0.5) * 100)
+        w_val = row.get("width_m")
+        l_val = row.get("length_m")
+        w_cm = round((float(w_val) if pd.notna(w_val) and w_val != "" else 0.3) * 100)
+        l_cm = round((float(l_val) if pd.notna(l_val) and l_val != "" else 0.5) * 100)
         if w_cm % 5 != 0 or l_cm % 5 != 0:
             warnings.append(f"• **{name}**: Размерите ({w_cm}x{l_cm} cm) не са кратни на 5 cm. Запълва се с компенсатор TC 5.")
     elif elem_type == "wall":
-        l_cm = round(float(row.get("length_m", 5.0) or 5.0) * 100)
+        l_val = row.get("length_m")
+        l_cm = round((float(l_val) if pd.notna(l_val) and l_val != "" else 5.0) * 100)
         if l_cm % 5 != 0:
             warnings.append(f"• **{name}**: Дължината {l_cm} cm не е кратна на 5 cm. Запълва се с компенсатор TC 5.")
     elif elem_type == "l_wall":
-        l1_cm = round(float(row.get("l1_m", 2.0) or 2.0) * 100)
-        l2_cm = round(float(row.get("l2_m", 2.0) or 2.0) * 100)
+        l1_val = row.get("l1_m")
+        l2_val = row.get("l2_m")
+        l1_cm = round((float(l1_val) if pd.notna(l1_val) and l1_val != "" else 2.0) * 100)
+        l2_cm = round((float(l2_val) if pd.notna(l2_val) and l2_val != "" else 2.0) * 100)
         if l1_cm % 5 != 0 or l2_cm % 5 != 0:
             warnings.append(f"• **{name}**: Раменете ({l1_cm} cm / {l2_cm} cm) съдържат стойности некратни на 5 cm.")
     elif elem_type == "u_wall":
-        l1_cm = round(float(row.get("l1_m", 2.0) or 2.0) * 100)
-        l2_cm = round(float(row.get("l2_m", 2.0) or 2.0) * 100)
-        l3_cm = round(float(row.get("l3_m", 2.0) or 2.0) * 100)
+        l1_val = row.get("l1_m")
+        l2_val = row.get("l2_m")
+        l3_val = row.get("l3_m")
+        l1_cm = round((float(l1_val) if pd.notna(l1_val) and l1_val != "" else 2.0) * 100)
+        l2_cm = round((float(l2_val) if pd.notna(l2_val) and l2_val != "" else 2.0) * 100)
+        l3_cm = round((float(l3_val) if pd.notna(l3_val) and l3_val != "" else 2.0) * 100)
         if l1_cm % 5 != 0 or l2_cm % 5 != 0 or l3_cm % 5 != 0:
             warnings.append(f"• **{name}**: Раменете ({l1_cm}/{l2_cm}/{l3_cm} cm) съдържат стойности некратни на 5 cm.")
 
@@ -136,8 +145,10 @@ def calculate_panel_width_breakdown(width_cm):
     return result_panels
 
 def get_element_teko_panels(elem_type, row):
-    cnt = int(row.get("count", 1) or 1)
-    h_m = float(row.get("height_m", 3.0) or 3.0)
+    c_val = row.get("count")
+    cnt = int(float(c_val) if pd.notna(c_val) and c_val != "" else 1)
+    h_val = row.get("height_m")
+    h_m = float(h_val) if pd.notna(h_val) and h_val != "" else 3.0
     h_cm = h_m * 100
     h_levels = calculate_height_breakdown(h_cm)
     
@@ -161,17 +172,23 @@ def get_element_teko_panels(elem_type, row):
                 element_panels[panel_name] = element_panels.get(panel_name, 0) + p_cnt * 2 * cnt
 
     if elem_type == "column":
-        w_cm = float(row.get("width_m", 0.3) or 0.3) * 100
-        l_cm = float(row.get("length_m", 0.5) or 0.5) * 100
+        w_val = row.get("width_m")
+        l_val = row.get("length_m")
+        w_cm = (float(w_val) if pd.notna(w_val) and w_val != "" else 0.3) * 100
+        l_cm = (float(l_val) if pd.notna(l_val) and l_val != "" else 0.5) * 100
         add_face_panels(w_cm)
         add_face_panels(l_cm)
     elif elem_type == "wall":
-        l_cm = float(row.get("length_m", 5.0) or 5.0) * 100
+        l_val = row.get("length_m")
+        l_cm = (float(l_val) if pd.notna(l_val) and l_val != "" else 5.0) * 100
         add_face_panels(l_cm)
     elif elem_type == "l_wall":
-        l1_cm = float(row.get("l1_m", 2.0) or 2.0) * 100
-        l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100
-        t_cm = float(row.get("thickness_m", 0.25) or 0.25) * 100
+        l1_val = row.get("l1_m")
+        l2_val = row.get("l2_m")
+        t_val = row.get("thickness_m")
+        l1_cm = (float(l1_val) if pd.notna(l1_val) and l1_val != "" else 2.0) * 100
+        l2_cm = (float(l2_val) if pd.notna(l2_val) and l2_val != "" else 2.0) * 100
+        t_cm = (float(t_val) if pd.notna(t_val) and t_val != "" else 0.25) * 100
         
         in_corner = f"Вътрешен ъгъл IN{int(h_levels[0])}" if h_levels else "Вътрешен ъгъл IN"
         ex_corner = "Външен ъгъл EX"
@@ -189,10 +206,14 @@ def get_element_teko_panels(elem_type, row):
             add_face_panels(rem_l2)
 
     elif elem_type == "u_wall":
-        l1_cm = float(row.get("l1_m", 2.0) or 2.0) * 100
-        l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100
-        l3_cm = float(row.get("l3_m", 2.0) or 2.0) * 100
-        t_cm = float(row.get("thickness_m", 0.25) or 0.25) * 100
+        l1_val = row.get("l1_m")
+        l2_val = row.get("l2_m")
+        l3_val = row.get("l3_m")
+        t_val = row.get("thickness_m")
+        l1_cm = (float(l1_val) if pd.notna(l1_val) and l1_val != "" else 2.0) * 100
+        l2_cm = (float(l2_val) if pd.notna(l2_val) and l2_val != "" else 2.0) * 100
+        l3_cm = (float(l3_val) if pd.notna(l3_val) and l3_val != "" else 2.0) * 100
+        t_cm = (float(t_val) if pd.notna(t_val) and t_val != "" else 0.25) * 100
         
         in_corner = f"Вътрешен ъгъл IN{int(h_levels[0])}" if h_levels else "Вътрешен ъгъл IN"
         ex_corner = "Външен ъгъл EX"
@@ -217,29 +238,42 @@ def get_element_teko_panels(elem_type, row):
     return element_panels
 
 def get_element_accessories(elem_type, row):
-    cnt = int(row.get("count", 1) or 1)
-    h_m = float(row.get("height_m", 3.0) or 3.0)
+    c_val = row.get("count")
+    cnt = int(float(c_val) if pd.notna(c_val) and c_val != "" else 1)
+    h_val = row.get("height_m")
+    h_m = float(h_val) if pd.notna(h_val) and h_val != "" else 3.0
     h_cm = h_m * 100
     h_levels = calculate_height_breakdown(h_cm)
     
     if elem_type == "column":
-        w_cm = float(row.get("width_m", 0.3) or 0.3) * 100
-        l_cm = float(row.get("length_m", 0.5) or 0.5) * 100
+        w_val = row.get("width_m")
+        l_val = row.get("length_m")
+        w_cm = (float(w_val) if pd.notna(w_val) and w_val != "" else 0.3) * 100
+        l_cm = (float(l_val) if pd.notna(l_val) and l_val != "" else 0.5) * 100
         acc = calculate_accessories("column", w_cm, l_cm, h_cm, [w_cm, l_cm], h_levels)
     elif elem_type == "wall":
-        l_cm = float(row.get("length_m", 5.0) or 5.0) * 100
-        t_cm = float(row.get("thickness_m", 0.25) or 0.25) * 100
+        l_val = row.get("length_m")
+        t_val = row.get("thickness_m")
+        l_cm = (float(l_val) if pd.notna(l_val) and l_val != "" else 5.0) * 100
+        t_cm = (float(t_val) if pd.notna(t_val) and t_val != "" else 0.25) * 100
         acc = calculate_accessories("wall", l_cm, t_cm, h_cm, [l_cm], h_levels)
     elif elem_type == "l_wall":
-        l1_cm = float(row.get("l1_m", 2.0) or 2.0) * 100
-        l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100
-        t_cm = float(row.get("thickness_m", 0.25) or 0.25) * 100
+        l1_val = row.get("l1_m")
+        l2_val = row.get("l2_m")
+        t_val = row.get("thickness_m")
+        l1_cm = (float(l1_val) if pd.notna(l1_val) and l1_val != "" else 2.0) * 100
+        l2_cm = (float(l2_val) if pd.notna(l2_val) and l2_val != "" else 2.0) * 100
+        t_cm = (float(t_val) if pd.notna(t_val) and t_val != "" else 0.25) * 100
         acc = calculate_accessories("L-образна стена", l1_cm, l2_cm, h_cm, [l1_cm, l2_cm], h_levels)
     elif elem_type == "u_wall":
-        l1_cm = float(row.get("l1_m", 2.0) or 2.0) * 100
-        l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100
-        l3_cm = float(row.get("l3_m", 2.0) or 2.0) * 100
-        t_cm = float(row.get("thickness_m", 0.25) or 0.25) * 100
+        l1_val = row.get("l1_m")
+        l2_val = row.get("l2_m")
+        l3_val = row.get("l3_m")
+        t_val = row.get("thickness_m")
+        l1_cm = (float(l1_val) if pd.notna(l1_val) and l1_val != "" else 2.0) * 100
+        l2_cm = (float(l2_val) if pd.notna(l2_val) and l2_val != "" else 2.0) * 100
+        l3_cm = (float(l3_val) if pd.notna(l3_val) and l3_val != "" else 2.0) * 100
+        t_cm = (float(t_val) if pd.notna(t_val) and t_val != "" else 0.25) * 100
         acc = calculate_accessories("U-образна стена", l1_cm + l2_cm + l3_cm, t_cm, h_cm, [l1_cm, l2_cm, l3_cm], h_levels)
     else:
         acc = {"bom_summary": {}}
@@ -501,8 +535,16 @@ with tab1:
                                 except Exception as e:
                                     st.error(f"Грешка при анализа: {e}")
     else:
-        st.subheader("⌨️ Ръчно въвеждане и управление на елементи")
-        st.markdown("Въведете вашите елементи в таблицата по-долу. Натиснете бутона **`+`** за нов ред. Когато приключите с въвеждането, натиснете бутона **„💾 Запази и Изчисли“**.")
+        st.subheader("⌨️ Ръчно въвеждане и управление в таблицата")
+        st.markdown(
+            "📝 **Инструкция за попълване в таблицата по-долу:**\n"
+            "- Изберете **тип елемент** (`wall` - стена, `column` - колона, `l_wall` - L-стена, `u_wall` - П/U-стена).\n"
+            "- За **права стена (`wall`)**: попълнете `length_m` (дължина) и `thickness_m` (дебелина).\n"
+            "- За **колона (`column`)**: попълнете `width_m` (ширина) и `length_m` (дължина).\n"
+            "- За **L-стена (`l_wall`)**: попълнете `l1_m` (рамо 1), `l2_m` (рамо 2) и `thickness_m` (дебелина).\n"
+            "- За **П/U-стена (`u_wall`)**: попълнете `l1_m` (рамо 1), `l2_m` (рамо 2), `l3_m` (рамо 3) и `thickness_m` (дебелина).\n"
+            "- Непотребните полета за съответния тип могат да се оставят празни — системата автоматично игнорира празни клетки без грешки!"
+        )
 
     st.divider()
     st.subheader("✏️ Таблица с вертикални кофражни елементи")
@@ -516,12 +558,12 @@ with tab1:
                 "type": st.column_config.SelectboxColumn("Тип елемент", options=["column", "wall", "l_wall", "u_wall"], required=True, default="wall"),
                 "name": st.column_config.TextColumn("Наименование / Маркировка"),
                 "count": st.column_config.NumberColumn("Брой", min_value=1, step=1, default=1),
-                "width_m": st.column_config.NumberColumn("Ширина (м)", format="%.2f"),
-                "length_m": st.column_config.NumberColumn("Дължина (м)", format="%.2f"),
-                "thickness_m": st.column_config.NumberColumn("Дебелина (м)", format="%.2f"),
-                "l1_m": st.column_config.NumberColumn("Рамо 1 (м)", format="%.2f"),
-                "l2_m": st.column_config.NumberColumn("Рамо 2 (м)", format="%.2f"),
-                "l3_m": st.column_config.NumberColumn("Рамо 3 (м)", format="%.2f"),
+                "width_m": st.column_config.NumberColumn("Ширина (м) [Само колона]", format="%.2f"),
+                "length_m": st.column_config.NumberColumn("Дължина (м) [Стена/Колона]", format="%.2f"),
+                "thickness_m": st.column_config.NumberColumn("Дебелина (м) [Стена/L/U]", format="%.2f"),
+                "l1_m": st.column_config.NumberColumn("Рамо 1 (м) [L/U стена]", format="%.2f"),
+                "l2_m": st.column_config.NumberColumn("Рамо 2 (м) [L/U стена]", format="%.2f"),
+                "l3_m": st.column_config.NumberColumn("Рамо 3 (м) [Само U стена]", format="%.2f"),
                 "height_m": st.column_config.NumberColumn("Височина (м)", format="%.2f")
             },
             use_container_width=True,
@@ -531,7 +573,7 @@ with tab1:
         submit_btn = st.form_submit_button("💾 Запази и Изчисли", type="primary", use_container_width=True)
         if submit_btn:
             st.session_state["edited_df"] = edited_grid
-            st.success("✅ Данните са запазени успешно!")
+            st.success("✅ Данните са запазени и преизчислени успешно! Можете да проверите резултатите в следващите табове.")
 
 with tab2:
     st.header("2. Спецификация на кофражните елементи и панели TEKO")
@@ -547,8 +589,10 @@ with tab2:
         project_accessories_summary = {}
 
         for _, row in df_calc.iterrows():
-            cnt = int(row.get("count", 1) or 1)
-            h = float(row.get("height_m", 3.0) or 3.0)
+            c_val = row.get("count")
+            cnt = int(float(c_val) if pd.notna(c_val) and c_val != "" else 1)
+            h_val = row.get("height_m")
+            h = float(h_val) if pd.notna(h_val) and h_val != "" else 3.0
             elem_type = str(row.get("type", "wall"))
             name = str(row.get("name", "Елемент"))
 
@@ -560,29 +604,40 @@ with tab2:
             elem_label = format_element_label(elem_type, name)
 
             if elem_type == "column":
-                w = float(row.get("width_m", 0.3) or 0.3)
-                l = float(row.get("length_m", 0.5) or 0.5)
+                w_val = row.get("width_m")
+                l_val = row.get("length_m")
+                w = float(w_val) if pd.notna(w_val) and w_val != "" else 0.3
+                l = float(l_val) if pd.notna(l_val) and l_val != "" else 0.5
                 area = 2 * (w + l) * h * cnt
                 dim_str = f"{int(w*100)}x{int(l*100)} cm, H={h:.1f}m"
 
             elif elem_type == "wall":
-                l = float(row.get("length_m", 5.0) or 5.0)
-                t = float(row.get("thickness_m", 0.25) or 0.25)
+                l_val = row.get("length_m")
+                t_val = row.get("thickness_m")
+                l = float(l_val) if pd.notna(l_val) and l_val != "" else 5.0
+                t = float(t_val) if pd.notna(t_val) and t_val != "" else 0.25
                 area = 2 * l * h * cnt
                 dim_str = f"L={l:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
 
             elif elem_type == "l_wall":
-                l1 = float(row.get("l1_m", 2.0) or 2.0)
-                l2 = float(row.get("l2_m", 2.0) or 2.0)
-                t = float(row.get("thickness_m", 0.25) or 0.25)
+                l1_val = row.get("l1_m")
+                l2_val = row.get("l2_m")
+                t_val = row.get("thickness_m")
+                l1 = float(l1_val) if pd.notna(l1_val) and l1_val != "" else 2.0
+                l2 = float(l2_val) if pd.notna(l2_val) and l2_val != "" else 2.0
+                t = float(t_val) if pd.notna(t_val) and t_val != "" else 0.25
                 area = 2 * (l1 + l2) * h * cnt
                 dim_str = f"L={l1:.1f}+{l2:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
 
             elif elem_type == "u_wall":
-                l1 = float(row.get("l1_m", 2.0) or 2.0)
-                l2 = float(row.get("l2_m", 2.0) or 2.0)
-                l3 = float(row.get("l3_m", 2.0) or 2.0)
-                t = float(row.get("thickness_m", 0.25) or 0.25)
+                l1_val = row.get("l1_m")
+                l2_val = row.get("l2_m")
+                l3_val = row.get("l3_m")
+                t_val = row.get("thickness_m")
+                l1 = float(l1_val) if pd.notna(l1_val) and l1_val != "" else 2.0
+                l2 = float(l2_val) if pd.notna(l2_val) and l2_val != "" else 2.0
+                l3 = float(l3_val) if pd.notna(l3_val) and l3_val != "" else 2.0
+                t = float(t_val) if pd.notna(t_val) and t_val != "" else 0.25
                 area = 2 * (l1 + l2 + l3) * h * cnt
                 dim_str = f"L={l1:.1f}+{l2:.1f}+{l3:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
 
@@ -692,11 +747,16 @@ with tab3:
         for _, r in df_calc.iterrows():
             e_type = str(r.get("type", "wall"))
             e_name = format_element_label(e_type, str(r.get("name", "Елемент")))
-            e_h = float(r.get("height_m", 3.0) or 3.0) * 100
-            e_l = float(r.get("length_m", 5.0) or 5.0) * 100
-            e_t = float(r.get("thickness_m", 0.25) or 0.25) * 100
+            h_val = r.get("height_m")
+            l_val = r.get("length_m")
+            t_val = r.get("thickness_m")
+            l1_val = r.get("l1_m")
+
+            e_h = (float(h_val) if pd.notna(h_val) and h_val != "" else 3.0) * 100
+            e_l = (float(l_val) if pd.notna(l_val) and l_val != "" else 5.0) * 100
+            e_t = (float(t_val) if pd.notna(t_val) and t_val != "" else 0.25) * 100
             if e_type in ["l_wall", "u_wall"]:
-                e_l = float(r.get("l1_m", 2.0) or 2.0) * 100
+                e_l = (float(l1_val) if pd.notna(l1_val) and l1_val != "" else 2.0) * 100
             
             pdf_elements.append({
                 "name": e_name, 
@@ -762,8 +822,10 @@ with tab4:
         total_a = 0.0
 
         for _, row in df_calc.iterrows():
-            cnt = int(row.get("count", 1) or 1)
-            h = float(row.get("height_m", 3.0) or 3.0)
+            c_val = row.get("count")
+            cnt = int(float(c_val) if pd.notna(c_val) and c_val != "" else 1)
+            h_val = row.get("height_m")
+            h = float(h_val) if pd.notna(h_val) and h_val != "" else 3.0
             elem_type = str(row.get("type", "wall"))
             name = str(row.get("name", "Елемент"))
 
@@ -772,29 +834,40 @@ with tab4:
             elem_label = format_element_label(elem_type, name)
 
             if elem_type == "column":
-                w = float(row.get("width_m", 0.3) or 0.3)
-                l = float(row.get("length_m", 0.5) or 0.5)
+                w_val = row.get("width_m")
+                l_val = row.get("length_m")
+                w = float(w_val) if pd.notna(w_val) and w_val != "" else 0.3
+                l = float(l_val) if pd.notna(l_val) and l_val != "" else 0.5
                 area = 2 * (w + l) * h * cnt
                 dim_str = f"{int(w*100)}x{int(l*100)} cm, H={h:.1f}m"
 
             elif elem_type == "wall":
-                l = float(row.get("length_m", 5.0) or 5.0)
-                t = float(row.get("thickness_m", 0.25) or 0.25)
+                l_val = row.get("length_m")
+                t_val = row.get("thickness_m")
+                l = float(l_val) if pd.notna(l_val) and l_val != "" else 5.0
+                t = float(t_val) if pd.notna(t_val) and t_val != "" else 0.25
                 area = 2 * l * h * cnt
                 dim_str = f"L={l:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
 
             elif elem_type == "l_wall":
-                l1 = float(row.get("l1_m", 2.0) or 2.0)
-                l2 = float(row.get("l2_m", 2.0) or 2.0)
-                t = float(row.get("thickness_m", 0.25) or 0.25)
+                l1_val = row.get("l1_m")
+                l2_val = row.get("l2_m")
+                t_val = row.get("thickness_m")
+                l1 = float(l1_val) if pd.notna(l1_val) and l1_val != "" else 2.0
+                l2 = float(l2_val) if pd.notna(l2_val) and l2_val != "" else 2.0
+                t = float(t_val) if pd.notna(t_val) and t_val != "" else 0.25
                 area = 2 * (l1 + l2) * h * cnt
                 dim_str = f"L={l1:.1f}+{l2:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
 
             elif elem_type == "u_wall":
-                l1 = float(row.get("l1_m", 2.0) or 2.0)
-                l2 = float(row.get("l2_m", 2.0) or 2.0)
-                l3 = float(row.get("l3_m", 2.0) or 2.0)
-                t = float(row.get("thickness_m", 0.25) or 0.25)
+                l1_val = row.get("l1_m")
+                l2_val = row.get("l2_m")
+                l3_val = row.get("l3_m")
+                t_val = row.get("thickness_m")
+                l1 = float(l1_val) if pd.notna(l1_val) and l1_val != "" else 2.0
+                l2 = float(l2_val) if pd.notna(l2_val) and l2_val != "" else 2.0
+                l3 = float(l3_val) if pd.notna(l3_val) and l3_val != "" else 2.0
+                t = float(t_val) if pd.notna(t_val) and t_val != "" else 0.25
                 area = 2 * (l1 + l2 + l3) * h * cnt
                 dim_str = f"L={l1:.1f}+{l2:.1f}+{l3:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
 
