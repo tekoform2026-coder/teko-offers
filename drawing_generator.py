@@ -201,6 +201,8 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
     w_str = str(wall_type).lower()
     n_str = str(name).lower()
     is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
+    is_l_wall = "l" in w_str or "l-образна" in w_str or "l_wall" in w_str
+    is_u_wall = "u" in w_str or "u-образна" in w_str or "u_wall" in w_str or "ядро" in w_str or "ядро" in n_str
 
     if is_column:
         # Бетонно ядро
@@ -234,11 +236,13 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
         ax.set_xlim(-25, a + 25)
         ax.set_ylim(-25, b + 25)
 
-    elif "l" in w_str or "l-образна" in w_str:
+    elif is_l_wall:
+        # L-образна стена (рамена a и b, дебелина t)
         poly = patches.Polygon([[0, 0], [a, 0], [a, t], [t, t], [t, b], [0, b]], 
                                facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2)
         ax.add_patch(poly)
         
+        # 3 Външни ъгъла EX и 1 Вътрешен IN
         for x_pos, y_pos in [(-15, -15), (a, -15), (-15, b)]:
             ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
             ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
@@ -277,6 +281,28 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
         ax.set_xlim(-25, a + 25)
         ax.set_ylim(-25, b + 25)
 
+    elif is_u_wall:
+        # U-образна стена (П-ядро): ляво рамо a, основно рамо b, дясно рамо c (ще ползваме dim_a за ляво/дясно и dim_b за основно или по подразбиране)
+        l_len = a
+        m_len = b if b else a
+        r_len = a
+        
+        poly = patches.Polygon([[0, 0], [m_len, 0], [m_len, l_len], [m_len - t, l_len], [m_len - t, t], [t, t], [t, r_len], [0, r_len]], 
+                               facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2)
+        ax.add_patch(poly)
+
+        # 4 Външни ъгъла EX и 2 Вътрешни IN
+        for x_pos, y_pos in [(-15, -15), (m_len, -15), (-15, l_len), (m_len, r_len)]:
+            ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
+            ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
+
+        for in_x, in_y in [(t, t), (m_len - t - 15, t)]:
+            ax.add_patch(patches.Rectangle((in_x, in_y), 15, 15, facecolor=COLOR_CORNER_IN, edgecolor='black', linewidth=0.8))
+            ax.text(in_x + 7.5, in_y + 7.5, "IN", ha='center', va='center', fontsize=5.5, fontweight='bold', color='white')
+
+        ax.set_xlim(-25, m_len + 25)
+        ax.set_ylim(-25, max(l_len, r_len) + 25)
+
     else:
         # Прав стенен кофраж със затворени краища (EX ъгли от двете страни)
         ax.add_patch(patches.Rectangle((0, 0), a, t, facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2))
@@ -304,9 +330,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
         # КОРИГИРАНИ ВЕРТИКАЛИЗАТОРИ (Push-Pull Props) - разположени извън панелите, без да ги пробиват
         prop_positions = [a * 0.33, a * 0.67]
         for px in prop_positions:
-            # Долен вертикализатор (извън долните панели: от y = -40 до y = -15)
             ax.add_patch(patches.Rectangle((px - 2, -40), 4, 25, facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.5, alpha=0.9, zorder=2))
-            # Горен вертикализатор (извън горните панели: от y = t + 15 до y = t + 40)
             ax.add_patch(patches.Rectangle((px - 2, t + 15), 4, 25, facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.5, alpha=0.9, zorder=2))
 
         ax.set_xlim(-25, a + 25)
@@ -361,7 +385,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
             for w_y in waler_positions:
                 if w_y < h_cm:
                     ax.add_patch(patches.Rectangle((-14, w_y - 4), side_len + 28, 8, 
-                                                 facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.6, alpha=0.9, zorder=2))
+                                                   facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.6, alpha=0.9, zorder=2))
 
         # 2. Платна и вертикални надписи
         curr_y = 0
@@ -369,7 +393,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
             curr_x = 0
             for w_val in w_panels:
                 rect = patches.Rectangle((curr_x, curr_y), w_val, h_val, 
-                                         linewidth=0.8, edgecolor=COLOR_PANEL_BORDER, facecolor=COLOR_PANEL, zorder=1)
+                                       linewidth=0.8, edgecolor=COLOR_PANEL_BORDER, facecolor=COLOR_PANEL, zorder=1)
                 ax.add_patch(rect)
                 
                 if int(h_val) == 60 and int(w_val) == 60:
@@ -409,7 +433,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
         ax.set_title(f"Страна {title_label} ({int(side_len)}x{int(h_cm)} cm)", fontsize=8, fontweight='bold')
 
     draw_side_front(ax1, a, "A")
-    draw_side_front(ax2, b, "B" if is_column or "l" in w_str else "A1")
+    draw_side_front(ax2, b, "B" if is_column or "l" in w_str else "А1")
 
     fig.suptitle("Изглед отпред (Front View)", fontsize=9, fontweight='bold', y=0.98)
     plt.tight_layout()
@@ -536,6 +560,9 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name=""):
     if "l" in w_str or "l-образна" in w_str:
         bom["Външен ъгъл EX"] = len(h_levels) * 3
         bom["Вътрешен ъгъл IN"] = len(h_levels)
+    elif "u" in w_str or "u-образна" in w_str or "ядро" in w_str or "ядро" in n_str:
+        bom["Външен ъгъл EX"] = len(h_levels) * 4
+        bom["Вътрешен ъгъл IN"] = len(h_levels) * 2
     elif is_column:
         bom["Външен ъгъл EX"] = len(h_levels) * 4
     else:
