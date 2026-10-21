@@ -422,7 +422,7 @@ if "blueprint_data" not in st.session_state:
 if "used_model" not in st.session_state:
     st.session_state["used_model"] = None
 if "edited_df" not in st.session_state:
-    st.session_state["edited_df"] = pd.DataFrame()
+    st.session_state["edited_df"] = pd.DataFrame(columns=["type", "name", "count", "width_m", "length_m", "thickness_m", "l1_m", "l2_m", "l3_m", "height_m"])
 
 with st.sidebar:
     st.header("⚙️ Настройки")
@@ -441,85 +441,112 @@ tab1, tab2, tab3, tab4 = st.tabs([
 ])
 
 with tab1:
-    st.header("1. Качване на чертеж и AI разчитане")
-    uploaded_file = st.file_uploader("Изберете чертеж (PDF, PNG, JPG):", type=["pdf", "png", "jpg", "jpeg"])
+    st.header("1. Избор на начин за въвеждане на елементи")
+    
+    input_mode = st.radio(
+        "Изберете режим на работа:",
+        ["🤖 Автоматично разчитане от чертежи", "⌨️ Ръчно въвеждане (Таблица)"],
+        horizontal=True
+    )
 
-    if uploaded_file:
-        col_img, col_actions = st.columns([1, 1])
-        with col_img:
-            st.subheader("🖼️ Преглед на файла")
-            try:
-                processed_img = process_uploaded_file(uploaded_file)
-                st.image(processed_img, use_container_width=True, caption="Качен чертеж")
-            except Exception as e:
-                st.error(f"Грешка при зареждането: {e}")
-                processed_img = None
+    if input_mode == "🤖 Автоматично разчитане от чертежи":
+        st.subheader("Качване на чертеж и AI разчитане")
+        uploaded_file = st.file_uploader("Изберете чертеж (PDF, PNG, JPG):", type=["pdf", "png", "jpg", "jpeg"])
 
-        with col_actions:
-            st.subheader("🤖 AI Разчитане")
-            
-            selected_model = st.selectbox(
-                "Избери AI модел за разчитане:",
-                options=[
-                    "gemini-3.1-pro",
-                    "gemini-2.5-pro",
-                    "gemini-3.8-flash",
-                    "gemini-3.6-flash"
-                ],
-                index=0,
-                help="Изберете кой модел на Gemini да анализира чертежа."
-            )
+        if uploaded_file:
+            col_img, col_actions = st.columns([1, 1])
+            with col_img:
+                st.subheader("🖼️ Преглед на файла")
+                try:
+                    processed_img = process_uploaded_file(uploaded_file)
+                    st.image(processed_img, use_container_width=True, caption="Качен чертеж")
+                except Exception as e:
+                    st.error(f"Грешка при зареждането: {e}")
+                    processed_img = None
 
-            if not api_key:
-                st.warning("⚠️ Моля, въведете Gemini API Key в страничното меню.")
-            else:
-                if st.button("🔍 Разчети чертежа с Vision AI", type="primary", use_container_width=True):
-                    if processed_img:
-                        with st.spinner("Извличане на вертикални кофражни елементи..."):
-                            try:
-                                res = analyze_blueprint(processed_img, api_key, model_choice=selected_model)
-                                if isinstance(res, tuple):
-                                    blueprint_data, used_model = res
-                                else:
-                                    blueprint_data, used_model = res, selected_model
+            with col_actions:
+                st.subheader("🤖 AI Разчитане")
+                
+                selected_model = st.selectbox(
+                    "Избери AI модел за разчитане:",
+                    options=[
+                        "gemini-3.1-pro",
+                        "gemini-2.5-pro",
+                        "gemini-3.8-flash",
+                        "gemini-3.6-flash"
+                    ],
+                    index=0,
+                    help="Изберете кой модел на Gemini да анализира чертежа."
+                )
 
-                                st.session_state["blueprint_data"] = blueprint_data
-                                st.session_state["used_model"] = used_model
-                                elements_list = blueprint_data.get("elements", [])
-                                st.session_state["edited_df"] = pd.DataFrame(elements_list)
-                                st.success(f"✅ Готово! Разчетено с: **{used_model}**")
-                            except Exception as e:
-                                st.error(f"Грешка при анализа: {e}")
+                if not api_key:
+                    st.warning("⚠️ Моля, въведете Gemini API Key в страничното меню.")
+                else:
+                    if st.button("🔍 Разчети чертежа с Vision AI", type="primary", use_container_width=True):
+                        if processed_img:
+                            with st.spinner("Извличане на вертикални кофражни елементи..."):
+                                try:
+                                    res = analyze_blueprint(processed_img, api_key, model_choice=selected_model)
+                                    if isinstance(res, tuple):
+                                        blueprint_data, used_model = res
+                                    else:
+                                        blueprint_data, used_model = res, selected_model
 
-    if not st.session_state["edited_df"].empty:
-        st.divider()
-        st.subheader("✏️ Корекция на разчетените вертикални елементи")
-        edited_df = st.data_editor(
-            st.session_state["edited_df"],
-            num_rows="dynamic",
-            column_config={
-                "type": st.column_config.SelectboxColumn("Тип елемент", options=["column", "wall", "l_wall", "u_wall"], required=True),
-                "name": st.column_config.TextColumn("Наименование / Маркировка"),
-                "count": st.column_config.NumberColumn("Брой", min_value=1, step=1, default=1),
-                "width_m": st.column_config.NumberColumn("Ширина (м)", format="%.2f"),
-                "length_m": st.column_config.NumberColumn("Дължина (м)", format="%.2f"),
-                "thickness_m": st.column_config.NumberColumn("Дебелина (м)", format="%.2f"),
-                "l1_m": st.column_config.NumberColumn("Рамо 1 (м)", format="%.2f"),
-                "l2_m": st.column_config.NumberColumn("Рамо 2 (м)", format="%.2f"),
-                "l3_m": st.column_config.NumberColumn("Рамо 3 (м)", format="%.2f"),
-                "height_m": st.column_config.NumberColumn("Височина (м)", format="%.2f")
-            },
-            use_container_width=True,
-            key="elements_editor_tab1"
-        )
-        st.session_state["edited_df"] = edited_df
+                                    st.session_state["blueprint_data"] = blueprint_data
+                                    st.session_state["used_model"] = used_model
+                                    elements_list = blueprint_data.get("elements", [])
+                                    st.session_state["edited_df"] = pd.DataFrame(elements_list)
+                                    st.success(f"✅ Готово! Разчетено с: **{used_model}**")
+                                except Exception as e:
+                                    st.error(f"Грешка при анализа: {e}")
+    else:
+        st.subheader("⌨️ Ръчно въвеждане и управление на елементи в таблица")
+        st.markdown("Въведете вашите елементи директно в таблицата по-долу. Можете да добавяте нови редове, да редактирате съществуващи или да изтривате.")
+        
+        # Уверяваме се, че таблицата има правилните колони, ако е празна
+        if st.session_state["edited_df"].empty:
+            st.session_state["edited_df"] = pd.DataFrame([{
+                "type": "wall",
+                "name": "Стена 1",
+                "count": 1,
+                "width_m": 0.3,
+                "length_m": 5.0,
+                "thickness_m": 0.25,
+                "l1_m": 2.0,
+                "l2_m": 2.0,
+                "l3_m": 2.0,
+                "height_m": 3.0
+            }])
+
+    st.divider()
+    st.subheader("✏️ Таблица с вертикални кофражни елементи")
+    
+    edited_df = st.data_editor(
+        st.session_state["edited_df"],
+        num_rows="dynamic",
+        column_config={
+            "type": st.column_config.SelectboxColumn("Тип елемент", options=["column", "wall", "l_wall", "u_wall"], required=True),
+            "name": st.column_config.TextColumn("Наименование / Маркировка"),
+            "count": st.column_config.NumberColumn("Брой", min_value=1, step=1, default=1),
+            "width_m": st.column_config.NumberColumn("Ширина (м)", format="%.2f"),
+            "length_m": st.column_config.NumberColumn("Дължина (м)", format="%.2f"),
+            "thickness_m": st.column_config.NumberColumn("Дебелина (м)", format="%.2f"),
+            "l1_m": st.column_config.NumberColumn("Рамо 1 (м)", format="%.2f"),
+            "l2_m": st.column_config.NumberColumn("Рамо 2 (м)", format="%.2f"),
+            "l3_m": st.column_config.NumberColumn("Рамо 3 (м)", format="%.2f"),
+            "height_m": st.column_config.NumberColumn("Височина (м)", format="%.2f")
+        },
+        use_container_width=True,
+        key="elements_editor_tab1"
+    )
+    st.session_state["edited_df"] = edited_df
 
 with tab2:
     st.header("2. Спецификация на кофражните елементи и панели TEKO")
     df_calc = st.session_state["edited_df"]
     
     if df_calc.empty:
-        st.info("ℹ️ Качете чертеж в Таб 1 или въведете елементи ръчно.")
+        st.info("ℹ️ Въведете елементи в Таб 1 (чрез AI разчитане или ръчно в таблицата).")
     else:
         detailed_rows = []
         all_warnings = []
@@ -672,7 +699,7 @@ with tab3:
     df_calc = st.session_state["edited_df"]
 
     if df_calc.empty:
-        st.info("ℹ Няма въведени елементи. Качете чертеж в Таб 1 или въведете данни ръчно.")
+        st.info("ℹ Няма въведени елементи. Въведете данни в Таб 1.")
     else:
         pdf_elements = []
         bom_summary = {}
@@ -743,7 +770,7 @@ with tab4:
     df_calc = st.session_state["edited_df"]
 
     if df_calc.empty:
-        st.info("ℹ Няма въведени елементи за изчисляване на оферта. Качете чертеж или въведете данни в Таб 1.")
+        st.info("ℹ Няма въведени елементи за изчисляване на оферта. Въведете данни в Таб 1.")
     else:
         detailed_rows = []
         total_a = 0.0
@@ -786,9 +813,7 @@ with tab4:
                 dim_str = f"L={l1:.1f}+{l2:.1f}+{l3:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
 
             total_a += area
-            subtotal = total_a * price_formwork
-            vat_amount = subtotal * (vat_percent / 100.0)
-            grand_total = subtotal + vat_amount
+            row_total_price = area * price_formwork
 
             detailed_rows.append({
                 "Елемент": elem_label,
@@ -796,24 +821,26 @@ with tab4:
                 "Брой": cnt,
                 "Площ (m²)": round(area, 2),
                 "Ед. цена (€/m²)": price_formwork,
-                "Обща сума (€)": round(area * price_formwork, 2)
+                "Обща сума (€)": round(row_total_price, 2)
             })
 
-        df_offer = pd.DataFrame(detailed_rows)
-        if not df_offer.empty:
-            df_offer.index = range(1, len(df_offer) + 1)
+        df_offer_table = pd.DataFrame(detailed_rows)
+        df_offer_table.index = range(1, len(df_offer_table) + 1)
 
-        st.subheader("📄 Резюме на офертата")
-        st.dataframe(df_offer, use_container_width=True)
+        subtotal = total_a * price_formwork
+        vat_amount = subtotal * (vat_percent / 100.0)
+        grand_total = subtotal + vat_amount
 
-        st.metric("💰 ОБЩА СТОЙНОСТ (без ДДС)", f"{subtotal:.2f} €")
-        st.metric("💵 ОБЩО ЗА ПЛАЩАНЕ (с ДДС)", f"{grand_total:.2f} €")
+        st.subheader("📋 Оферирани елементи и стойности")
+        st.dataframe(df_offer_table, use_container_width=True)
 
-        if st.button("📥 Генерирай и свали оферта в Word (.docx)", type="primary"):
+        st.metric("💶 ОБЩА СУМА ЗА ПЛАЩАНЕ (с ДДС)", f"{grand_total:.2f} €")
+
+        if st.button("📄 Генериране на Word Оферта (.docx)", type="primary"):
             try:
-                word_stream = generate_word_offer(
-                    client_name=client_name or "Клиент",
-                    project_name=project_name_input or "Обект TEKO",
+                docx_stream = generate_word_offer(
+                    client_name=client_name if client_name else "Клиент",
+                    project_name=project_name_input if project_name_input else "Обект TEKO",
                     offer_date=offer_date,
                     offer_type=offer_type,
                     price_per_m2=price_formwork,
@@ -824,8 +851,8 @@ with tab4:
                     grand_total=grand_total
                 )
                 st.download_button(
-                    label="💾 Изтегли Word оферта",
-                    data=word_stream,
+                    label="⬇️ Свали готова Word оферта",
+                    data=docx_stream,
                     file_name="Teko_Offer.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
