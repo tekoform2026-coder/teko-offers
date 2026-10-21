@@ -15,6 +15,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 from accessories_calculator import calculate_accessories, calculate_walers
+from teko_calculator import solve_height_cm, solve_width_cm, format_panel_code
 
 # Висока резолюция за чисти линии и четливи надписи
 DPI_RESOLUTION = 300
@@ -50,55 +51,18 @@ def setup_pdf_fonts():
 
 def calculate_height_breakdown(height_cm):
     """Разбива височината на стандартни модули, като избира най-близкия по-висок стандартен панел при остатък."""
-    height_levels = []
-    rem = float(height_cm)
-    while rem >= 150:
-        height_levels.append(150)
-        rem -= 150
-    while rem >= 120:
-        height_levels.append(120)
-        rem -= 120
-    while rem >= 60:
-        height_levels.append(60)
-        rem -= 60
-    if rem > 0:
-        if rem <= 35:
-            height_levels.append(35)
-        else:
-            height_levels.append(60)
-    return height_levels
+    return solve_height_cm(height_cm)
 
 def calculate_panel_width_breakdown(width_cm):
     """
     Разбива ширината точно в рамките на наличната дължина, без да пречи на EX ъглите.
+    Вика основния решател от teko_calculator.
     """
-    panel_widths = [60, 35, 30, 25, 20]
-    remaining = float(width_cm)
+    panels_dict, _ = solve_width_cm(width_cm, 150)
     result = []
-    
-    if remaining == 50:
-        return [25, 25]
-    if remaining == 40:
-        return [20, 20]
-    if remaining == 45:
-        return [25, 20]
-    if remaining == 55:
-        return [35, 20]
-    
-    for w in panel_widths:
-        count = int(remaining // w)
-        if count > 0:
-            for _ in range(count):
-                result.append(w)
-            remaining -= count * w
-            
-    if remaining > 0:
-        closest_w = min(panel_widths, key=lambda x: abs(x - remaining))
-        if sum(result) + closest_w <= width_cm + 2:
-            result.append(closest_w)
-        elif not result:
-            result.append(20)
-            
+    for w, count in panels_dict.items():
+        for _ in range(count):
+            result.append(w)
     return result
 
 # ==========================================
@@ -229,12 +193,10 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
         ax.set_ylim(-25, b + 25)
 
     elif is_l_wall:
-        # L-образна стена с бетонен контур
         poly = patches.Polygon([[0, 0], [a, 0], [a, t], [t, t], [t, b], [0, b]], 
                                facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2)
         ax.add_patch(poly)
         
-        # 3 външни ъгъла EX и 1 вътрешен IN
         for x_pos, y_pos in [(-15, -15), (a, -15), (-15, b)]:
             ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
             ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
@@ -242,7 +204,6 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
         ax.add_patch(patches.Rectangle((t, t), 15, 15, facecolor=COLOR_CORNER_IN, edgecolor='black', linewidth=0.8))
         ax.text(t + 7.5, t + 7.5, "IN", ha='center', va='center', fontsize=5.5, fontweight='bold', color='white')
 
-        # Външни панели по хоризонталното рамо а
         w_a = calculate_panel_width_breakdown(a)
         curr_x = 0
         for w in w_a:
@@ -250,7 +211,6 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(curr_x + w/2, -7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
             curr_x += w
 
-        # Външни панели по вертикалното рамо b
         w_b = calculate_panel_width_breakdown(b)
         curr_y = 0
         for w in w_b:
@@ -258,7 +218,6 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(-7.5, curr_y + w/2, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
             curr_y += w
 
-        # Вътрешни панели по рамената (над и дясно от дебелината t)
         w_inner_a = calculate_panel_width_breakdown(a - t)
         curr_x = t
         for w in w_inner_a:
@@ -279,23 +238,19 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
         ax.set_ylim(-25, max(a, b) + 25)
 
     elif is_u_wall:
-        # П/U-образна стена (ядро)
         m_len = b if b else a
         poly = patches.Polygon([[0, 0], [m_len, 0], [m_len, a], [m_len - t, a], [m_len - t, t], [t, t], [t, a], [0, a]], 
                                facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2)
         ax.add_patch(poly)
 
-        # 4 външни ъгъла EX
         for x_pos, y_pos in [(-15, -15), (m_len, -15), (-15, a), (m_len, a)]:
             ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
             ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
 
-        # 2 вътрешни ъгъла IN
         for in_x, in_y in [(t, t), (m_len - t - 15, t)]:
             ax.add_patch(patches.Rectangle((in_x, in_y), 15, 15, facecolor=COLOR_CORNER_IN, edgecolor='black', linewidth=0.8))
             ax.text(in_x + 7.5, in_y + 7.5, "IN", ha='center', va='center', fontsize=5.5, fontweight='bold', color='white')
 
-        # Външни панели по долното основно рамо
         w_m = calculate_panel_width_breakdown(m_len)
         curr_x = 0
         for w in w_m:
@@ -303,7 +258,6 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(curr_x + w/2, -7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
             curr_x += w
 
-        # Външни панели по лявото и дясното рамо
         w_side = calculate_panel_width_breakdown(a)
         curr_y = 0
         for w in w_side:
@@ -313,7 +267,6 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(m_len + 7.5, curr_y + w/2, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
             curr_y += w
 
-        # Вътрешни панели по основното рамо
         w_inner_m = calculate_panel_width_breakdown(m_len - 2 * t)
         curr_x = t
         for w in w_inner_m:
@@ -538,13 +491,11 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     return buf
 
 # ==========================================
-# 5. СПЕЦИФИКАЦИЯ ЗА ЕЛЕМЕНТА (BOM)
+# 5. СИНХРОНИЗИРАНА СПЕЦИФИКАЦИЯ ЗА ЕЛЕМЕНТА (BOM)
 # ==========================================
-def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name=""):
+def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name="", thickness_cm=30):
     bom = {}
     h_levels = calculate_height_breakdown(height_cm)
-    w_a = calculate_panel_width_breakdown(dim_a)
-    w_b = calculate_panel_width_breakdown(dim_b if dim_b else dim_a)
     
     w_str = str(wall_type).lower()
     n_str = str(name).lower()
@@ -552,17 +503,32 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name=""):
     is_l_wall = "l" in w_str or "l-образна" in w_str or "l_wall" in w_str or "l-стена" in n_str
     is_u_wall = "u" in w_str or "u-образна" in w_str or "u_wall" in w_str or "ядро" in w_str or "ядро" in n_str
 
+    t = float(thickness_cm or 30)
+    
+    # Използваме абсолютно същата логика за събиране на панелите като в чертежите
+    panels_to_count = []
+    w_a = calculate_panel_width_breakdown(dim_a)
+    
+    if is_column:
+        w_b = calculate_panel_width_breakdown(dim_b if dim_b else dim_a)
+        panels_to_count = w_a + w_a + w_b + w_b
+    elif is_l_wall:
+        w_b = calculate_panel_width_breakdown(dim_b if dim_b else dim_a)
+        w_inner_a = calculate_panel_width_breakdown(max(10, dim_a - t))
+        w_inner_b = calculate_panel_width_breakdown(max(10, (dim_b if dim_b else dim_a) - t))
+        panels_to_count = w_a + w_b + w_inner_a + w_inner_b
+    elif is_u_wall:
+        m_len = dim_b if dim_b else dim_a
+        w_m = calculate_panel_width_breakdown(m_len)
+        w_side = calculate_panel_width_breakdown(dim_a)
+        w_inner_m = calculate_panel_width_breakdown(max(10, m_len - 2 * t))
+        panels_to_count = w_m + w_side + w_side + w_inner_m
+    else:
+        panels_to_count = w_a + w_a
+
     for h in h_levels:
-        for w in w_a + w_b:
-            if h == 60:
-                if w == 60 or w == 150:
-                    code = "Панел ТК 150/60 (полегнал)"
-                elif w == 120:
-                    code = "Панел ТК 120/60 (полегнал)"
-                else:
-                    code = f"Панел ТК 60/{int(w)}"
-            else:
-                code = f"Панел ТК {int(h)}/{int(w)}"
+        for w in panels_to_count:
+            code = format_panel_code(w, h)
             bom[code] = bom.get(code, 0) + 1
 
     if is_l_wall:
@@ -696,7 +662,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         story.append(rl_front)
         story.append(Spacer(1, 10))
 
-        elem_bom = calculate_element_bom(display_type, l_a, l_b, h_cm, name=e_name)
+        elem_bom = calculate_element_bom(display_type, l_a, l_b, h_cm, name=e_name, thickness_cm=thick)
         
         e_table_data = [[
             Paragraph("<b>Необходим артикул за елемента</b>", cell_bold_style),
