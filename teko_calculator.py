@@ -83,7 +83,7 @@ def solve_width_cm_standing(width_cm):
     Пресмята разпределението по ширина за изправен ред (H=150 или H=120 см)
     с приоритет на основните панели 60 см.
     """
-    count_60 = width_cm // 60
+    count_60 = int(width_cm // 60)
     rem = width_cm % 60
     fit_rem = (rem // 5) * 5
     exact_rem = rem % 5
@@ -108,13 +108,13 @@ def solve_width_cm_lying(width_cm):
     panels = {}
 
     # 1. Полегнали панели 150 см (височина 60 см, ширина 150 см)
-    count_150 = remaining // 150
+    count_150 = int(remaining // 150)
     if count_150 > 0:
         panels[150] = count_150
         remaining -= count_150 * 150
 
     # 2. Полегнали панели 120 см (височина 60 см, ширина 120 см)
-    count_120 = remaining // 120
+    count_120 = int(remaining // 120)
     if count_120 > 0:
         panels[120] = count_120
         remaining -= count_120 * 120
@@ -176,10 +176,10 @@ def calculate_column(width_m, length_m, height_m, count=1):
 
         for w, c in side_a_panels.items():
             key = format_panel_code(w, h)
-            detailed_panels[key] = detailed_panels.get(key, 0) + (c * 2 * count)
+            detailed_panels[key] = detailed_panels.get(key, 0) + (int(c) * 2 * count)
         for w, c in side_b_panels.items():
             key = format_panel_code(w, h)
-            detailed_panels[key] = detailed_panels.get(key, 0) + (c * 2 * count)
+            detailed_panels[key] = detailed_panels.get(key, 0) + (int(c) * 2 * count)
             
     outer_corners = 4 * len(height_levels) * count
     total_panel_pieces = sum(detailed_panels.values())
@@ -216,7 +216,7 @@ def calculate_wall(length_m, thickness_m, height_m, count=1):
         last_remainder = remainder
         for w, c in side_panels.items():
             key = format_panel_code(w, h)
-            detailed_panels[key] = detailed_panels.get(key, 0) + (c * 2 * count)
+            detailed_panels[key] = detailed_panels.get(key, 0) + (int(c) * 2 * count)
             
     total_panel_pieces = sum(detailed_panels.values())
     handles = total_panel_pieces * 4
@@ -256,7 +256,7 @@ def calculate_l_wall(l1_m, l2_m, thickness_m, height_m, count=1):
         for side in [out1_panels, out2_panels, in1_panels, in2_panels]:
             for w, c in side.items():
                 key = format_panel_code(w, h)
-                detailed_panels[key] = detailed_panels.get(key, 0) + (c * count)
+                detailed_panels[key] = detailed_panels.get(key, 0) + (int(c) * count)
                 
     total_panel_pieces = sum(detailed_panels.values())
     inner_corners = 1 * len(height_levels) * count
@@ -304,7 +304,7 @@ def calculate_u_wall(l1_m, l2_m, l3_m, thickness_m, height_m, count=1):
         for side in [out1_panels, out2_panels, out3_panels, in1_panels, in2_panels, in3_panels]:
             for w, c in side.items():
                 key = format_panel_code(w, h)
-                detailed_panels[key] = detailed_panels.get(key, 0) + (c * count)
+                detailed_panels[key] = detailed_panels.get(key, 0) + (int(c) * count)
                 
     total_panel_pieces = sum(detailed_panels.values())
     inner_corners = 2 * len(height_levels) * count
@@ -327,26 +327,4 @@ def calculate_u_wall(l1_m, l2_m, l3_m, thickness_m, height_m, count=1):
             "Анкерни шпилки": tie_rods,
             "Затягащи гайки": nuts
         }
-    }
-
-# ==========================================
-# ДОБАВЕНИ ПОМОЩНИ ФУНКЦИИ ЗА ЧЕРТАЧА (LAYOUT EXPORT)
-# Те не променят никакви изчисления, а само предоставят
-# структурирани данни за визуализацията в drawing_generator.py
-# ==========================================
-
-def get_element_layout_data(wall_type, dim_a, dim_b, height_cm, thickness_cm=30):
-    """
-    Връща точна структура с разпределението по височина и ширина за всяка страна,
-    която drawing_generator.py може директно да използва за чертане.
-    """
-    h_levels = solve_height_cm(height_cm)
-    w_a = solve_width_cm(dim_a, h_levels[0] if h_levels else 150)[0]
-    w_b = solve_width_cm(dim_b if dim_b else dim_a, h_levels[0] if h_levels else 150)[0]
-    
-    return {
-        "height_levels": h_levels,
-        "width_breakdown_a": w_a,
-        "width_breakdown_b": w_b,
-        "thickness_cm": thickness_cm
     }
