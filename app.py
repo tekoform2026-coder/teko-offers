@@ -173,17 +173,14 @@ def get_element_teko_panels(elem_type, row):
         l2_cm = float(row.get("l2_m", 2.0) or 2.0) * 100
         t_cm = float(row.get("thickness_m", 0.25) or 0.25) * 100
         
-        # 1. Начисляване на ъгловите профили (1 вътрешен, 3 външни)
         in_corner = f"Вътрешен ъгъл IN{int(h_levels[0])}" if h_levels else "Вътрешен ъгъл IN"
         ex_corner = "Външен ъгъл EX"
         element_panels[in_corner] = element_panels.get(in_corner, 0) + 1 * cnt
         element_panels[ex_corner] = element_panels.get(ex_corner, 0) + 3 * cnt
         
-        # 2. Поставяне на ъгловия панел (Дебелина на стената + 10 cm) до EX
         corner_w = t_cm + 10.0
         add_face_panels(corner_w)
         
-        # 3. Огледално подреждане на остатъка от раменете
         rem_l1 = max(0, l1_cm - corner_w)
         rem_l2 = max(0, l2_cm - corner_w)
         if rem_l1 > 0:
@@ -197,18 +194,15 @@ def get_element_teko_panels(elem_type, row):
         l3_cm = float(row.get("l3_m", 2.0) or 2.0) * 100
         t_cm = float(row.get("thickness_m", 0.25) or 0.25) * 100
         
-        # 1. Начисляване на ъгловите профили (2 вътрешни, 4 външни)
         in_corner = f"Вътрешен ъгъл IN{int(h_levels[0])}" if h_levels else "Вътрешен ъгъл IN"
         ex_corner = "Външен ъгъл EX"
         element_panels[in_corner] = element_panels.get(in_corner, 0) + 2 * cnt
         element_panels[ex_corner] = element_panels.get(ex_corner, 0) + 4 * cnt
         
-        # 2. Поставяне на ъгловите панели (Дебелина на стената + 10 cm) при всеки ъгъл
         corner_w = t_cm + 10.0
         add_face_panels(corner_w)
         add_face_panels(corner_w)
         
-        # 3. Огледално подреждане на остатъка от раменете
         rem_l1 = max(0, l1_cm - corner_w)
         rem_l2 = max(0, l2_cm - 2 * corner_w)
         rem_l3 = max(0, l3_cm - corner_w)
@@ -277,6 +271,38 @@ def process_uploaded_file(uploaded_file):
         return img
     else:
         return Image.open(uploaded_file)
+
+def normalize_elements_data(elements_list):
+    """Гарантира, че всеки елемент има пълния набор от стандартни колони с валидни стойности."""
+    standard_keys = {
+        "type": "wall",
+        "name": "Елемент",
+        "count": 1,
+        "width_m": 0.3,
+        "length_m": 5.0,
+        "thickness_m": 0.25,
+        "l1_m": 2.0,
+        "l2_m": 2.0,
+        "l3_m": 2.0,
+        "height_m": 3.0
+    }
+    normalized = []
+    for el in elements_list:
+        if not isinstance(el, dict):
+            continue
+        norm_el = {}
+        for key, default_val in standard_keys.items():
+            val = el.get(key, default_val)
+            if val is None or (isinstance(val, float) and pd.isna(val)):
+                norm_el[key] = default_val
+            else:
+                norm_el[key] = val
+        normalized.append(norm_el)
+    
+    if not normalized:
+        normalized = [standard_keys.copy()]
+        
+    return pd.DataFrame(normalized, columns=list(standard_keys.keys()))
 
 def generate_word_offer(client_name, project_name, offer_date, offer_type, price_per_m2, detailed_rows, total_area, subtotal, vat_amount, grand_total):
     doc = docx.Document()
@@ -422,9 +448,9 @@ if "blueprint_data" not in st.session_state:
 if "used_model" not in st.session_state:
     st.session_state["used_model"] = None
 
-# Инициализираме DataFrame в сесията, ако липсва
+# Инициализираме безопасен DataFrame в сесията
 if "edited_df" not in st.session_state:
-    st.session_state["edited_df"] = pd.DataFrame([{
+    st.session_state["edited_df"] = normalize_elements_data([{
         "type": "wall",
         "name": "Стена 1",
         "count": 1,
@@ -508,22 +534,21 @@ with tab1:
                                     st.session_state["blueprint_data"] = blueprint_data
                                     st.session_state["used_model"] = used_model
                                     elements_list = blueprint_data.get("elements", [])
-                                    st.session_state["edited_df"] = pd.DataFrame(elements_list)
+                                    
+                                    # Нормализираме данните от AI преди да ги подадем в таблицата
+                                    st.session_state["edited_df"] = normalize_elements_data(elements_list)
                                     st.success(f"✅ Готово! Разчетено с: **{used_model}**")
                                 except Exception as e:
                                     st.error(f"Грешка при анализа: {e}")
     else:
         st.subheader("⌨️ Ръчно въвеждане и управление на елементи в таблица")
-        st.markdown("Въведете вашите елементи директно в таблицата по-долу. Промените се запазват автоматично в сесията.")
+        st.markdown("Въведете вашите елементи директно в таблицата по-долу. Можете да добавяте и редактирате свободно.")
 
     st.divider()
     st.subheader("✏️ Таблица с вертикални кофражни елементи")
     
-    # Тук използваме callback (on_change), за да записваме промените веднага без излишни рефреши
-    def update_table_session():
-        st.session_state["edited_df"] = st.session_state["elements_editor_tab1"]
-
-    st.data_editor(
+    # Стабилно управление на таблицата без излишни цикли
+    st.session_state["edited_df"] = st.data_editor(
         st.session_state["edited_df"],
         num_rows="dynamic",
         column_config={
@@ -539,8 +564,7 @@ with tab1:
             "height_m": st.column_config.NumberColumn("Височина (м)", format="%.2f")
         },
         use_container_width=True,
-        key="elements_editor_tab1",
-        on_change=update_table_session
+        key="elements_editor_tab1"
     )
 
 with tab2:
@@ -562,7 +586,6 @@ with tab2:
             elem_type = str(row.get("type", "wall"))
             name = str(row.get("name", "Елемент"))
 
-            # Проверка за нестандартни размери (Стъпка 4)
             row_warns = check_element_dimensions(row)
             all_warnings.extend(row_warns)
 
@@ -599,17 +622,14 @@ with tab2:
 
             total_a += area
             
-            # Разпис по височина (Стъпка 3)
             h_breakdown_str = format_height_breakdown_text(h)
 
-            # Панели
             panels_dict = get_element_teko_panels(elem_type, row)
             for p_name, p_qty in panels_dict.items():
                 project_panels_summary[p_name] = project_panels_summary.get(p_name, 0) + p_qty
 
             panels_str = ", ".join([f"{k} ({v} бр.)" for k, v in panels_dict.items()])
 
-            # Аксесоари
             acc_dict = get_element_accessories(elem_type, row)
             for acc_name, acc_qty in acc_dict.items():
                 project_accessories_summary[acc_name] = project_accessories_summary.get(acc_name, 0) + acc_qty
@@ -627,7 +647,6 @@ with tab2:
         if not df_detailed.empty:
             df_detailed.index = range(1, len(df_detailed) + 1)
 
-        # Пресмятане на общо тегло за панели и аксесоари
         panels_sum_data = []
         total_panels_weight = 0.0
         for k, v in sorted(project_panels_summary.items()):
@@ -668,7 +687,6 @@ with tab2:
         with col_m2:
             st.metric("⚖️ ОБЩО ТЕГЛО НА КОФРАЖА", f"{total_formwork_weight:.2f} kg ({total_formwork_weight/1000.0:.2f} t)")
 
-        # Покажи предупреждения за размери, ако има такива (Стъпка 4)
         if all_warnings:
             with st.expander("⚠️ Предупреждения за нестандартни размери в кофражните елементи", expanded=True):
                 for w_msg in all_warnings:
@@ -822,7 +840,7 @@ with tab4:
                 "Размери": dim_str,
                 "Брой": cnt,
                 "Площ (m²)": round(area, 2),
-                "Ед. цена (€/m²)": price_per_m2 if 'price_per_m2' in locals() else price_formwork,
+                "Ед. цена (€/m²)": price_formwork,
                 "Обща сума (€)": round(row_total_price, 2)
             })
 
