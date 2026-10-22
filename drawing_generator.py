@@ -197,7 +197,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
                                facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2)
         ax.add_patch(poly)
         
-        # 3 външни ъгъла EX
+        # 3 външни ъгъла EX на пълния контур
         for x_pos, y_pos in [(-15, -15), (a, -15), (-15, b)]:
             ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
             ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
@@ -257,7 +257,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
         ax.add_patch(poly)
 
         # 4 външни ъгъла EX
-        for x_pos, y_pos in [(-15, -15), (m_len, -15), (-15, a), (m_len, a)]:
+        for x_pos, y_pos in [(-15, -15), (m_len, -15), (-15, a), (m_len - t, a)]:
             ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
             ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
 
@@ -300,7 +300,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
                 ax.text(curr_x + w/2, t + 7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
                 curr_x += w
 
-        # ВЪТРЕШНИ ПАНЕЛИ ПО ЛЯВОТО ВЕРТИКАЛНО РАМО НА U
+        # Вътрешни панели по лявото вертикално рамо на U
         w_inner_side = calculate_panel_width_breakdown(max(0, a - t - 15))
         curr_y = t + 15
         for w in w_inner_side:
@@ -309,7 +309,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
                 ax.text(t + 7.5, curr_y + w/2, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
                 curr_y += w
 
-        # ВЪТРЕШНИ ПАНЕЛИ ПО ДЯСНОТО ВЕРТИКАЛНО РАМО НА U
+        # Вътрешни панели по дясното вертикално рамо на U
         curr_y = t + 15
         for w in w_inner_side:
             if curr_y + w <= a:
@@ -548,7 +548,6 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name="", thickness
 
     t = float(thickness_cm or 30)
     
-    # Използваме същите правила за събиране на панелите
     panels_to_count = []
     w_a = calculate_panel_width_breakdown(dim_a)
     
@@ -574,7 +573,6 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name="", thickness
             code = format_panel_code(w, h)
             bom[code] = bom.get(code, 0) + 1
 
-    # Коригирани точни бройки на ъглите съгласно теко_calculator.py
     if is_l_wall:
         bom["Външен ъгъл EX"] = len(h_levels) * 3
         bom["Вътрешен ъгъл IN"] = len(h_levels) * 1
