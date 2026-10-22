@@ -1,3 +1,4 @@
+# drawing_generator.py
 import io
 import os
 import numpy as np
@@ -149,7 +150,7 @@ def generate_overall_project_3d_buf(pdf_elements):
     return buf
 
 # ==========================================
-# 2. ИЗГЛЕД ОТГОРЕ (TOP VIEW) - С ТОЧНИ КОРИГИРАНИ EX КОРДИНАТИ ЗА L И U СТЕНИ
+# 2. ИЗГЛЕД ОТГОРЕ (TOP VIEW) - С КОРЕКТНО РАЗПОЗНАВАНЕ НА П-СТЕНИ И ЪГЛИ
 # ==========================================
 def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемент"):
     fig, ax = plt.subplots(figsize=(3.5, 2.5), dpi=DPI_RESOLUTION)
@@ -162,7 +163,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
     n_str = str(name).lower()
     is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
     is_l_wall = "l" in w_str or "l-образна" in w_str or "l_wall" in w_str or "l-стена" in n_str
-    is_u_wall = "u" in w_str or "u-образна" in w_str or "u_wall" in w_str or "ядро" in w_str or "ядро" in n_str
+    is_u_wall = "u" in w_str or "u-образна" in w_str or "u_wall" in w_str or "п" in w_str or "п-образна" in w_str or "ядро" in w_str or "ядро" in n_str
 
     if is_column:
         ax.add_patch(patches.Rectangle((0, 0), a, b, facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2))
@@ -384,7 +385,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
             for w_y in waler_positions:
                 if w_y < h_cm:
                     ax.add_patch(patches.Rectangle((-14, w_y - 4), side_len + 28, 8, 
-                                                   facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.6, alpha=0.9, zorder=2))
+                                                 facecolor=COLOR_WALER, edgecolor='#1E8449', linewidth=0.6, alpha=0.9, zorder=2))
 
         curr_y = 0
         for h_val in h_levels:
@@ -440,7 +441,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     return buf
 
 # ==========================================
-# 4. ИНДИВИДУАЛЕН 3D КОФРАЖЕН ИЗГЛЕД (3D AXONOMETRY)
+# 4. ИНДИВИДУАЛЕН 3D КОФРАЖЕН ИЗГЛЕД (3D AXONOMETRY) - С КОРЕКТНО РАЗПОЗНАВАНЕ НА П-СТЕНИ
 # ==========================================
 def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, name="Елемент"):
     fig = plt.figure(figsize=(3.5, 2.5), dpi=DPI_RESOLUTION)
@@ -455,7 +456,7 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     n_str = str(name).lower()
     is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
     is_l_wall = "l" in w_str or "l-образна" in w_str or "l_wall" in w_str or "l-стена" in n_str
-    is_u_wall = "u" in w_str or "u-образна" in w_str or "u_wall" in w_str or "ядро" in w_str or "ядро" in n_str
+    is_u_wall = "u" in w_str or "u-образна" in w_str or "u_wall" in w_str or "п" in w_str or "п-образна" in w_str or "ядро" in w_str or "ядро" in n_str
     h_levels = calculate_height_breakdown(h)
 
     if is_l_wall:
@@ -568,7 +569,7 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     return buf
 
 # ==========================================
-# 5. СИНХРОНИЗИРАНА СПЕЦИФИКАЦИЯ ЗА ЕЛЕМЕНТА (BOM)
+# 5. СИНХРОНИЗИРАНА СПЕЦИФИКАЦИЯ ЗА ЕЛЕМЕНТА (BOM) - С КОРЕКТНО РАЗПОЗНАВАНЕ НА П-СТЕНИ
 # ==========================================
 def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name="", thickness_cm=30):
     bom = {}
@@ -578,7 +579,7 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name="", thickness
     n_str = str(name).lower()
     is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
     is_l_wall = "l" in w_str or "l-образна" in w_str or "l_wall" in w_str or "l-стена" in n_str
-    is_u_wall = "u" in w_str or "u-образна" in w_str or "u_wall" in w_str or "ядро" in w_str or "ядро" in n_str
+    is_u_wall = "u" in w_str or "u-образна" in w_str or "u_wall" in w_str or "п" in w_str or "п-образна" in w_str or "ядро" in w_str or "ядро" in n_str
 
     t = float(thickness_cm or 30)
     
@@ -687,68 +688,87 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#003366')),
         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
+        ('TOPPADDING', (0, 0), (-1, 0), 5),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F8F9F9')])
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F9F9F9')])
     ]))
+    
     story.append(t_summary)
     story.append(PageBreak())
 
-    for elem in pdf_elements:
-        e_name = elem.get('name', 'Елемент')
-        w_type = elem.get('type_bg') or elem.get('wall_type') or 'Стена'
-        l_a = elem.get('length_a_cm') or elem.get('length_cm') or 100
-        l_b = elem.get('length_b_cm') or elem.get('width_cm') or l_a
-        h_cm = elem.get('height_cm') or 300
-        thick = elem.get('thickness_cm') or 30
+    overview_buf = generate_overall_project_3d_buf(pdf_elements)
+    img_overview = RLImage(overview_buf, width=480, height=224)
+    story.append(img_overview)
+    story.append(Spacer(1, 10))
 
-        display_type = "Колона" if ("колона" in str(w_type).lower() or "column" in str(w_type).lower() or "колона" in str(e_name).lower()) else w_type
+    for elem in pdf_elements:
+        story.append(PageBreak())
+        
+        e_name = elem.get('name', 'Елемент')
+        w_type = elem.get('wall_type', 'Стена')
+        l_a = elem.get('length_a_cm', 100)
+        l_b = elem.get('length_b_cm', 100)
+        h_cm = elem.get('height_cm', 300)
+        thick = elem.get('thickness_cm', 30)
 
         story.append(Paragraph(f"<b>Чертеж и Спецификация: {e_name}</b>", title_style))
-        story.append(Paragraph(f"Тип: {display_type} | Размери: {int(l_a)}x{int(l_b)} cm | Височина: {int(h_cm)} cm", subtitle_style))
+        story.append(Paragraph(f"<b>Тип:</b> {w_type} | <b>Размери:</b> {int(l_a)}х{int(l_b)} см | <b>Височина:</b> {int(h_cm)} cm", subtitle_style))
         story.append(Spacer(1, 4))
 
-        buf_top = generate_top_view_buf(display_type, l_a, l_b, thick, name=e_name)
-        buf_axon = generate_3d_axonometry_buf(display_type, l_a, l_b, h_cm, thick, name=e_name)
+        top_buf = generate_top_view_buf(w_type, l_a, l_b, thick, name=e_name)
+        iso_buf = generate_3d_axonometry_buf(w_type, l_a, l_b, h_cm, thick, name=e_name)
         
-        rl_top = RLImage(buf_top, width=235, height=168)
-        rl_axon = RLImage(buf_axon, width=235, height=168)
+        img_top = RLImage(top_buf, width=230, height=165)
+        img_iso = RLImage(iso_buf, width=230, height=165)
+
+        t_views = Table([[
+            Paragraph("<b>Изглед отгоре (Top View)</b>", cell_style),
+            Paragraph("<b>3D Изометрия (3D View)</b>", cell_style)
+        ], [
+            img_top, img_iso
+        ]], colWidths=[240, 240])
         
-        row_table = Table([[rl_top, rl_axon]], colWidths=[245, 245])
-        row_table.setStyle(TableStyle([
+        t_views.setStyle(TableStyle([
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 0),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+            ('TOPPADDING', (0, 0), (-1, -1), 2),
         ]))
-        story.append(row_table)
+        story.append(t_views)
+        story.append(Spacer(1, 4))
+
+        front_buf = generate_front_view_buf(w_type, l_a, l_b, h_cm, name=e_name)
+        img_front = RLImage(front_buf, width=475, height=205)
+        story.append(img_front)
         story.append(Spacer(1, 6))
 
-        buf_front = generate_front_view_buf(display_type, l_a, l_b, h_cm, name=e_name)
-        rl_front = RLImage(buf_front, width=490, height=209)
-        story.append(rl_front)
-        story.append(Spacer(1, 10))
+        story.append(Paragraph("<b>Необходим артикул за елемента</b>", title_style))
+        story.append(Spacer(1, 2))
 
-        elem_bom = calculate_element_bom(display_type, l_a, l_b, h_cm, name=e_name, thickness_cm=thick)
-        
-        e_table_data = [[
-            Paragraph("<b>Необходим артикул за елемента</b>", cell_bold_style),
+        elem_bom = calculate_element_bom(w_type, l_a, l_b, h_cm, name=e_name, thickness_cm=thick)
+        elem_table_data = [[
+            Paragraph("<b>Артикул / Код</b>", cell_bold_style),
             Paragraph("<b>Количество (бр.)</b>", cell_bold_style)
         ]]
-        for item_code, item_qty in elem_bom.items():
-            e_table_data.append([
-                Paragraph(item_code, cell_style),
-                Paragraph(str(item_qty), cell_style)
+
+        for ec, eq in sorted(elem_bom.items()):
+            elem_table_data.append([
+                Paragraph(str(ec), cell_style),
+                Paragraph(str(eq), cell_style)
             ])
-            
-        t_elem = Table(e_table_data, colWidths=[350, 140])
+
+        t_elem = Table(elem_table_data, colWidths=[320, 160])
         t_elem.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2E4053')),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#003366')),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#DDDDDD')),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F4F6F7')])
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
+            ('TOPPADDING', (0, 0), (-1, 0), 4),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F9F9F9')])
         ]))
         story.append(t_elem)
-        story.append(PageBreak())
 
     doc.build(story)
     buffer.seek(0)
