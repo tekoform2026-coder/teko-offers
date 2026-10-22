@@ -554,16 +554,16 @@ with tab1:
             st.session_state["edited_df"],
             num_rows="dynamic",
             column_config={
-                "type": st.column_config.SelectboxColumn("Тип елемент", options=["column", "wall", "l_wall", "u_wall"], required=True, default="wall"),
-                "name": st.column_config.TextColumn("Наименование / Маркировка"),
-                "count": st.column_config.NumberColumn("Брой", min_value=1, step=1, default=1),
-                "width_m": st.column_config.NumberColumn("Ширина (м) [Само колона]", format="%.2f"),
-                "length_m": st.column_config.NumberColumn("Дължина (м) [Стена/Колона]", format="%.2f"),
-                "thickness_m": st.column_config.NumberColumn("Дебелина (м) [Стена/L/U]", format="%.2f"),
-                "l1_m": st.column_config.NumberColumn("Рамо 1 (м) [L/U стена]", format="%.2f"),
-                "l2_m": st.column_config.NumberColumn("Рамо 2 (м) [L/U стена]", format="%.2f"),
-                "l3_m": st.column_config.NumberColumn("Рамо 3 (м) [Само U стена]", format="%.2f"),
-                "height_m": st.column_config.NumberColumn("Височина (м)", format="%.2f")
+                "type": st.column_config.SelectboxColumn("Тип елемент", options=["column", "wall", "l_wall", "u_wall"], required=True, default="wall", width="medium"),
+                "name": st.column_config.TextColumn("Наименование / Маркировка", width="medium"),
+                "count": st.column_config.NumberColumn("Брой", min_value=1, step=1, default=1, width="small"),
+                "width_m": st.column_config.NumberColumn("Ширина (м)", format="%.2f", width="small"),
+                "length_m": st.column_config.NumberColumn("Дължина (м)", format="%.2f", width="small"),
+                "thickness_m": st.column_config.NumberColumn("Дебелина (м)", format="%.2f", width="small"),
+                "l1_m": st.column_config.NumberColumn("Рамо 1 (м)", format="%.2f", width="small"),
+                "l2_m": st.column_config.NumberColumn("Рамо 2 (м)", format="%.2f", width="small"),
+                "l3_m": st.column_config.NumberColumn("Рамо 3 (м)", format="%.2f", width="small"),
+                "height_m": st.column_config.NumberColumn("Височина (м)", format="%.2f", width="small")
             },
             use_container_width=True,
             key="elements_form_editor"
@@ -744,91 +744,91 @@ with tab3:
         client_input = st.text_input("Име на клиента:", "Няма посочен клиент")
         project_input = st.text_input("Име на обект:", "Обект TEKO")
 
-        if st.button("📄 Генерирай PDF Чертежи и Спецификация", type="primary"):
-            with st.spinner("Генериране на технически чертежи и изчисляване на спецификации..."):
+        pdf_elements_list = []
+        project_bom_summary = {}
+
+        for _, row in df_calc.iterrows():
+            elem_type = str(row.get("type", "wall"))
+            name = str(row.get("name", "Елемент"))
+            c_val = row.get("count")
+            cnt = int(float(c_val) if pd.notna(c_val) and c_val != "" else 1)
+            h_val = row.get("height_m")
+            h = float(h_val) if pd.notna(h_val) and h_val != "" else 3.0
+            thick = float(row.get("thickness_m") or 0.25) * 100
+
+            elem_label = format_element_label(elem_type, name)
+
+            l_a, l_b = 100, 100
+            if elem_type == "column":
+                w_val = row.get("width_m")
+                l_val = row.get("length_m")
+                l_a = float(w_val if pd.notna(w_val) and w_val != "" else 0.3) * 100
+                l_b = float(l_val if pd.notna(l_val) and l_val != "" else 0.5) * 100
+            elif elem_type == "wall":
+                l_val = row.get("length_m")
+                l_a = float(l_val if pd.notna(l_val) and l_val != "" else 5.0) * 100
+                l_b = l_a
+            elif elem_type == "l_wall":
+                l1_val = row.get("l1_m")
+                l2_val = row.get("l2_m")
+                l_a = float(l1_val if pd.notna(l1_val) and l1_val != "" else 2.0) * 100
+                l_b = float(l2_val if pd.notna(l2_val) and l2_val != "" else 2.0) * 100
+            elif elem_type == "u_wall":
+                l1_val = row.get("l1_m")
+                l2_val = row.get("l2_m")
+                l3_val = row.get("l3_m")
+                l_a = float(l1_val if pd.notna(l1_val) and l1_val != "" else 2.0) * 100
+                l_b = float(l2_val if pd.notna(l2_val) and l2_val != "" else 2.0) * 100
+
+            pdf_elements_list.append({
+                "name": elem_label,
+                "type_bg": "Колона" if elem_type == "column" else ("Права Стена / Шайба" if elem_type == "wall" else ("L-образна Стена / Шайба" if elem_type == "l_wall" else "П-образна Стена / Шайба")),
+                "length_a_cm": l_a,
+                "length_b_cm": l_b,
+                "height_cm": h * 100,
+                "thickness_cm": thick,
+                "count": cnt
+            })
+
+            elem_bom = calculate_element_bom(elem_type, l_a, l_b, h * 100, name=elem_label, thickness_cm=thick)
+            for k, v in elem_bom.items():
+                project_bom_summary[k] = project_bom_summary.get(k, 0) + v * cnt
+
+        if st.button("📄 Генерирай PDF с чертежи и спецификация", type="primary", use_container_width=True):
+            with st.spinner("Генериране на PDF документ..."):
                 try:
-                    pdf_elements = []
-                    bom_summary = {}
-
-                    for _, r in df_calc.iterrows():
-                        elem_type = str(r.get("type", "wall"))
-                        name = str(r.get("name", "Елемент"))
-                        h_val = float(r.get("height_m") or 3.0) * 100
-                        t_val = float(r.get("thickness_m") or 0.25) * 100
-
-                        if elem_type == "column":
-                            l_a = float(r.get("width_m") or 0.3) * 100
-                            l_b = float(r.get("length_m") or 0.5) * 100
-                            type_bg = "Колона"
-                        elif elem_type == "wall":
-                            l_a = float(r.get("length_m") or 5.0) * 100
-                            l_b = t_val
-                            type_bg = "Стена"
-                        elif elem_type == "l_wall":
-                            l_a = float(r.get("l1_m") or 2.0) * 100
-                            l_b = float(r.get("l2_m") or 2.0) * 100
-                            type_bg = "L-образна Стена / Шайба"
-                        elif elem_type == "u_wall":
-                            l_a = float(r.get("l1_m") or 2.0) * 100
-                            l_b = float(r.get("l2_m") or 2.0) * 100
-                            type_bg = "П-образна Стена / Шайба"
-                        else:
-                            l_a = 200
-                            l_b = 200
-                            type_bg = "Стена"
-
-                        elem_dict = {
-                            "name": format_element_label(elem_type, name),
-                            "type_bg": type_bg,
-                            "length_a_cm": l_a,
-                            "length_b_cm": l_b,
-                            "height_cm": h_val,
-                            "thickness_cm": t_val
-                        }
-                        pdf_elements.append(elem_dict)
-
-                        # Изчисляване на елементната спецификация чрез синхронизираната функция
-                        elem_bom = calculate_element_bom(type_bg, l_a, l_b, h_val, name=name, thickness_cm=t_val)
-                        for code, qty in elem_bom.items():
-                            bom_summary[code] = bom_summary.get(code, 0) + qty
-
-                    proj_info = {
-                        "client": client_input,
-                        "project": project_input
-                    }
-
-                    pdf_bytes = generate_pdf_drawings(pdf_elements, bom_summary, proj_info)
-
-                    st.success("✅ PDF чертежите и спецификацията са генерирани успешно!")
+                    proj_info = {"client": client_input, "project": project_input}
+                    pdf_bytes = generate_pdf_drawings(pdf_elements_list, project_bom_summary, proj_info)
+                    st.success("✅ PDF документът е генериран успешно!")
                     st.download_button(
-                        label="📥 Изтегли PDF с чертежи и спецификации",
+                        label="📥 Изтегли PDF Чертежи и Спецификация",
                         data=pdf_bytes,
                         file_name="Teko_Drawings.pdf",
                         mime="application/pdf",
-                        type="primary"
+                        use_container_width=True
                     )
                 except Exception as e:
-                    st.error(f"Грешка при генериране на PDF чертежите: {e}")
+                    st.error(f"Грешка при генериране на PDF: {e}")
 
 with tab4:
-    st.header("4. Търговска оферта")
+    st.header("4. Генериране на търговска оферта (Word)")
     df_calc = st.session_state["edited_df"]
 
     if df_calc.empty or len(df_calc) == 0:
-        st.info("ℹ️ Въведете елементи в Таб 1, за да можете да генерирате оферта.")
+        st.info("ℹ Няма въведени елементи. Въведете данни в Таб 1.")
     else:
+        c_name = st.text_input("Клиент / Фирма:", "Строителна Компания ООД", key="offer_client")
+        p_name = st.text_input("Име на обект за офертата:", "Жилищна сграда", key="offer_project")
+        o_date = st.date_input("Дата на офертата:", key="offer_date")
+        
         col_o1, col_o2 = st.columns(2)
         with col_o1:
-            offer_client = st.text_input("Клиент / Фирма:", "Строителна Компания ООД")
-            offer_project = st.text_input("Наименование на обект:", "Жилищна сграда")
-            offer_date = st.date_input("Дата на офертата:")
+            offer_type = st.selectbox("Тип оферта:", ["Наем на кофраж", "Закупуване на кофраж"])
         with col_o2:
-            offer_type = st.selectbox("Тип на офертата:", ["Наем на кофраж (€ / m² / месец)", "Закупуване на кофраж (€ / m²)"])
-            default_price = 25.0 if "наем" in offer_type.lower() else 120.0
-            price_per_m2 = st.number_input("Единична цена (€ / m²):", min_value=1.0, value=default_price, step=1.0)
+            price_per_m2 = st.number_input("Цена за m² (€):", min_value=0.0, value=25.0 if "наем" in offer_type.lower() else 120.0, step=1.0)
 
-        detailed_rows = []
-        total_a = 0.0
+        detailed_offer_rows = []
+        total_offer_area = 0.0
 
         for _, row in df_calc.iterrows():
             c_val = row.get("count")
@@ -837,77 +837,66 @@ with tab4:
             h = float(h_val) if pd.notna(h_val) and h_val != "" else 3.0
             elem_type = str(row.get("type", "wall"))
             name = str(row.get("name", "Елемент"))
+            elem_label = format_element_label(elem_type, name)
 
             area = 0.0
             dim_str = ""
-            elem_label = format_element_label(elem_type, name)
-
             if elem_type == "column":
-                w_val = row.get("width_m")
-                l_val = row.get("length_m")
-                w = float(w_val) if pd.notna(w_val) and w_val != "" else 0.3
-                l = float(l_val) if pd.notna(l_val) and l_val != "" else 0.5
+                w = float(row.get("width_m") or 0.3)
+                l = float(row.get("length_m") or 0.5)
                 area = 2 * (w + l) * h * cnt
                 dim_str = f"{int(w*100)}x{int(l*100)} cm, H={h:.1f}m"
             elif elem_type == "wall":
-                l_val = row.get("length_m")
-                t_val = row.get("thickness_m")
-                l = float(l_val) if pd.notna(l_val) and l_val != "" else 5.0
-                t = float(t_val) if pd.notna(t_val) and t_val != "" else 0.25
+                l = float(row.get("length_m") or 5.0)
+                t = float(row.get("thickness_m") or 0.25)
                 area = 2 * l * h * cnt
                 dim_str = f"L={l:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
             elif elem_type == "l_wall":
-                l1_val = row.get("l1_m")
-                l2_val = row.get("l2_m")
-                t_val = row.get("thickness_m")
-                l1 = float(l1_val) if pd.notna(l1_val) and l1_val != "" else 2.0
-                l2 = float(l2_val) if pd.notna(l2_val) and l2_val != "" else 2.0
-                t = float(t_val) if pd.notna(t_val) and t_val != "" else 0.25
+                l1 = float(row.get("l1_m") or 2.0)
+                l2 = float(row.get("l2_m") or 2.0)
+                t = float(row.get("thickness_m") or 0.25)
                 area = 2 * (l1 + l2) * h * cnt
                 dim_str = f"L={l1:.1f}+{l2:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
             elif elem_type == "u_wall":
-                l1_val = row.get("l1_m")
-                l2_val = row.get("l2_m")
-                l3_val = row.get("l3_m")
-                t_val = row.get("thickness_m")
-                l1 = float(l1_val) if pd.notna(l1_val) and l1_val != "" else 2.0
-                l2 = float(l2_val) if pd.notna(l2_val) and l2_val != "" else 2.0
-                l3 = float(l3_val) if pd.notna(l3_val) and l3_val != "" else 2.0
-                t = float(t_val) if pd.notna(t_val) and t_val != "" else 0.25
+                l1 = float(row.get("l1_m") or 2.0)
+                l2 = float(row.get("l2_m") or 2.0)
+                l3 = float(row.get("l3_m") or 2.0)
+                t = float(row.get("thickness_m") or 0.25)
                 area = 2 * (l1 + l2 + l3) * h * cnt
                 dim_str = f"L={l1:.1f}+{l2:.1f}+{l3:.1f}m, B={int(t*100)}cm, H={h:.1f}m"
 
-            total_a += area
-            row_total_price = area * price_per_m2
+            total_offer_area += area
+            row_sum = area * price_per_m2
 
-            detailed_rows.append({
+            detailed_offer_rows.append({
                 "Елемент": elem_label,
                 "Размери": dim_str,
                 "Брой": cnt,
-                "Площ (m²)": round(area, 2),
-                "Обща сума (€)": round(row_total_price, 2)
+                "Площ (m²)": area,
+                "Обща сума (€)": row_sum
             })
 
-        subtotal = total_a * price_per_m2
+        subtotal = total_offer_area * price_per_m2
         vat_amount = subtotal * 0.20
         grand_total = subtotal + vat_amount
 
         st.divider()
-        st.markdown(f"### 💰 Обща сума по оферта: **{subtotal:.2f} €** (без ДДС) | **{grand_total:.2f} €** (с ДДС)")
+        st.markdown(f"**Обща площ:** {total_offer_area:.2f} m² | **Сума без ДДС:** {subtotal:.2f} € | **Общо с ДДС:** {grand_total:.2f} €")
 
-        if st.button("📄 Генерирай Word оферта (.docx)", type="primary"):
-            with st.spinner("Генериране на официална оферта..."):
+        if st.button("📄 Генерирай Word оферта", type="primary", use_container_width=True):
+            with st.spinner("Създаване на Word документ с оферта..."):
                 try:
                     word_stream = generate_word_offer(
-                        offer_client, offer_project, offer_date, offer_type,
-                        price_per_m2, detailed_rows, total_a, subtotal, vat_amount, grand_total
+                        c_name, p_name, o_date, offer_type, price_per_m2,
+                        detailed_offer_rows, total_offer_area, subtotal, vat_amount, grand_total
                     )
                     st.success("✅ Офертата е генерирана успешно!")
                     st.download_button(
-                        label="📥 Изтегли оферта (Word)",
+                        label="📥 Изтегли Word Оферта (.docx)",
                         data=word_stream,
-                        file_name=f"Oferta_{offer_project.replace(' ', '_')}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        file_name=f"Teko_Offer_{p_name}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True
                     )
                 except Exception as e:
                     st.error(f"Грешка при генериране на офертата: {e}")
