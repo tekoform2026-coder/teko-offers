@@ -505,7 +505,7 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name="", thickness
 
     t = float(thickness_cm or 30)
     
-    # Използваме абсолютно същата логика за събиране на панелите като в чертежите
+    # Използваме същите правила за събиране на панелите
     panels_to_count = []
     w_a = calculate_panel_width_breakdown(dim_a)
     
@@ -531,6 +531,7 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name="", thickness
             code = format_panel_code(w, h)
             bom[code] = bom.get(code, 0) + 1
 
+    # Коригирани точни бройки на ъглите съгласно теко_calculator.py
     if is_l_wall:
         bom["Външен ъгъл EX"] = len(h_levels) * 3
         bom["Вътрешен ъгъл IN"] = len(h_levels) * 1
@@ -555,7 +556,7 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name="", thickness
         bom[item_code] = bom.get(item_code, 0) + item_qty
 
     return bom
-
+    
 # ==========================================
 # 6. ГЕНЕРИРАНЕ НА ЦЕЛИЯ PDF ДОКУМЕНТ
 # ==========================================
