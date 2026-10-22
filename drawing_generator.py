@@ -51,11 +51,14 @@ def setup_pdf_fonts():
         return False
 
 def calculate_height_breakdown(height_cm):
-    """Разбива височината на стандартни модули."""
+    """Разбива височината на стандартни модули, като избира най-близкия по-висок стандартен панел при остатък."""
     return solve_height_cm(height_cm)
 
 def calculate_panel_width_breakdown(width_cm):
-    """Разбива ширината в рамките на наличната дължина."""
+    """
+    Разбива ширината точно в рамките на наличната дължина, без да пречи на EX ъглите.
+    Вика основния решател от teko_calculator.
+    """
     panels_dict, _ = solve_width_cm(width_cm, 150)
     result = []
     for w, count in panels_dict.items():
@@ -147,7 +150,7 @@ def generate_overall_project_3d_buf(pdf_elements):
     return buf
 
 # ==========================================
-# 2. ИЗГЛЕД ОТГОРЕ (TOP VIEW)
+# 2. ИЗГЛЕД ОТГОРЕ (TOP VIEW) - С ТОЧНИ КОРИГИРАНИ EX КОРДИНАТИ ЗА L И U СТЕНИ
 # ==========================================
 def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемент"):
     fig, ax = plt.subplots(figsize=(3.5, 2.5), dpi=DPI_RESOLUTION)
@@ -160,7 +163,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
     n_str = str(name).lower()
     is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
     is_l_wall = "l" in w_str or "l-образна" in w_str or "l_wall" in w_str or "l-стена" in n_str
-    is_u_wall = "u" in w_str or "u-образна" in w_str or "u_wall" in w_str or "п" in w_str or "п-образна" in w_str or "ядро" in w_str or "ядро" in n_str
+    is_u_wall = "u" in w_str or "u-образна" in w_str or "u_wall" in w_str or "ядро" in w_str or "ядро" in n_str
 
     if is_column:
         ax.add_patch(patches.Rectangle((0, 0), a, b, facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2))
@@ -453,7 +456,7 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     n_str = str(name).lower()
     is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
     is_l_wall = "l" in w_str or "l-образна" in w_str or "l_wall" in w_str or "l-стена" in n_str
-    is_u_wall = "u" in w_str or "u-образна" in w_str or "u_wall" in w_str or "п" in w_str or "п-образна" in w_str or "ядро" in w_str or "ядро" in n_str
+    is_u_wall = "u" in w_str or "u-образна" in w_str or "u_wall" in w_str or "ядро" in w_str or "ядро" in n_str
     h_levels = calculate_height_breakdown(h)
 
     if is_l_wall:
@@ -576,7 +579,7 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name="", thickness
     n_str = str(name).lower()
     is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
     is_l_wall = "l" in w_str or "l-образна" in w_str or "l_wall" in w_str or "l-стена" in n_str
-    is_u_wall = "u" in w_str or "u-образна" in w_str or "u_wall" in w_str or "п" in w_str or "п-образна" in w_str or "ядро" in w_str or "ядро" in n_str
+    is_u_wall = "u" in w_str or "u-образна" in w_str or "u_wall" in w_str or "ядро" in w_str or "ядро" in n_str
 
     t = float(thickness_cm or 30)
     
