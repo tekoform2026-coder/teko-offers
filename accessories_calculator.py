@@ -101,7 +101,7 @@ def calculate_tie_rods(
     first_row_panel_type: str = "150x60_standing"
 ) -> Dict[str, Any]:
     """
-    Изчислява броя анкерни шпилки и затягащи гайки според нивата на анкериране (30, 90, 150 cm и т.н.)
+    Изчислява броя анкерни шпилки и затягащи гайки според нивалата на анкериране (30, 90, 150 cm и т.н.)
     и броя вертикални модули по дължината на стената.
     """
     a = float(dim_a_cm or 0)
@@ -175,30 +175,37 @@ def calculate_tie_rods(
 # ==========================================
 # 3. ИЗЧИСЛЯВАНЕ НА ЪГЛИ (EX И IN CORNERS)
 # ==========================================
-def calculate_corners(wall_type: str, height_breakdown: List[float]) -> Dict[str, int]:
+def calculate_corners(wall_type: str, height_cm: float) -> Dict[str, int]:
     """
-    Изчислява броя външни (EX) и вътрешни (IN) ъгли на база броя вертикални нива по височина.
+    Изчислява броя външни (EX) и вътрешни (IN) ъгли според реалната височина (height_cm)
+    и физическата височина на ъгловия профил (1.40 m), а не според броя панелни редове.
     """
-    num_levels = len(height_breakdown)
-    if num_levels == 0:
+    h = float(height_cm or 0)
+    if h <= 0:
         return {}
+
+    # Логика за брой ъгли по височина за един вертикален ръб:
+    if h <= 160.0:
+        corner_levels = 1
+    else:
+        corner_levels = math.ceil(h / 140.0)
 
     w_type_lower = str(wall_type).lower()
     bom = {}
 
     if "l" in w_type_lower or "l-образна" in w_type_lower:
-        # L-стена: 5 бр. EX и 1 бр. IN на ниво
-        bom["Външен ъгъл EX"] = num_levels * 5
-        bom["Вътрешен ъгъл IN"] = num_levels * 1
+        # L-стена: 5 бр. EX и 1 бр. IN на вертикална линия
+        bom["Външен ъгъл EX"] = corner_levels * 5
+        bom["Вътрешен ъгъл IN"] = corner_levels * 1
     elif "u" in w_type_lower or "u-образна" in w_type_lower or "п" in w_type_lower or "п-образна" in w_type_lower or "ядро" in w_type_lower:
-        # U-ядро / П-стена: 6 бр. EX и 2 бр. IN на ниво
-        bom["Външен ъгъл EX"] = num_levels * 6
-        bom["Вътрешен ъгъл IN"] = num_levels * 2
+        # U-ядро / П-стена: 6 бр. EX и 2 бр. IN на вертикална линия
+        bom["Външен ъгъл EX"] = corner_levels * 6
+        bom["Вътрешен ъгъл IN"] = corner_levels * 2
     elif "колона" in w_type_lower or "column" in w_type_lower:
-        bom["Външен ъгъл EX"] = num_levels * 4
+        bom["Външен ъгъл EX"] = corner_levels * 4
     else:
         # Права стена
-        bom["Външен ъгъл EX"] = num_levels * 4
+        bom["Външен ъгъл EX"] = corner_levels * 4
 
     return bom
 
@@ -377,7 +384,7 @@ def calculate_accessories(wall_type: str, dim_a_cm: float, dim_b_cm: float, heig
     ties_res = calculate_tie_rods(wall_type, a, b, h, width_breakdown_a=width_breakdown_a, first_row_panel_type=first_row_panel_type)
     props_res = calculate_push_pull_props(wall_type, a, b, h)
     clamps_res = calculate_panel_clamps(width_breakdown_a, height_breakdown, sides_count=sides_count)
-    corners_res = calculate_corners(wall_type, height_breakdown)
+    corners_res = calculate_corners(wall_type, h)
 
     combined_bom = {}
     for sub_res in [walers_res["bom"], ties_res["bom"], props_res["bom"], clamps_res["bom"], corners_res]:
