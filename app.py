@@ -549,11 +549,14 @@ with tab1:
     st.divider()
     st.subheader("✏️ Таблица с вертикални кофражни елементи")
     
-    # CSS за намаляване на шрифта САМО на заглавията (надписите) в таблицата, без да пипаме числата
+    # CSS: Намаляваме шрифта на заглавията (надписите) и премахваме излишните ограничения, 
+    # за да могат колоните да се разширят спрямо дължината на текста си.
     st.markdown("""
         <style>
         [data-testid="stDataEditor"] th div {
-            font-size: 11px !important;
+            font-size: 11.5px !important;
+            white-space: normal !important;
+            overflow: visible !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -563,16 +566,16 @@ with tab1:
             st.session_state["edited_df"],
             num_rows="dynamic",
             column_config={
-                "type": st.column_config.SelectboxColumn("Тип елемент", options=["column", "wall", "l_wall", "u_wall"], required=True, default="wall", width="medium"),
-                "name": st.column_config.TextColumn("Наименование / Маркировка", width="medium"),
-                "count": st.column_config.NumberColumn("Брой", min_value=1, step=1, default=1, width="medium"),
-                "width_m": st.column_config.NumberColumn("Ширина (м)", format="%.2f", width="medium"),
-                "length_m": st.column_config.NumberColumn("Дължина (м)", format="%.2f", width="medium"),
-                "thickness_m": st.column_config.NumberColumn("Дебелина (м)", format="%.2f", width="medium"),
-                "l1_m": st.column_config.NumberColumn("Рамо 1 (м)", format="%.2f", width="medium"),
-                "l2_m": st.column_config.NumberColumn("Рамо 2 (м)", format="%.2f", width="medium"),
-                "l3_m": st.column_config.NumberColumn("Рамо 3 (м)", format="%.2f", width="medium"),
-                "height_m": st.column_config.NumberColumn("Височина (м)", format="%.2f", width="medium")
+                "type": st.column_config.SelectboxColumn("Тип елемент", options=["column", "wall", "l_wall", "u_wall"], required=True, default="wall", width="auto"),
+                "name": st.column_config.TextColumn("Наименование / Маркировка", width="auto"),
+                "count": st.column_config.NumberColumn("Брой", min_value=1, step=1, default=1, width="auto"),
+                "width_m": st.column_config.NumberColumn("Ширина (м)", format="%.2f", width="auto"),
+                "length_m": st.column_config.NumberColumn("Дължина (м)", format="%.2f", width="auto"),
+                "thickness_m": st.column_config.NumberColumn("Дебелина (м)", format="%.2f", width="auto"),
+                "l1_m": st.column_config.NumberColumn("Рамо 1 (м)", format="%.2f", width="auto"),
+                "l2_m": st.column_config.NumberColumn("Рамо 2 (м)", format="%.2f", width="auto"),
+                "l3_m": st.column_config.NumberColumn("Рамо 3 (м)", format="%.2f", width="auto"),
+                "height_m": st.column_config.NumberColumn("Височина (м)", format="%.2f", width="auto")
             },
             use_container_width=True,
             key="elements_form_editor"
