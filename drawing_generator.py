@@ -197,12 +197,10 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
                                facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2)
         ax.add_patch(poly)
         
-        # Точни външни EX ъгли в крайните точки на L-формата
         for x_pos, y_pos in [(-15, -15), (a, -15), (-15, b)]:
             ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
             ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
 
-        # Вътрешен IN ъгъл на чупката
         ax.add_patch(patches.Rectangle((t, t), 15, 15, facecolor=COLOR_CORNER_IN, edgecolor='black', linewidth=0.8))
         ax.text(t + 7.5, t + 7.5, "IN", ha='center', va='center', fontsize=5.5, fontweight='bold', color='white')
 
@@ -251,12 +249,10 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
                                facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2)
         ax.add_patch(poly)
 
-        # КОРИГИРАНО: 4 външни EX ъгъла точно в четирите крайни външни ъгъла на U-профила
         for x_pos, y_pos in [(-15, -15), (m_len, -15), (-15, a), (m_len, a)]:
             ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
             ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
 
-        # 2 вътрешни IN ъгъла в чупките на U
         for in_x, in_y in [(t, t), (m_len - t - 15, t)]:
             ax.add_patch(patches.Rectangle((in_x, in_y), 15, 15, facecolor=COLOR_CORNER_IN, edgecolor='black', linewidth=0.8))
             ax.text(in_x + 7.5, in_y + 7.5, "IN", ha='center', va='center', fontsize=5.5, fontweight='bold', color='white')
@@ -611,17 +607,7 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name="", thickness
             code = format_panel_code(w, h)
             bom[code] = bom.get(code, 0) + 1
 
-    if is_l_wall:
-        bom["Външен ъгъл EX"] = len(h_levels) * 3
-        bom["Вътрешен ъгъл IN"] = len(h_levels) * 1
-    elif is_u_wall:
-        bom["Външен ъгъл EX"] = len(h_levels) * 4
-        bom["Вътрешен ъгъл IN"] = len(h_levels) * 2
-    elif is_column:
-        bom["Външен ъгъл EX"] = len(h_levels) * 4
-    else:
-        bom["Външен ъгъл EX"] = len(h_levels) * 4
-
+    # Всички изчисления на аксесоари и ъгли се извикват изцяло от accessories_calculator.py
     acc_res = calculate_accessories(
         wall_type=wall_type,
         dim_a_cm=dim_a,
@@ -637,7 +623,7 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name="", thickness
     return bom
     
 # ==========================================
-# 6. ГЕНЕРИРАНЕ НА ЦЕЛИЯ PDF ДОКУМЕНТ
+# 6. ГЕНЕРИРАНЕ НА ЦЕЛИЯ ДОКУМЕНТ
 # ==========================================
 def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
     has_dejavu = setup_pdf_fonts()
