@@ -549,6 +549,15 @@ with tab1:
     st.divider()
     st.subheader("✏️ Таблица с вертикални кофражни елементи")
     
+    # CSS за намаляване на шрифта САМО на заглавията (надписите) в таблицата, без да пипаме числата
+    st.markdown("""
+        <style>
+        [data-testid="stDataEditor"] th div {
+            font-size: 11px !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
     with st.form("manual_elements_form"):
         edited_grid = st.data_editor(
             st.session_state["edited_df"],
@@ -556,14 +565,14 @@ with tab1:
             column_config={
                 "type": st.column_config.SelectboxColumn("Тип елемент", options=["column", "wall", "l_wall", "u_wall"], required=True, default="wall", width="medium"),
                 "name": st.column_config.TextColumn("Наименование / Маркировка", width="medium"),
-                "count": st.column_config.NumberColumn("Брой", min_value=1, step=1, default=1, width="small"),
-                "width_m": st.column_config.NumberColumn("Ширина (м)", format="%.2f", width="small"),
-                "length_m": st.column_config.NumberColumn("Дължина (м)", format="%.2f", width="small"),
-                "thickness_m": st.column_config.NumberColumn("Дебелина (м)", format="%.2f", width="small"),
-                "l1_m": st.column_config.NumberColumn("Рамо 1 (м)", format="%.2f", width="small"),
-                "l2_m": st.column_config.NumberColumn("Рамо 2 (м)", format="%.2f", width="small"),
-                "l3_m": st.column_config.NumberColumn("Рамо 3 (м)", format="%.2f", width="small"),
-                "height_m": st.column_config.NumberColumn("Височина (м)", format="%.2f", width="small")
+                "count": st.column_config.NumberColumn("Брой", min_value=1, step=1, default=1, width="medium"),
+                "width_m": st.column_config.NumberColumn("Ширина (м)", format="%.2f", width="medium"),
+                "length_m": st.column_config.NumberColumn("Дължина (м)", format="%.2f", width="medium"),
+                "thickness_m": st.column_config.NumberColumn("Дебелина (м)", format="%.2f", width="medium"),
+                "l1_m": st.column_config.NumberColumn("Рамо 1 (м)", format="%.2f", width="medium"),
+                "l2_m": st.column_config.NumberColumn("Рамо 2 (м)", format="%.2f", width="medium"),
+                "l3_m": st.column_config.NumberColumn("Рамо 3 (м)", format="%.2f", width="medium"),
+                "height_m": st.column_config.NumberColumn("Височина (м)", format="%.2f", width="medium")
             },
             use_container_width=True,
             key="elements_form_editor"
