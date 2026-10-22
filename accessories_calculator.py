@@ -190,7 +190,7 @@ def calculate_corners(wall_type: str, height_breakdown: List[float]) -> Dict[str
         # L-стена: 5 бр. EX и 1 бр. IN на ниво
         bom["Външен ъгъл EX"] = num_levels * 5
         bom["Вътрешен ъгъл IN"] = num_levels * 1
-    elif "u" in w_type_lower or "u-образна" in w_type_lower or "ядро" in w_type_lower:
+    elif "u" in w_type_lower or "u-образна" in w_type_lower or "п" in w_type_lower or "п-образна" in w_type_lower or "ядро" in w_type_lower:
         # U-ядро / П-стена: 6 бр. EX и 2 бр. IN на ниво
         bom["Външен ъгъл EX"] = num_levels * 6
         bom["Вътрешен ъгъл IN"] = num_levels * 2
