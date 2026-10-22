@@ -54,6 +54,8 @@ def calculate_walers(
     bom = {}
     positions = []
 
+    w_type_lower = str(wall_type).lower()
+
     if is_column:
         if requires_walers_a or requires_walers_b:
             waler_code = "Ригел AW 100" if max(a, b) <= 100 else "Ригел AW 150"
@@ -71,7 +73,7 @@ def calculate_walers(
             for level_h in waler_heights:
                 positions.append({"height_cm": level_h, "side": "A (двустранно)", "type": code_a})
 
-        if wall_type == "L-образна стена" and requires_walers_b:
+        if ("l" in w_type_lower or "l-образна" in w_type_lower) and requires_walers_b:
             code_b = f"Ригел AW {200 if b >= 200 else 150 if b >= 150 else 100}"
             count_b = num_levels * 2
             bom[code_b] = bom.get(code_b, 0) + count_b
@@ -112,7 +114,7 @@ def calculate_tie_rods(
     if a <= 35.0 and (is_column or b <= 35.0):
         return {"bom": {}, "rods_count": 0, "nuts_count": 0, "levels_count": 0}
 
-    # 2. Опроделяне на височинните нива за анкериране (съвпадащи с ригелите)
+    # 2. Определяне на височинните нива за анкериране (съвпадащи с ригелите)
     if "120x60_standing" in first_row_panel_type:
         candidate_heights = [18.0, 60.0]
         curr_h = 120.0
@@ -141,10 +143,11 @@ def calculate_tie_rods(
             return len(w_breakdown)
         return max(1, int(math.ceil(width_cm / 60.0)))
 
+    w_type_lower = str(wall_type).lower()
     if is_column:
         cols_a = get_tie_cols(a, width_breakdown_a)
         total_rods = num_levels * cols_a
-    elif wall_type == "L-образна стена":
+    elif "l" in w_type_lower or "l-образна" in w_type_lower:
         cols_a = get_tie_cols(a, width_breakdown_a)
         cols_b = get_tie_cols(b, None)
         total_rods = num_levels * (cols_a + cols_b)
@@ -170,7 +173,38 @@ def calculate_tie_rods(
 
 
 # ==========================================
-# 3. ИЗЧИСЛЯВАНЕ НА ВЕРТИКАЛИЗАТОРИ (PUSH-PULL PROPS)
+# 3. ИЗЧИСЛЯВАНЕ НА ЪГЛИ (EX И IN CORNERS)
+# ==========================================
+def calculate_corners(wall_type: str, height_breakdown: List[float]) -> Dict[str, int]:
+    """
+    Изчислява броя външни (EX) и вътрешни (IN) ъгли на база броя вертикални нива по височина.
+    """
+    num_levels = len(height_breakdown)
+    if num_levels == 0:
+        return {}
+
+    w_type_lower = str(wall_type).lower()
+    bom = {}
+
+    if "l" in w_type_lower or "l-образна" in w_type_lower:
+        # L-стена: 5 бр. EX и 1 бр. IN на ниво
+        bom["Външен ъгъл EX"] = num_levels * 5
+        bom["Вътрешен ъгъл IN"] = num_levels * 1
+    elif "u" in w_type_lower or "u-образна" in w_type_lower or "ядро" in w_type_lower:
+        # U-ядро / П-стена: 6 бр. EX и 2 бр. IN на ниво
+        bom["Външен ъгъл EX"] = num_levels * 6
+        bom["Вътрешен ъгъл IN"] = num_levels * 2
+    elif "колона" in w_type_lower or "column" in w_type_lower:
+        bom["Външен ъгъл EX"] = num_levels * 4
+    else:
+        # Права стена
+        bom["Външен ъгъл EX"] = num_levels * 4
+
+    return bom
+
+
+# ==========================================
+# 4. ИЗЧИСЛЯВАНЕ НА ВЕРТИКАЛИЗАТОРИ (PUSH-PULL PROPS)
 # ==========================================
 def calculate_push_pull_props(wall_type: str, dim_a_cm: float, dim_b_cm: float, height_cm: float) -> Dict[str, Any]:
     """
@@ -201,6 +235,7 @@ def calculate_push_pull_props(wall_type: str, dim_a_cm: float, dim_b_cm: float, 
     total_props = 0
     details = []
 
+    w_type_lower = str(wall_type).lower()
     if is_column:
         if a <= 60 and b <= 60:
             total_props = 2
@@ -217,7 +252,7 @@ def calculate_push_pull_props(wall_type: str, dim_a_cm: float, dim_b_cm: float, 
         total_props += count_a * 2
         details.append({"side": "Страна A (двустранно)", "count": count_a * 2, "positions_cm": pos_a})
         
-        if wall_type == "L-образна стена" and b > 0:
+        if ("l" in w_type_lower or "l-образна" in w_type_lower) and b > 0:
             count_b, pos_b = get_props_count_for_length(b)
             total_props += count_b * 2
             details.append({"side": "Страна B (двустранно)", "count": count_b * 2, "positions_cm": pos_b})
@@ -233,12 +268,12 @@ def calculate_push_pull_props(wall_type: str, dim_a_cm: float, dim_b_cm: float, 
 
 
 # ==========================================
-# 4. ИЗЧИСЛЯВАНЕ НА РЪКОХВАТКИ (HANDLES)
+# 5. ИЗЧИСЛЯВАНЕ НА РЪКОХВАТКИ (HANDLES)
 # ==========================================
 def calculate_panel_clamps(width_breakdown: List[float], height_breakdown: List[float], sides_count: int = 2) -> Dict[str, Any]:
     """
     Алгоритъм за преброяване на пластмасовите ръкохватки (H8, H6, H5, H4)
-    по допирателните фуги между панелите според Спесификация.xlsx.
+    по допирателните фуги между панелите според Спецификация.xlsx.
     """
     cols = len(width_breakdown)
     rows = len(height_breakdown)
@@ -316,21 +351,22 @@ def calculate_panel_clamps(width_breakdown: List[float], height_breakdown: List[
 
 
 # ==========================================
-# 5. ГЛАВНА ФУНКЦИЯ: CALCULATE_ACCESSORIES
+# 6. ГЛАВНА ФУНКЦИЯ: CALCULATE_ACCESSORIES
 # ==========================================
 def calculate_accessories(wall_type: str, dim_a_cm: float, dim_b_cm: float, height_cm: float,
                           width_breakdown_a: List[float] = None, 
                           height_breakdown: List[float] = None,
                           first_row_panel_type: str = "150x60_standing") -> Dict[str, Any]:
     """
-    Обединяваща функция за аксесоарите (включва и шпилки и гайки).
+    Обединяваща функция за аксесоарите, шпилките, гайките и ъглите.
     """
     a = float(dim_a_cm or 0)
     b = float(dim_b_cm or a)
     h = float(height_cm or 0)
     
     is_column = "Колона" in wall_type or "колона" in wall_type.lower()
-    sides_count = 4 if is_column else (4 if wall_type == "L-образна стена" else 2)
+    w_type_lower = str(wall_type).lower()
+    sides_count = 4 if is_column else (4 if ("l" in w_type_lower or "l-образна" in w_type_lower) else 2)
 
     if not width_breakdown_a:
         width_breakdown_a = [a]
@@ -341,9 +377,10 @@ def calculate_accessories(wall_type: str, dim_a_cm: float, dim_b_cm: float, heig
     ties_res = calculate_tie_rods(wall_type, a, b, h, width_breakdown_a=width_breakdown_a, first_row_panel_type=first_row_panel_type)
     props_res = calculate_push_pull_props(wall_type, a, b, h)
     clamps_res = calculate_panel_clamps(width_breakdown_a, height_breakdown, sides_count=sides_count)
+    corners_res = calculate_corners(wall_type, height_breakdown)
 
     combined_bom = {}
-    for sub_res in [walers_res["bom"], ties_res["bom"], props_res["bom"], clamps_res["bom"]]:
+    for sub_res in [walers_res["bom"], ties_res["bom"], props_res["bom"], clamps_res["bom"], corners_res]:
         for code, qty in sub_res.items():
             combined_bom[code] = combined_bom.get(code, 0) + qty
 
@@ -352,5 +389,6 @@ def calculate_accessories(wall_type: str, dim_a_cm: float, dim_b_cm: float, heig
         "walers": walers_res,
         "tie_rods": ties_res,
         "push_pull_props": props_res,
-        "clamps_and_handles": clamps_res
+        "clamps_and_handles": clamps_res,
+        "corners": corners_res
     }
