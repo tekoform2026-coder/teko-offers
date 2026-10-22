@@ -259,8 +259,8 @@ def calculate_l_wall(l1_m, l2_m, thickness_m, height_m, count=1):
                 detailed_panels[key] = detailed_panels.get(key, 0) + (int(c) * count)
                 
     total_panel_pieces = sum(detailed_panels.values())
-    inner_corners = 1 * len(height_levels) * count
-    outer_corners = 3 * len(height_levels) * count  # Коригирано на 3 външни ъгъла EX за L-стена
+    inner_corners = 1 * len(height_levels) * count  # 1 вътрешен ъгъл IN за едно ниво
+    outer_corners = 5 * len(height_levels) * count  # 5 външни ъгъла EX за едно ниво
     
     handles = (total_panel_pieces + inner_corners + outer_corners) * 4
     tie_rods = len(height_levels) * 4 * count
@@ -307,8 +307,8 @@ def calculate_u_wall(l1_m, l2_m, l3_m, thickness_m, height_m, count=1):
                 detailed_panels[key] = detailed_panels.get(key, 0) + (int(c) * count)
                 
     total_panel_pieces = sum(detailed_panels.values())
-    inner_corners = 2 * len(height_levels) * count
-    outer_corners = 4 * len(height_levels) * count  # Коригирано на 4 външни ъгъла EX за U-стена
+    inner_corners = 2 * len(height_levels) * count  # 2 вътрешни ъгъла IN за едно ниво
+    outer_corners = 6 * len(height_levels) * count  # 6 външни ъгъла EX за едно ниво
     
     handles = (total_panel_pieces + inner_corners + outer_corners) * 4
     tie_rods = len(height_levels) * 6 * count
