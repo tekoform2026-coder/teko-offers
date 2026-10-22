@@ -197,13 +197,16 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
                                facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2)
         ax.add_patch(poly)
         
+        # 3 външни ъгъла EX
         for x_pos, y_pos in [(-15, -15), (a, -15), (-15, b)]:
             ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
             ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
 
+        # 1 вътрешен ъгъл IN на чупката
         ax.add_patch(patches.Rectangle((t, t), 15, 15, facecolor=COLOR_CORNER_IN, edgecolor='black', linewidth=0.8))
         ax.text(t + 7.5, t + 7.5, "IN", ha='center', va='center', fontsize=5.5, fontweight='bold', color='white')
 
+        # Външни панели по рамо а (отдолу)
         w_a = calculate_panel_width_breakdown(a)
         curr_x = 0
         for w in w_a:
@@ -211,6 +214,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(curr_x + w/2, -7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
             curr_x += w
 
+        # Външни панели по рамо b (отляво)
         w_b = calculate_panel_width_breakdown(b)
         curr_y = 0
         for w in w_b:
@@ -218,16 +222,25 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(-7.5, curr_y + w/2, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
             curr_y += w
 
-        w_inner_a = calculate_panel_width_breakdown(a - t)
-        curr_x = t
+        # Затваряне на челата на рамената (дебелина t)
+        ax.add_patch(patches.Rectangle((a, 0), 15, t, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
+        ax.text(a + 7.5, t/2, f"{int(t)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
+
+        ax.add_patch(patches.Rectangle((0, b), t, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
+        ax.text(t/2, b + 7.5, f"{int(t)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
+
+        # Вътрешни панели по хоризонталното рамо (след вътрешния ъгъл)
+        w_inner_a = calculate_panel_width_breakdown(max(0, a - t - 15))
+        curr_x = t + 15
         for w in w_inner_a:
             if curr_x + w <= a:
                 ax.add_patch(patches.Rectangle((curr_x, t), w, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
                 ax.text(curr_x + w/2, t + 7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
                 curr_x += w
 
-        w_inner_b = calculate_panel_width_breakdown(b - t)
-        curr_y = t
+        # Вътрешни панели по вертикалното рамо (след вътрешния ъгъл)
+        w_inner_b = calculate_panel_width_breakdown(max(0, b - t - 15))
+        curr_y = t + 15
         for w in w_inner_b:
             if curr_y + w <= b:
                 ax.add_patch(patches.Rectangle((t, curr_y), 15, w, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
@@ -243,14 +256,17 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
                                facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2)
         ax.add_patch(poly)
 
+        # 4 външни ъгъла EX
         for x_pos, y_pos in [(-15, -15), (m_len, -15), (-15, a), (m_len, a)]:
             ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
             ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
 
+        # 2 вътрешни ъгъла IN
         for in_x, in_y in [(t, t), (m_len - t - 15, t)]:
             ax.add_patch(patches.Rectangle((in_x, in_y), 15, 15, facecolor=COLOR_CORNER_IN, edgecolor='black', linewidth=0.8))
             ax.text(in_x + 7.5, in_y + 7.5, "IN", ha='center', va='center', fontsize=5.5, fontweight='bold', color='white')
 
+        # Външни панели по долното основно рамо
         w_m = calculate_panel_width_breakdown(m_len)
         curr_x = 0
         for w in w_m:
@@ -258,6 +274,7 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(curr_x + w/2, -7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
             curr_x += w
 
+        # Външни панели по лявото и дясното рамо
         w_side = calculate_panel_width_breakdown(a)
         curr_y = 0
         for w in w_side:
@@ -267,18 +284,44 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(m_len + 7.5, curr_y + w/2, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
             curr_y += w
 
-        w_inner_m = calculate_panel_width_breakdown(m_len - 2 * t)
-        curr_x = t
+        # Чела на горните свободни краища на U-стената (дебелина t)
+        ax.add_patch(patches.Rectangle((0, a), t, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
+        ax.text(t/2, a + 7.5, f"{int(t)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
+        
+        ax.add_patch(patches.Rectangle((m_len - t, a), t, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
+        ax.text(m_len - t/2, a + 7.5, f"{int(t)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
+
+        # Вътрешни панели по долното рамо между IN ъглите
+        w_inner_m = calculate_panel_width_breakdown(max(0, m_len - 2 * t - 30))
+        curr_x = t + 15
         for w in w_inner_m:
             if curr_x + w <= m_len - t:
                 ax.add_patch(patches.Rectangle((curr_x, t), w, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
                 ax.text(curr_x + w/2, t + 7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
                 curr_x += w
 
+        # ВЪТРЕШНИ ПАНЕЛИ ПО ЛЯВОТО ВЕРТИКАЛНО РАМО НА U
+        w_inner_side = calculate_panel_width_breakdown(max(0, a - t - 15))
+        curr_y = t + 15
+        for w in w_inner_side:
+            if curr_y + w <= a:
+                ax.add_patch(patches.Rectangle((t, curr_y), 15, w, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
+                ax.text(t + 7.5, curr_y + w/2, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
+                curr_y += w
+
+        # ВЪТРЕШНИ ПАНЕЛИ ПО ДЯСНОТО ВЕРТИКАЛНО РАМО НА U
+        curr_y = t + 15
+        for w in w_inner_side:
+            if curr_y + w <= a:
+                ax.add_patch(patches.Rectangle((m_len - t - 15, curr_y), 15, w, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
+                ax.text(m_len - t - 7.5, curr_y + w/2, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
+                curr_y += w
+
         ax.set_xlim(-25, m_len + 25)
         ax.set_ylim(-25, a + 25)
 
     else:
+        # Стандартна права стена
         ax.add_patch(patches.Rectangle((0, 0), a, t, facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2))
         
         for x_pos, y_pos in [(-15, -15), (a, -15), (a, t), (-15, t)]:
