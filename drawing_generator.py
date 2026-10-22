@@ -149,7 +149,7 @@ def generate_overall_project_3d_buf(pdf_elements):
     return buf
 
 # ==========================================
-# 2. ИЗГЛЕД ОТГОРЕ (TOP VIEW) - ПРЕЦИЗИРАН С ВЪНШНИ И ВЪТРЕШНИ ПАНЕЛИ
+# 2. ИЗГЛЕД ОТГОРЕ (TOP VIEW)
 # ==========================================
 def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемент"):
     fig, ax = plt.subplots(figsize=(3.5, 2.5), dpi=DPI_RESOLUTION)
@@ -197,16 +197,13 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
                                facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2)
         ax.add_patch(poly)
         
-        # 3 външни ъгъла EX на пълния контур
         for x_pos, y_pos in [(-15, -15), (a, -15), (-15, b)]:
             ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
             ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
 
-        # 1 вътрешен ъгъл IN на чупката
         ax.add_patch(patches.Rectangle((t, t), 15, 15, facecolor=COLOR_CORNER_IN, edgecolor='black', linewidth=0.8))
         ax.text(t + 7.5, t + 7.5, "IN", ha='center', va='center', fontsize=5.5, fontweight='bold', color='white')
 
-        # Външни панели по рамо а (отдолу)
         w_a = calculate_panel_width_breakdown(a)
         curr_x = 0
         for w in w_a:
@@ -214,7 +211,6 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(curr_x + w/2, -7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
             curr_x += w
 
-        # Външни панели по рамо b (отляво)
         w_b = calculate_panel_width_breakdown(b)
         curr_y = 0
         for w in w_b:
@@ -222,14 +218,12 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(-7.5, curr_y + w/2, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
             curr_y += w
 
-        # Затваряне на челата на рамената (дебелина t)
         ax.add_patch(patches.Rectangle((a, 0), 15, t, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
         ax.text(a + 7.5, t/2, f"{int(t)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
 
         ax.add_patch(patches.Rectangle((0, b), t, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
         ax.text(t/2, b + 7.5, f"{int(t)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
 
-        # Вътрешни панели по хоризонталното рамо (след вътрешния ъгъл)
         w_inner_a = calculate_panel_width_breakdown(max(0, a - t - 15))
         curr_x = t + 15
         for w in w_inner_a:
@@ -238,7 +232,6 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
                 ax.text(curr_x + w/2, t + 7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
                 curr_x += w
 
-        # Вътрешни панели по вертикалното рамо (след вътрешния ъгъл)
         w_inner_b = calculate_panel_width_breakdown(max(0, b - t - 15))
         curr_y = t + 15
         for w in w_inner_b:
@@ -256,17 +249,14 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
                                facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2)
         ax.add_patch(poly)
 
-        # 4 външни ъгъла EX
         for x_pos, y_pos in [(-15, -15), (m_len, -15), (-15, a), (m_len - t, a)]:
             ax.add_patch(patches.Rectangle((x_pos, y_pos), 15, 15, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8))
             ax.text(x_pos+7.5, y_pos+7.5, "EX", ha='center', va='center', fontsize=5.5, fontweight='bold')
 
-        # 2 вътрешни ъгъла IN
         for in_x, in_y in [(t, t), (m_len - t - 15, t)]:
             ax.add_patch(patches.Rectangle((in_x, in_y), 15, 15, facecolor=COLOR_CORNER_IN, edgecolor='black', linewidth=0.8))
             ax.text(in_x + 7.5, in_y + 7.5, "IN", ha='center', va='center', fontsize=5.5, fontweight='bold', color='white')
 
-        # Външни панели по долното основно рамо
         w_m = calculate_panel_width_breakdown(m_len)
         curr_x = 0
         for w in w_m:
@@ -274,7 +264,6 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(curr_x + w/2, -7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
             curr_x += w
 
-        # Външни панели по лявото и дясното рамо
         w_side = calculate_panel_width_breakdown(a)
         curr_y = 0
         for w in w_side:
@@ -284,14 +273,12 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
             ax.text(m_len + 7.5, curr_y + w/2, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
             curr_y += w
 
-        # Чела на горните свободни краища на U-стената (дебелина t)
         ax.add_patch(patches.Rectangle((0, a), t, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
         ax.text(t/2, a + 7.5, f"{int(t)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
         
         ax.add_patch(patches.Rectangle((m_len - t, a), t, 15, facecolor=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, linewidth=0.8))
         ax.text(m_len - t/2, a + 7.5, f"{int(t)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
 
-        # Вътрешни панели по долното рамо между IN ъглите
         w_inner_m = calculate_panel_width_breakdown(max(0, m_len - 2 * t - 30))
         curr_x = t + 15
         for w in w_inner_m:
@@ -300,7 +287,6 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
                 ax.text(curr_x + w/2, t + 7.5, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold')
                 curr_x += w
 
-        # Вътрешни панели по лявото вертикално рамо на U
         w_inner_side = calculate_panel_width_breakdown(max(0, a - t - 15))
         curr_y = t + 15
         for w in w_inner_side:
@@ -309,7 +295,6 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
                 ax.text(t + 7.5, curr_y + w/2, f"{int(w)}", ha='center', va='center', fontsize=5.5, fontweight='bold', rotation=90)
                 curr_y += w
 
-        # Вътрешни панели по дясното вертикално рамо на U
         curr_y = t + 15
         for w in w_inner_side:
             if curr_y + w <= a:
@@ -321,7 +306,6 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
         ax.set_ylim(-25, a + 25)
 
     else:
-        # Стандартна права стена
         ax.add_patch(patches.Rectangle((0, 0), a, t, facecolor=COLOR_CONCRETE, edgecolor='#2C3E50', linewidth=1.2))
         
         for x_pos, y_pos in [(-15, -15), (a, -15), (a, t), (-15, t)]:
@@ -456,7 +440,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     return buf
 
 # ==========================================
-# 4. ИНДИВИДУАЛЕН 3D КОФРАЖЕН ИЗГЛЕД (3D AXONOMETRY)
+# 4. ИНДИВИДУАЛЕН 3D КОФРАЖЕН ИЗГЛЕД (3D AXONOMETRY) - С ГЕОМЕТРИЧНИ ЧУПКИ ЗА L И U СТЕНИ
 # ==========================================
 def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, name="Елемент"):
     fig = plt.figure(figsize=(3.5, 2.5), dpi=DPI_RESOLUTION)
@@ -471,12 +455,15 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     n_str = str(name).lower()
     is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
     is_l_wall = "l" in w_str or "l-образна" in w_str or "l_wall" in w_str or "l-стена" in n_str
-    dim_y = b if is_column else t
+    is_u_wall = "u" in w_str or "u-образна" in w_str or "u_wall" in w_str or "ядро" in w_str or "ядро" in n_str
+    h_levels = calculate_height_breakdown(h)
 
     if is_l_wall:
+        # 3D изглед за L-образна стена (две рамена под 90 градуса с дебелина t)
         w_a = calculate_panel_width_breakdown(a)
-        h_levels = calculate_height_breakdown(h)
+        w_b = calculate_panel_width_breakdown(b)
 
+        # Външен кофражен контур по рамо А (по протежение на X)
         curr_z = 0
         for h_val in h_levels:
             curr_x = 0
@@ -484,10 +471,68 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
                 ax.bar3d(curr_x, -12, curr_z, w_val, 12, h_val, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=0.9, linewidth=0.3)
                 curr_x += w_val
             curr_z += h_val
+
+        # Външен кофражен контур по рамо B (по протежение на Y)
+        curr_z = 0
+        for h_val in h_levels:
+            curr_y = 0
+            for w_val in w_b:
+                ax.bar3d(-12, curr_y, curr_z, 12, w_val, h_val, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=0.9, linewidth=0.3)
+                curr_y += w_val
+            curr_z += h_val
+
+        # Външни ъгли EX за L-формата
+        for xc, yc in [(-12, -12), (a - 12, -12), (-12, b - 12)]:
+            ax.bar3d(xc, yc, 0, 12, 12, h, color=COLOR_CORNER_EX, edgecolor='black', alpha=0.9, linewidth=0.3)
+
+        ax.set_xlim(-30, max(a, b) + 30)
+        ax.set_ylim(-30, max(a, b) + 30)
+
+    elif is_u_wall:
+        # 3D изглед за U-образна стена (три рамена)
+        m_len = b if b else a
+        w_m = calculate_panel_width_breakdown(m_len)
+        w_side = calculate_panel_width_breakdown(a)
+
+        # Долно основно рамо на U (по X)
+        curr_z = 0
+        for h_val in h_levels:
+            curr_x = 0
+            for w_val in w_m:
+                ax.bar3d(curr_x, -12, curr_z, w_val, 12, h_val, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=0.9, linewidth=0.3)
+                curr_x += w_val
+            curr_z += h_val
+
+        # Ляво вертикално рамо на U (по Y)
+        curr_z = 0
+        for h_val in h_levels:
+            curr_y = 0
+            for w_val in w_side:
+                ax.bar3d(-12, curr_y, curr_z, 12, w_val, h_val, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=0.9, linewidth=0.3)
+                curr_y += w_val
+            curr_z += h_val
+
+        # Дясно вертикално рамо на U (по Y)
+        curr_z = 0
+        for h_val in h_levels:
+            curr_y = 0
+            for w_val in w_side:
+                ax.bar3d(m_len - 12, curr_y, curr_z, 12, w_val, h_val, color=COLOR_PANEL, edgecolor=COLOR_PANEL_BORDER, alpha=0.9, linewidth=0.3)
+                curr_y += w_val
+            curr_z += h_val
+
+        # 4 външни ъгъла EX за U-формата
+        for xc, yc in [(-12, -12), (m_len - 12, -12), (-12, a - 12), (m_len - 12, a - 12)]:
+            ax.bar3d(xc, yc, 0, 12, 12, h, color=COLOR_CORNER_EX, edgecolor='black', alpha=0.9, linewidth=0.3)
+
+        ax.set_xlim(-30, m_len + 30)
+        ax.set_ylim(-30, a + 30)
+
     else:
+        # Стандартна права стена или колона
+        dim_y = b if is_column else t
         w_a = calculate_panel_width_breakdown(a)
         w_b = calculate_panel_width_breakdown(b) if is_column else []
-        h_levels = calculate_height_breakdown(h)
 
         curr_z = 0
         for h_val in h_levels:
@@ -518,11 +563,10 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
         for xc, yc in [(-12, -12), (a, -12), (a, dim_y), (-12, dim_y)]:
             ax.bar3d(xc, yc, 0, 12, 12, h, color=COLOR_CORNER_EX, edgecolor='black', alpha=0.9, linewidth=0.3)
 
-    ax.set_xlim(-30, a + 30)
-    ax.set_ylim(-30, (b if is_l_wall or is_column else dim_y) + 30)
+        ax.set_xlim(-30, a + 30)
+        ax.set_ylim(-30, (b if is_column else dim_y) + 30)
+
     ax.set_zlim(0, h + 20)
-    ax.set_box_aspect([a + 60, (b if is_l_wall or is_column else dim_y) + 60, h + 20])
-    
     ax.axis('off')
     ax.view_init(elev=25, azim=-55)
     ax.set_title("3D Изометрия (3D View)", fontsize=8, fontweight='bold', pad=2)
