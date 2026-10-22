@@ -51,14 +51,11 @@ def setup_pdf_fonts():
         return False
 
 def calculate_height_breakdown(height_cm):
-    """Разбива височината на стандартни модули, като избира най-близкия по-висок стандартен панел при остатък."""
+    """Разбива височината на стандартни модули."""
     return solve_height_cm(height_cm)
 
 def calculate_panel_width_breakdown(width_cm):
-    """
-    Разбива ширината точно в рамките на наличната дължина, без да пречи на EX ъглите.
-    Вика основния решател от teko_calculator.
-    """
+    """Разбива ширината в рамките на наличната дължина."""
     panels_dict, _ = solve_width_cm(width_cm, 150)
     result = []
     for w, count in panels_dict.items():
@@ -150,7 +147,7 @@ def generate_overall_project_3d_buf(pdf_elements):
     return buf
 
 # ==========================================
-# 2. ИЗГЛЕД ОТГОРЕ (TOP VIEW) - С КОРЕКТНО РАЗПОЗНАВАНЕ НА П-СТЕНИ И ЪГЛИ
+# 2. ИЗГЛЕД ОТГОРЕ (TOP VIEW)
 # ==========================================
 def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемент"):
     fig, ax = plt.subplots(figsize=(3.5, 2.5), dpi=DPI_RESOLUTION)
@@ -441,7 +438,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     return buf
 
 # ==========================================
-# 4. ИНДИВИДУАЛЕН 3D КОФРАЖЕН ИЗГЛЕД (3D AXONOMETRY) - С КОРЕКТНО РАЗПОЗНАВАНЕ НА П-СТЕНИ
+# 4. ИНДИВИДУАЛЕН 3D КОФРАЖЕН ИЗГЛЕД (3D AXONOMETRY)
 # ==========================================
 def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, name="Елемент"):
     fig = plt.figure(figsize=(3.5, 2.5), dpi=DPI_RESOLUTION)
@@ -569,7 +566,7 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     return buf
 
 # ==========================================
-# 5. СИНХРОНИЗИРАНА СПЕЦИФИКАЦИЯ ЗА ЕЛЕМЕНТА (BOM) - С КОРЕКТНО РАЗПОЗНАВАНЕ НА П-СТЕНИ
+# 5. СИНХРОНИЗИРАНА СПЕЦИФИКАЦИЯ ЗА ЕЛЕМЕНТА (BOM)
 # ==========================================
 def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name="", thickness_cm=30):
     bom = {}
