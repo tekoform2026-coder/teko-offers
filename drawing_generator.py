@@ -1,6 +1,7 @@
 # drawing_generator.py
 import io
 import os
+import math
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
@@ -348,7 +349,6 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
 # 3. ИЗГЛЕД ОТПРЕД (FRONT VIEW) - ТОЧЕН МАЩАБ И ЪГЛИ ПО НИВА
 # ==========================================
 def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елемент"):
-    import math
     a = float(dim_a or 100)
     b = float(dim_b or 100)
     h_cm = float(height_cm or 300)
@@ -359,7 +359,6 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
     is_l_wall = "l" in w_str or "l-образна" in w_str or "l_wall" in w_str or "l-стена" in n_str
 
-    # Динамично изчисляване на пропорциите според дължините на страните
     side_b_len = b if is_column or is_l_wall else a
     max_len = max(a, side_b_len)
     fig_w1 = max(2.5, 7.5 * (a / (a + side_b_len)))
@@ -374,10 +373,9 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     def draw_side_front(ax, side_len, title_label):
         w_panels = calculate_panel_width_breakdown(side_len)
         
-        # Пресмятаме реалния брой ъглови нива (по 140 cm)
+        # Гарантираме визуализацията на ъгловите нива по цялата височина (наставени един върху друг)
         num_corner_levels = 1 if h_cm <= 160 else math.ceil(h_cm / 140.0)
         
-        # Чертане на ъглите по нива надградени един върху друг
         for c_idx in range(num_corner_levels):
             c_y = c_idx * 140.0
             c_h = min(140.0, h_cm - c_y)
@@ -428,7 +426,6 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                 ax.plot([dim_line_x - 3, dim_line_x + 3], [w_y, w_y], color='#27AE60', linewidth=1.2, zorder=4)
                 ax.text(dim_line_x - 5, w_y, f"{int(w_y)}", ha='right', va='center', fontsize=5, fontweight='bold', color='#1E8449')
 
-        # Запазваме твърди и равни граници на графиката за уеднаквен мащаб
         ax.set_xlim(-35, side_len + 20)
         ax.set_ylim(-10, h_cm + 15)
         ax.set_aspect('equal', adjustable='box')
@@ -466,6 +463,8 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
     is_u_wall = "u" in w_str or "u-образна" in w_str or "u_wall" in w_str or "ядро" in w_str or "ядро" in n_str
     h_levels = calculate_height_breakdown(h)
 
+    num_corner_levels = 1 if h <= 160 else math.ceil(h / 140.0)
+
     if is_l_wall:
         w_a = calculate_panel_width_breakdown(a)
         w_b = calculate_panel_width_breakdown(b)
@@ -487,7 +486,11 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
             curr_z += h_val
 
         for xc, yc in [(-12, -12), (a, -12), (-12, b)]:
-            ax.bar3d(xc, yc, 0, 12, 12, h, color=COLOR_CORNER_EX, edgecolor='black', alpha=0.9, linewidth=0.3)
+            for c_idx in range(num_corner_levels):
+                c_z = c_idx * 140.0
+                c_h = min(140.0, h - c_z)
+                if c_h > 0:
+                    ax.bar3d(xc, yc, c_z, 12, 12, c_h, color=COLOR_CORNER_EX, edgecolor='black', alpha=0.9, linewidth=0.3)
 
         ax.set_xlim(-30, max(a, b) + 30)
         ax.set_ylim(-30, max(a, b) + 30)
@@ -522,7 +525,11 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
             curr_z += h_val
 
         for xc, yc in [(-12, -12), (m_len - 12, -12), (-12, a), (m_len - 12, a)]:
-            ax.bar3d(xc, yc, 0, 12, 12, h, color=COLOR_CORNER_EX, edgecolor='black', alpha=0.9, linewidth=0.3)
+            for c_idx in range(num_corner_levels):
+                c_z = c_idx * 140.0
+                c_h = min(140.0, h - c_z)
+                if c_h > 0:
+                    ax.bar3d(xc, yc, c_z, 12, 12, c_h, color=COLOR_CORNER_EX, edgecolor='black', alpha=0.9, linewidth=0.3)
 
         ax.set_xlim(-30, m_len + 30)
         ax.set_ylim(-30, a + 30)
@@ -559,7 +566,11 @@ def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, na
                 curr_z += h_val
 
         for xc, yc in [(-12, -12), (a, -12), (a, dim_y), (-12, dim_y)]:
-            ax.bar3d(xc, yc, 0, 12, 12, h, color=COLOR_CORNER_EX, edgecolor='black', alpha=0.9, linewidth=0.3)
+            for c_idx in range(num_corner_levels):
+                c_z = c_idx * 140.0
+                c_h = min(140.0, h - c_z)
+                if c_h > 0:
+                    ax.bar3d(xc, yc, c_z, 12, 12, c_h, color=COLOR_CORNER_EX, edgecolor='black', alpha=0.9, linewidth=0.3)
 
         ax.set_xlim(-30, a + 30)
         ax.set_ylim(-30, (b if is_column else dim_y) + 30)
