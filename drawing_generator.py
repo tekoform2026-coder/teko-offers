@@ -67,7 +67,7 @@ def calculate_panel_width_breakdown(width_cm):
     return result
 
 # ==========================================
-# 1. ОБЩ 3D ИЗГЛЕД НА ЦЕЛИЯ ОБЕКТ (PROJECT 3D)
+# 1. ОБЩ 3D ИЗГЛЕД НА ЦЕЛИЯ ОБЕКТ (PROJECT 3D) - ЗАПАЗЕН ПРИ НУЖДА
 # ==========================================
 def generate_overall_project_3d_buf(pdf_elements):
     fig = plt.figure(figsize=(7.5, 3.5), dpi=DPI_RESOLUTION)
@@ -663,9 +663,41 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
     story.append(Paragraph(f"<b>Обект:</b> {project} | <b>Клиент:</b> {client}", subtitle_style))
     story.append(Spacer(1, 8))
 
-    # СТРАНИЦА 2 С ОБОБЩЕНАТА КОЛИЧЕСТВЕНА СМЕТКА (PROJECT BOM) Е ПРЕМАХНАТА.
-    # ДОКУМЕНТЪТ ПРОДЪЛЖАВА ДИРЕКТНО С ИНДИВИДУАЛНИТЕ ЧЕРТЕЖИ И СПЕЦИФИКАЦИИ НА ЕЛЕМЕНТИТЕ.
+    # --- ВРЪЩАНЕ НА ОБОБЩЕНАТА КОЛИЧЕСТВЕНА СМЕТКА (PROJECT BOM) НА ПЪРВА СТРАНИЦА ---
+    story.append(Paragraph("<b>Обобщена количествена сметка (Project BOM)</b>", title_style))
+    story.append(Spacer(1, 4))
+    
+    table_data = [[
+        Paragraph("<b>№</b>", cell_bold_style),
+        Paragraph("<b>Артикул / Код</b>", cell_bold_style),
+        Paragraph("<b>Система</b>", cell_bold_style),
+        Paragraph("<b>Количество (бр.)</b>", cell_bold_style)
+    ]]
+    
+    idx = 1
+    for code, qty in sorted(bom_summary.items()):
+        table_data.append([
+            Paragraph(str(idx), cell_style),
+            Paragraph(str(code), cell_style),
+            Paragraph("TEKO", cell_style),
+            Paragraph(str(qty), cell_style)
+        ])
+        idx += 1
 
+    summary_table = Table(table_data, colWidths=[30, 270, 70, 110])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#003366')),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
+    ]))
+    
+    story.append(summary_table)
+    story.append(PageBreak())  # Преминаване към следващата страница за чертежите на елементите
+
+    # --- ИНДИВИДУАЛНИ ЧЕРТЕЖИ И СПЕЦИФИКАЦИИ НА ЕЛЕМЕНТИТЕ ---
     for idx, elem in enumerate(pdf_elements):
         w_type = str(elem.get('type_bg') or elem.get('wall_type') or 'Стена')
         e_name = str(elem.get('name', f'Елемент {idx+1}'))
@@ -678,13 +710,14 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         story.append(Paragraph(f"Тип: {w_type} | Размери: {int(dim_a)}х{int(dim_b)} см | Височина: {int(height_cm)} cm", subtitle_style))
         story.append(Spacer(1, 4))
 
-        # Графични буфери (само изглед отгоре, изглед отпред и 3Д изометрия без дублиране)
+        # Графични буфери (Изглед отгоре е увлечен за по-добра видимост)
         top_buf = generate_top_view_buf(w_type, dim_a, dim_b, thickness, e_name)
         front_buf = generate_front_view_buf(w_type, dim_a, dim_b, height_cm, e_name)
         ax_buf = generate_3d_axonometry_buf(w_type, dim_a, dim_b, height_cm, thickness, e_name)
 
-        img_top = RLImage(top_buf, width=160, height=114)
-        img_ax = RLImage(ax_buf, width=160, height=114)
+        # Увеличени размери за "Изглед отгоре" и "3D Изометрия" (от 160 на 220 ширина)
+        img_top = RLImage(top_buf, width=220, height=156)
+        img_ax = RLImage(ax_buf, width=220, height=156)
         
         top_ax_table = Table([[img_top, img_ax]], colWidths=[240, 240])
         top_ax_table.setStyle(TableStyle([
