@@ -28,12 +28,12 @@ matplotlib.rcParams['text.antialiased'] = True
 matplotlib.rcParams['path.simplify'] = False
 
 # Цветова палитра TEKO
-COLOR_PANEL = '#F1948A'         # Кофражен панел (розово-червен)[cite: 1]
-COLOR_PANEL_BORDER = '#681910'  # Кант на панел (тъмночервен)[cite: 1]
-COLOR_CORNER_EX = '#52BE80'     # Външен ъгъл EX (яркозелено)[cite: 1]
-COLOR_CORNER_IN = '#1E8449'     # Вътрешен ъгъл IN (тъмнозелено)[cite: 1]
-COLOR_WALER = '#27AE60'         # Ригел AW / Вертикализатори (зелено)[cite: 1]
-COLOR_CONCRETE = '#D5D8DC'      # Бетонно ядро (светлосиво)[cite: 1]
+COLOR_PANEL = '#F1948A'         # Кофражен панел (розово-червен)
+COLOR_PANEL_BORDER = '#681910'  # Кант на панел (тъмночервен)
+COLOR_CORNER_EX = '#52BE80'     # Външен ъгъл EX (яркозелено)
+COLOR_CORNER_IN = '#1E8449'     # Вътрешен ъгъл IN (тъмнозелено)
+COLOR_WALER = '#27AE60'         # Ригел AW / Вертикализатори (зелено)
+COLOR_CONCRETE = '#D5D8DC'      # Бетонно ядро (светлосиво)
 
 def setup_pdf_fonts():
     """Регистрира кирилски шрифт в ReportLab."""
@@ -51,14 +51,11 @@ def setup_pdf_fonts():
         return False
 
 def calculate_height_breakdown(height_cm):
-    """Разбива височината на стандартни модули, като избира най-близкия по-висок стандартен панел при остатък."""
+    """Разбива височината на стандартни модули."""
     return solve_height_cm(height_cm)
 
 def calculate_panel_width_breakdown(width_cm):
-    """
-    Разбива ширината точно в рамките на наличната дължина, без да пречи на EX ъглите.
-    Вика основния решател от teko_calculator.
-    """
+    """Разбива ширината точно в рамките на наличната дължина."""
     panels_dict, _ = solve_width_cm(width_cm, 150)
     result = []
     for w, count in panels_dict.items():
@@ -67,7 +64,7 @@ def calculate_panel_width_breakdown(width_cm):
     return result
 
 # ==========================================
-# 1. ОБЩ 3D ИЗГЛЕД НА ЦЕЛИЯ ОБЕКТ (PROJECT 3D) - ЗАПАЗЕН ПРИ НУЖДА
+# 1. ОБЩ 3D ИЗГЛЕД НА ЦЕЛИЯ ОБЕКТ
 # ==========================================
 def generate_overall_project_3d_buf(pdf_elements):
     fig = plt.figure(figsize=(7.5, 3.5), dpi=DPI_RESOLUTION)
@@ -348,11 +345,10 @@ def generate_top_view_buf(wall_type, dim_a, dim_b, thickness, name="Елемен
     return buf
 
 # ==========================================
-# 3. ИЗГЛЕД ОТПРЕД (FRONT VIEW)
+# 3. ИЗГЛЕД ОТПРЕД (FRONT VIEW) - ТОЧЕН МАЩАБ И ЪГЛИ ПО НИВА
 # ==========================================
 def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елемент"):
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.5, 3.2), dpi=DPI_RESOLUTION)
-    
+    import math
     a = float(dim_a or 100)
     b = float(dim_b or 100)
     h_cm = float(height_cm or 300)
@@ -363,19 +359,31 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     is_column = "колона" in w_str or "column" in w_str or "колона" in n_str
     is_l_wall = "l" in w_str or "l-образна" in w_str or "l_wall" in w_str or "l-стена" in n_str
 
+    # Динамично изчисляване на пропорциите според дължините на страните
+    side_b_len = b if is_column or is_l_wall else a
+    max_len = max(a, side_b_len)
+    fig_w1 = max(2.5, 7.5 * (a / (a + side_b_len)))
+    fig_w2 = max(2.5, 7.5 * (side_b_len / (a + side_b_len)))
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.5, 3.2), gridspec_kw={'width_ratios': [fig_w1, fig_w2]}, dpi=DPI_RESOLUTION)
+
     needs_walers = True
-    if is_column:
-        max_col_dim = max(a, b)
-        if max_col_dim <= 35:
-            needs_walers = False
+    if is_column and max(a, b) <= 35:
+        needs_walers = False
 
     def draw_side_front(ax, side_len, title_label):
         w_panels = calculate_panel_width_breakdown(side_len)
         
-        # Ъглите в ТЕКО са с максимална височина 140 см (показваме ги реално по нива, а не опънати до горе)
-        corner_draw_h = min(h_cm, 140.0) if h_cm <= 160 else 140.0
-        ax.add_patch(patches.Rectangle((-10, 0), 10, corner_draw_h, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
-        ax.add_patch(patches.Rectangle((side_len, 0), 10, corner_draw_h, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
+        # Пресмятаме реалния брой ъглови нива (по 140 cm)
+        num_corner_levels = 1 if h_cm <= 160 else math.ceil(h_cm / 140.0)
+        
+        # Чертане на ъглите по нива надградени един върху друг
+        for c_idx in range(num_corner_levels):
+            c_y = c_idx * 140.0
+            c_h = min(140.0, h_cm - c_y)
+            if c_h > 0:
+                ax.add_patch(patches.Rectangle((-10, c_y), 10, c_h, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
+                ax.add_patch(patches.Rectangle((side_len, c_y), 10, c_h, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
 
         waler_positions = []
         if needs_walers:
@@ -397,11 +405,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                                          linewidth=0.8, edgecolor=COLOR_PANEL_BORDER, facecolor=COLOR_PANEL, zorder=1)
                 ax.add_patch(rect)
                 
-                if int(h_val) == 60 and int(w_val) == 60:
-                    text_str = "150/60"
-                else:
-                    text_str = f"{int(h_val)}/{int(w_val)}"
-
+                text_str = f"{int(h_val)}/{int(w_val)}"
                 font_sz = 5.5
                 ax.text(curr_x + w_val / 2, curr_y + h_val / 2, text_str,
                         ha='center', va='center', fontsize=font_sz, color='#111111', fontweight='bold', 
@@ -424,14 +428,15 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
                 ax.plot([dim_line_x - 3, dim_line_x + 3], [w_y, w_y], color='#27AE60', linewidth=1.2, zorder=4)
                 ax.text(dim_line_x - 5, w_y, f"{int(w_y)}", ha='right', va='center', fontsize=5, fontweight='bold', color='#1E8449')
 
-        ax.set_xlim(-38, side_len + 20)
+        # Запазваме твърди и равни граници на графиката за уеднаквен мащаб
+        ax.set_xlim(-35, side_len + 20)
         ax.set_ylim(-10, h_cm + 15)
-        ax.set_aspect('equal', adjustable='datalim')
+        ax.set_aspect('equal', adjustable='box')
         ax.axis('off')
         ax.set_title(f"Страна {title_label} ({int(side_len)}x{int(h_cm)} cm)", fontsize=8, fontweight='bold')
 
     draw_side_front(ax1, a, "A")
-    draw_side_front(ax2, b, "B" if is_column or is_l_wall else "А1")
+    draw_side_front(ax2, side_b_len, "B" if is_column or is_l_wall else "А1")
 
     fig.suptitle("Изглед отпред (Front View)", fontsize=9, fontweight='bold', y=0.98)
     plt.tight_layout()
@@ -443,7 +448,7 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     return buf
 
 # ==========================================
-# 4. ИНДИВИДУАЛЕН 3D КОФРАЖЕН ИЗГЛЕД (3D AXONOMETRY)
+# 4. ИНДИВИДУАЛЕН 3D КОФРАЖЕН ИЗГЛЕД
 # ==========================================
 def generate_3d_axonometry_buf(wall_type, dim_a, dim_b, height_cm, thickness, name="Елемент"):
     fig = plt.figure(figsize=(3.5, 2.5), dpi=DPI_RESOLUTION)
@@ -610,7 +615,6 @@ def calculate_element_bom(wall_type, dim_a, dim_b, height_cm, name="", thickness
             code = format_panel_code(w, h)
             bom[code] = bom.get(code, 0) + 1
 
-    # Всички изчисления на аксесоари и ъгли се извикват изцяло от accessories_calculator.py
     acc_res = calculate_accessories(
         wall_type=wall_type,
         dim_a_cm=dim_a,
@@ -665,7 +669,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
     story.append(Paragraph(f"<b>Обект:</b> {project} | <b>Клиент:</b> {client}", subtitle_style))
     story.append(Spacer(1, 8))
 
-    # --- ОБОБЩЕНА КОЛИЧЕСТВЕНА СМЕТКА (PROJECT BOM) НА ПЪРВА СТРАНИЦА ---
+    # --- ОБОБЩЕНА КОЛИЧЕСТВЕНА СМЕТКА (PROJECT BOM) ---
     story.append(Paragraph("<b>Обобщена количествена сметка (Project BOM)</b>", title_style))
     story.append(Spacer(1, 4))
     
@@ -697,9 +701,9 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
     ]))
     
     story.append(summary_table)
-    story.append(PageBreak())  # Преминаване към следващата страница за чертежите
+    story.append(PageBreak())
 
-    # --- ИНДИВИДУАЛНИ ЧЕРТЕЖИ И СПЕЦИФИКАЦИИ НА ЕЛЕМЕНТИТЕ ---
+    # --- ИНДИВИДУАЛНИ ЧЕРТЕЖИ И СПЕЦИФИКАЦИИ ---
     for idx, elem in enumerate(pdf_elements):
         w_type = str(elem.get('type_bg') or elem.get('wall_type') or 'Стена')
         e_name = str(elem.get('name', f'Елемент {idx+1}'))
@@ -712,12 +716,10 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         story.append(Paragraph(f"Тип: {w_type} | Размери: {int(dim_a)}х{int(dim_b)} см | Височина: {int(height_cm)} cm", subtitle_style))
         story.append(Spacer(1, 4))
 
-        # Графични буфери
         top_buf = generate_top_view_buf(w_type, dim_a, dim_b, thickness, e_name)
         front_buf = generate_front_view_buf(w_type, dim_a, dim_b, height_cm, e_name)
         ax_buf = generate_3d_axonometry_buf(w_type, dim_a, dim_b, height_cm, thickness, e_name)
 
-        # Фиксирани еднакви размери (мащаб) за изглед отгоре и 3D изометрия
         img_top = RLImage(top_buf, width=200, height=142)
         img_ax = RLImage(ax_buf, width=200, height=142)
         
