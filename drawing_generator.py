@@ -715,7 +715,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         front_buf = generate_front_view_buf(w_type, dim_a, dim_b, height_cm, e_name)
         ax_buf = generate_3d_axonometry_buf(w_type, dim_a, dim_b, height_cm, thickness, e_name)
 
-        # Увеличени размери за "Изглед отгоре" и "3D Изометрия" (от 160 на 220 ширина)
+        # Увеличени размери за "Изглед отгоре" и "3D Изометрия"
         img_top = RLImage(top_buf, width=220, height=156)
         img_ax = RLImage(ax_buf, width=220, height=156)
         
@@ -729,7 +729,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         story.append(top_ax_table)
         story.append(Spacer(1, 4))
 
-        img_front = RLImage(front_buf, width=340, height=145)
+        img_front = RLImage(front_buf, width=440, height=188)
         front_table = Table([[img_front]], colWidths=[480])
         front_table.setStyle(TableStyle([
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
