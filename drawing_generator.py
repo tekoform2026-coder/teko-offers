@@ -372,8 +372,10 @@ def generate_front_view_buf(wall_type, dim_a, dim_b, height_cm, name="Елеме
     def draw_side_front(ax, side_len, title_label):
         w_panels = calculate_panel_width_breakdown(side_len)
         
-        ax.add_patch(patches.Rectangle((-10, 0), 10, h_cm, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
-        ax.add_patch(patches.Rectangle((side_len, 0), 10, h_cm, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
+        # Ъглите в ТЕКО са с максимална височина 140 см (показваме ги реално по нива, а не опънати до горе)
+        corner_draw_h = min(h_cm, 140.0) if h_cm <= 160 else 140.0
+        ax.add_patch(patches.Rectangle((-10, 0), 10, corner_draw_h, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
+        ax.add_patch(patches.Rectangle((side_len, 0), 10, corner_draw_h, facecolor=COLOR_CORNER_EX, edgecolor='black', linewidth=0.8, zorder=1))
 
         waler_positions = []
         if needs_walers:
@@ -663,7 +665,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
     story.append(Paragraph(f"<b>Обект:</b> {project} | <b>Клиент:</b> {client}", subtitle_style))
     story.append(Spacer(1, 8))
 
-    # --- ВРЪЩАНЕ НА ОБОБЩЕНАТА КОЛИЧЕСТВЕНА СМЕТКА (PROJECT BOM) НА ПЪРВА СТРАНИЦА ---
+    # --- ОБОБЩЕНА КОЛИЧЕСТВЕНА СМЕТКА (PROJECT BOM) НА ПЪРВА СТРАНИЦА ---
     story.append(Paragraph("<b>Обобщена количествена сметка (Project BOM)</b>", title_style))
     story.append(Spacer(1, 4))
     
@@ -695,7 +697,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
     ]))
     
     story.append(summary_table)
-    story.append(PageBreak())  # Преминаване към следващата страница за чертежите на елементите
+    story.append(PageBreak())  # Преминаване към следващата страница за чертежите
 
     # --- ИНДИВИДУАЛНИ ЧЕРТЕЖИ И СПЕЦИФИКАЦИИ НА ЕЛЕМЕНТИТЕ ---
     for idx, elem in enumerate(pdf_elements):
@@ -710,14 +712,14 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         story.append(Paragraph(f"Тип: {w_type} | Размери: {int(dim_a)}х{int(dim_b)} см | Височина: {int(height_cm)} cm", subtitle_style))
         story.append(Spacer(1, 4))
 
-        # Графични буфери (Изглед отгоре е увлечен за по-добра видимост)
+        # Графични буфери
         top_buf = generate_top_view_buf(w_type, dim_a, dim_b, thickness, e_name)
         front_buf = generate_front_view_buf(w_type, dim_a, dim_b, height_cm, e_name)
         ax_buf = generate_3d_axonometry_buf(w_type, dim_a, dim_b, height_cm, thickness, e_name)
 
-        # Увеличени размери за "Изглед отгоре" и "3D Изометрия"
-        img_top = RLImage(top_buf, width=220, height=156)
-        img_ax = RLImage(ax_buf, width=220, height=156)
+        # Фиксирани еднакви размери (мащаб) за изглед отгоре и 3D изометрия
+        img_top = RLImage(top_buf, width=200, height=142)
+        img_ax = RLImage(ax_buf, width=200, height=142)
         
         top_ax_table = Table([[img_top, img_ax]], colWidths=[240, 240])
         top_ax_table.setStyle(TableStyle([
@@ -729,7 +731,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         story.append(top_ax_table)
         story.append(Spacer(1, 4))
 
-        img_front = RLImage(front_buf, width=440, height=188)
+        img_front = RLImage(front_buf, width=420, height=178)
         front_table = Table([[img_front]], colWidths=[480])
         front_table.setStyle(TableStyle([
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
