@@ -178,13 +178,13 @@ def calculate_tie_rods(
 def calculate_corners(wall_type: str, height_cm: float) -> Dict[str, int]:
     """
     Изчислява броя външни (EX) и вътрешни (IN) ъгли според реалната височина (height_cm)
-    и физическата височина на ъгловия профил (1.40 m), а не според броя панелни редове.
+    и физическата височина на ъгловия профил (1.40 m), без излишно умножение по нива за H <= 160 cm.
     """
     h = float(height_cm or 0)
     if h <= 0:
         return {}
 
-    # Логика за брой ъгли по височина за един вертикален ръб:
+    # За височина до 160 см включително е нужен строго 1 ъгъл по височина
     if h <= 160.0:
         corner_levels = 1
     else:
@@ -194,21 +194,17 @@ def calculate_corners(wall_type: str, height_cm: float) -> Dict[str, int]:
     bom = {}
 
     if "l" in w_type_lower or "l-образна" in w_type_lower:
-        # L-стена: 5 бр. EX и 1 бр. IN на вертикална линия
         bom["Външен ъгъл EX"] = corner_levels * 5
         bom["Вътрешен ъгъл IN"] = corner_levels * 1
     elif "u" in w_type_lower or "u-образна" in w_type_lower or "п" in w_type_lower or "п-образна" in w_type_lower or "ядро" in w_type_lower:
-        # U-ядро / П-стена: 6 бр. EX и 2 бр. IN на вертикална линия
         bom["Външен ъгъл EX"] = corner_levels * 6
         bom["Вътрешен ъгъл IN"] = corner_levels * 2
     elif "колона" in w_type_lower or "column" in w_type_lower:
         bom["Външен ъгъл EX"] = corner_levels * 4
     else:
-        # Права стена
         bom["Външен ъгъл EX"] = corner_levels * 4
 
     return bom
-
 
 # ==========================================
 # 4. ИЗЧИСЛЯВАНЕ НА ВЕРТИКАЛИЗАТОРИ (PUSH-PULL PROPS)
