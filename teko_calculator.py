@@ -41,6 +41,7 @@ def format_panel_code(width_cm, height_cm):
         elif width_cm <= 15:
             return f"TC 60/{width_cm}"
         else:
+            # Защита срещу генерация на несъществуващ стандартен панел 60/60
             return f"TK 60/{width_cm}"
     
     if width_cm <= 15 and height_cm in [120, 150]:
