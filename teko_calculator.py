@@ -30,8 +30,8 @@ OPTIMAL_REMAINDERS = {
 def format_panel_code(width_cm, height_cm):
     """
     Генерира каталожното наименование според официалната спецификация ТЕКО.
-    Строго разграничава изправени от полегнали панели и гарантира,
-    че няма несъществуващ панел 60/60.
+    Строго разграничава изправени от полегнали панели и напълно 
+    елиминира появата на несъществуващия панел 60/60.
     """
     if height_cm == 60:
         if width_cm == 150:
@@ -42,7 +42,7 @@ def format_panel_code(width_cm, height_cm):
             return f"TC 60/{width_cm}"
         else:
             # Защита срещу генерация на несъществуващ стандартен панел 60/60
-            return f"TK 60/{width_cm}"
+            return f"TK 150/60 (полегнал)"
     
     if width_cm <= 15 and height_cm in [120, 150]:
         return f"TC {height_cm}/{width_cm}"
