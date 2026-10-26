@@ -154,15 +154,18 @@ def _face(name, segments, levels, start=None, end=None):
     }
 
 def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=25,
-                   l1_cm=0, l2_cm=0, l3_cm=0, closed_ends=0):
+                   l1_cm=0, l2_cm=0, l3_cm=0, closed_ends=0,
+                   closed_end_1=None, closed_end_2=None):
     """
     Разположение на панелите по страни и редове за един елемент.
 
     elem_type: "column" (width x length), "wall" (length, thickness),
                "l_wall" (l1 = рамо A, l2 = рамо B, thickness),
                "u_wall" (l1 = рамо A, l2 = гръб B, l3 = рамо C, thickness).
-    closed_ends: 0/1/2 затворени челни края (стени). При 1 се затваря краят на рамо A
-                 (при права стена - десният край).
+    closed_end_1 / closed_end_2: затворени челни края (стени). Край 1 е краят на рамо A
+                 (при права стена - десният), край 2 - краят на последното рамо B / C
+                 (при права стена - левият).
+    closed_ends: 0/1/2 - кратък запис, когато не е зададено кой край: 1 = край 1, 2 = двата.
 
     Връща речник с height_levels, faces (всяка с rows = ширини по редове отдолу нагоре)
     и corners (брой позиции EX / IN).
@@ -170,7 +173,10 @@ def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=2
     levels = solve_height_cm(height_cm)
     t = float(thickness_cm or 0)
     k = t + IN_CORNER_CM
-    closed_ends = max(0, min(2, int(closed_ends or 0)))
+    if closed_end_1 is None and closed_end_2 is None:
+        n = max(0, min(2, int(closed_ends or 0)))
+        closed_end_1, closed_end_2 = n >= 1, n >= 2
+    closed = [bool(closed_end_1), bool(closed_end_2)]
     faces = []
     ex, inn = 0, 0
 
@@ -184,45 +190,45 @@ def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=2
         ]
         ex = 4
         dims = {"a": a, "b": b}
-        closed_ends = 0
+        closed = [False, False]
 
     elif elem_type == "wall":
         length = float(length_cm)
-        end_r = "EX" if closed_ends >= 1 else None
-        end_l = "EX" if closed_ends >= 2 else None
+        end_r = "EX" if closed[0] else None
+        end_l = "EX" if closed[1] else None
         faces = [
             _face("A", [length], levels, end_l, end_r),
             _face("A1", [length], levels, end_l, end_r),
         ]
-        if closed_ends >= 1:
-            faces.append(_face("Край 2", [t], levels, "EX", "EX"))
-        if closed_ends >= 2:
+        if closed[0]:
             faces.append(_face("Край 1", [t], levels, "EX", "EX"))
-        ex = 2 * closed_ends
+        if closed[1]:
+            faces.append(_face("Край 2", [t], levels, "EX", "EX"))
+        ex = 2 * sum(closed)
         dims = {"length": length, "t": t}
 
     elif elem_type == "l_wall":
         l1, l2 = float(l1_cm), float(l2_cm)
-        end_a = "EX" if closed_ends >= 1 else None
-        end_b = "EX" if closed_ends >= 2 else None
+        end_a = "EX" if closed[0] else None
+        end_b = "EX" if closed[1] else None
         faces = [
             _face("A", [k, l1 - k], levels, "EX", end_a),
             _face("A1", [l1 - k], levels, "IN", end_a),
             _face("B", [k, l2 - k], levels, "EX", end_b),
             _face("B1", [l2 - k], levels, "IN", end_b),
         ]
-        if closed_ends >= 1:
+        if closed[0]:
             faces.append(_face("Край A", [t], levels, "EX", "EX"))
-        if closed_ends >= 2:
+        if closed[1]:
             faces.append(_face("Край B", [t], levels, "EX", "EX"))
-        ex = 1 + 2 * closed_ends
+        ex = 1 + 2 * sum(closed)
         inn = 1
         dims = {"l1": l1, "l2": l2, "t": t}
 
     elif elem_type == "u_wall":
         l1, l2, l3 = float(l1_cm), float(l2_cm), float(l3_cm)
-        end_a = "EX" if closed_ends >= 1 else None
-        end_c = "EX" if closed_ends >= 2 else None
+        end_a = "EX" if closed[0] else None
+        end_c = "EX" if closed[1] else None
         faces = [
             _face("A", [k, l1 - k], levels, "EX", end_a),
             _face("A1", [l1 - k], levels, "IN", end_a),
@@ -231,11 +237,11 @@ def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=2
             _face("C", [k, l3 - k], levels, "EX", end_c),
             _face("C1", [l3 - k], levels, "IN", end_c),
         ]
-        if closed_ends >= 1:
+        if closed[0]:
             faces.append(_face("Край A", [t], levels, "EX", "EX"))
-        if closed_ends >= 2:
+        if closed[1]:
             faces.append(_face("Край C", [t], levels, "EX", "EX"))
-        ex = 2 + 2 * closed_ends
+        ex = 2 + 2 * sum(closed)
         inn = 2
         dims = {"l1": l1, "l2": l2, "l3": l3, "t": t}
 
@@ -247,7 +253,8 @@ def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=2
         "height_cm": float(height_cm),
         "height_levels": levels,
         "thickness_cm": t,
-        "closed_ends": closed_ends,
+        "closed_ends": sum(closed),
+        "closed": closed,
         "dims": dims,
         "faces": faces,
         "corners": {"EX": ex, "IN": inn},
