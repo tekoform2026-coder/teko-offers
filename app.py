@@ -101,11 +101,16 @@ def _row_float(row, key, default):
     val = row.get(key)
     return float(val) if pd.notna(val) and val != "" else default
 
+def _row_bool(row, key):
+    val = row.get(key)
+    return bool(val) if pd.notna(val) and val != "" else False
+
 def row_to_layout(elem_type, row):
     """Превежда ред от таблицата към разположение на панелите (teko_calculator.layout_element)."""
     h_cm = _row_float(row, "height_m", 3.0) * 100
     t_cm = _row_float(row, "thickness_m", 0.25) * 100
-    closed_ends = int(_row_float(row, "closed_ends", 0))
+    closed = {"closed_end_1": _row_bool(row, "closed_end_1"),
+              "closed_end_2": _row_bool(row, "closed_end_2")}
 
     if elem_type == "column":
         return layout_element("column", h_cm,
@@ -113,18 +118,18 @@ def row_to_layout(elem_type, row):
                               length_cm=_row_float(row, "length_m", 0.5) * 100)
     elif elem_type == "wall":
         return layout_element("wall", h_cm, length_cm=_row_float(row, "length_m", 5.0) * 100,
-                              thickness_cm=t_cm, closed_ends=closed_ends)
+                              thickness_cm=t_cm, **closed)
     elif elem_type == "l_wall":
         return layout_element("l_wall", h_cm,
                               l1_cm=_row_float(row, "l1_m", 2.0) * 100,
                               l2_cm=_row_float(row, "l2_m", 2.0) * 100,
-                              thickness_cm=t_cm, closed_ends=closed_ends)
+                              thickness_cm=t_cm, **closed)
     elif elem_type == "u_wall":
         return layout_element("u_wall", h_cm,
                               l1_cm=_row_float(row, "l1_m", 2.0) * 100,
                               l2_cm=_row_float(row, "l2_m", 2.0) * 100,
                               l3_cm=_row_float(row, "l3_m", 2.0) * 100,
-                              thickness_cm=t_cm, closed_ends=closed_ends)
+                              thickness_cm=t_cm, **closed)
     return None
 
 def get_element_teko_panels(elem_type, row):
@@ -334,7 +339,7 @@ if "used_model" not in st.session_state:
     st.session_state["used_model"] = None
 
 EMPTY_DF = pd.DataFrame(columns=[
-    "type", "name", "count", "width_m", "length_m", "thickness_m", "l1_m", "l2_m", "l3_m", "height_m", "closed_ends"
+    "type", "name", "count", "width_m", "length_m", "thickness_m", "l1_m", "l2_m", "l3_m", "height_m", "closed_end_1", "closed_end_2"
 ])
 
 if "edited_df" not in st.session_state:
@@ -412,7 +417,11 @@ with tab1:
                                     st.session_state["used_model"] = used_model
                                     elements_list = blueprint_data.get("elements", [])
                                     
-                                    st.session_state["edited_df"] = pd.DataFrame(elements_list)
+                                    df_ai = pd.DataFrame(elements_list)
+                                    for col in ("closed_end_1", "closed_end_2"):
+                                        if col not in df_ai.columns:
+                                            df_ai[col] = False
+                                    st.session_state["edited_df"] = df_ai
                                     st.success(f"✅ Готово! Разчетено с: **{used_model}**")
                                 except Exception as e:
                                     st.error(f"Грешка при анализа: {e}")
@@ -425,7 +434,7 @@ with tab1:
             "- За **колона (`column`)**: попълнете `width_m` (ширина) и `length_m` (дължина).\n"
             "- За **L-стена (`l_wall`)**: попълнете `l1_m` (рамо 1), `l2_m` (рамо 2) и `thickness_m` (дебелина).\n"
             "- За **П/U-стена (`u_wall`)**: попълнете `l1_m` (рамо 1), `l2_m` (рамо 2), `l3_m` (рамо 3) и `thickness_m` (дебелина).\n"
-            "- **Затворени краища** (`closed_ends`, 0/1/2) за стени, L- и П/U-стени: челните краища, затворени с панел колкото дебелината. При 1 се затваря краят на рамо 1.\n"
+            "- **Затворен край 1 / Затворен край 2** (отметки) за стени, L- и П/U-стени: челните краища, затворени с панел колкото дебелината. Край 1 е краят на рамо 1 (при права стена - десният), край 2 - краят на последното рамо (при права стена - левият).\n"
             "- Непотребните полета за съответния тип могат да се оставят празни — системата автоматично игнорира празни клетки без грешки!"
         )
 
@@ -457,7 +466,8 @@ with tab1:
                 "l2_m": st.column_config.NumberColumn("Рамо 2 (м)", format="%.2f", width="auto"),
                 "l3_m": st.column_config.NumberColumn("Рамо 3 (м)", format="%.2f", width="auto"),
                 "height_m": st.column_config.NumberColumn("Височина (м)", format="%.2f", width="auto"),
-                "closed_ends": st.column_config.NumberColumn("Затворени краища", min_value=0, max_value=2, step=1, default=0, width="auto")
+                "closed_end_1": st.column_config.CheckboxColumn("Затворен край 1", default=False, width="auto"),
+                "closed_end_2": st.column_config.CheckboxColumn("Затворен край 2", default=False, width="auto")
             },
             use_container_width=True,
             key="elements_form_editor"
