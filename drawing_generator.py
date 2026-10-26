@@ -151,7 +151,7 @@ def _plan_geometry(layout):
     t = layout["thickness_cm"]
     k = t + IN_CORNER_CM
     d = layout["dims"]
-    closed = layout["closed_ends"]
+    end_1, end_2 = layout["closed"]
     typ = layout["type"]
 
     if typ == "column":
@@ -163,11 +163,11 @@ def _plan_geometry(layout):
     elif typ == "wall":
         L = d["length"]
         poly = [[0, 0], [L, 0], [L, t], [0, t]]
-        place = {"A": (0, -T, 'x'), "A1": (0, t, 'x'), "Край 2": (L, 0, 'y'), "Край 1": (-T, 0, 'y')}
+        place = {"A": (0, -T, 'x'), "A1": (0, t, 'x'), "Край 1": (L, 0, 'y'), "Край 2": (-T, 0, 'y')}
         corners = []
-        if closed >= 1:
+        if end_1:
             corners += [("EX", L, -T), ("EX", L, t)]
-        if closed >= 2:
+        if end_2:
             corners += [("EX", -T, -T), ("EX", -T, t)]
 
     elif typ == "l_wall":
@@ -176,9 +176,9 @@ def _plan_geometry(layout):
         place = {"A": (0, -T, 'x'), "A1": (k, t, 'x'), "B": (-T, 0, 'y'), "B1": (t, k, 'y'),
                  "Край A": (l1, 0, 'y'), "Край B": (0, l2, 'x')}
         corners = [("EX", -T, -T), ("IN", t, t)]
-        if closed >= 1:
+        if end_1:
             corners += [("EX", l1, -T), ("EX", l1, t)]
-        if closed >= 2:
+        if end_2:
             corners += [("EX", -T, l2), ("EX", t, l2)]
 
     else:  # u_wall: рамо A вляво, гръб B отдолу, рамо C вдясно
@@ -189,13 +189,18 @@ def _plan_geometry(layout):
                  "C": (m, 0, 'y'), "C1": (m - t - T, k, 'y'),
                  "Край A": (0, l1, 'x'), "Край C": (m - t, l3, 'x')}
         corners = [("EX", -T, -T), ("EX", m, -T), ("IN", t, t), ("IN", m - t - T, t)]
-        if closed >= 1:
+        if end_1:
             corners += [("EX", -T, l1), ("EX", t, l1)]
-        if closed >= 2:
+        if end_2:
             corners += [("EX", m - t - T, l3), ("EX", m, l3)]
 
 
     return poly, place, corners
+
+def _closed_label(layout):
+    """Кои челни краища са затворени: "няма", "край 1", "край 2" или "край 1 и 2"."""
+    ends = [str(i + 1) for i, c in enumerate(layout["closed"]) if c]
+    return f"край {' и '.join(ends)}" if ends else "няма"
 
 def _dims_label(layout):
     d = layout["dims"]
@@ -931,7 +936,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
 
         story.append(Paragraph(f"<b>Чертеж и Спецификация: {e_name}</b>", title_style))
         story.append(Paragraph(f"Тип: {w_type} | Размери: {_dims_label(layout)} | Височина: {int(layout['height_cm'])} cm | "
-                               f"Затворени краища: {layout['closed_ends']} | Брой: {e_count}", subtitle_style))
+                               f"Затворени краища: {_closed_label(layout)} | Брой: {e_count}", subtitle_style))
         story.append(Spacer(1, 4))
 
         top_buf = generate_top_view_buf(layout, e_name)
