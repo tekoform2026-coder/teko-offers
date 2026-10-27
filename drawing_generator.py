@@ -255,6 +255,7 @@ TOP_WALER_BORDER = '#2E7D32'
 TOP_PROP = '#9BDB8F'
 TOP_PROP_BORDER = '#3E8E41'
 TOP_WALER_T = 4  # дебелина на ригела в изгледа отгоре (cm)
+TOP_PROP_W = 3   # ширина на вертикализатора в изгледа отгоре (cm)
 
 
 def _face_strips(layout, place, poly):
@@ -478,16 +479,18 @@ def generate_top_view_buf(layout, name="Елемент"):
         ax.add_patch(patches.Rectangle((x, y), w, h, facecolor=TOP_WALER, edgecolor=TOP_WALER_BORDER,
                                        linewidth=0.5, zorder=2.5))
 
-    # Вертикализатори (условна дължина): закрепване при панела, регулируема част, опорна плоча
+    # Вертикализатори (условна дължина): тънък зелен правоъгълник с 3 точки, като в еталона
     for (px0, py0), (px1, py1) in props:
-        ax.plot([px0, px1], [py0, py1], color=TOP_PROP_BORDER, linewidth=2.6, solid_capstyle='butt', zorder=6)
-        ax.plot([px0, px1], [py0, py1], color=TOP_PROP, linewidth=1.6, solid_capstyle='butt', zorder=6.1)
-        ax.plot([px0 + 0.3 * (px1 - px0), px0 + 0.8 * (px1 - px0)], [py0 + 0.3 * (py1 - py0), py0 + 0.8 * (py1 - py0)],
-                color=TOP_PROP_BORDER, linewidth=0.8, linestyle=(0, (1, 2)), zorder=6.2)
-        ax.add_patch(patches.Rectangle((px1 - 3, py1 - 3), 6, 6, facecolor=TOP_PROP, edgecolor=TOP_PROP_BORDER,
-                                       linewidth=0.6, zorder=6.3))
-        ax.plot(px0, py0, 'o', markersize=3.2, markerfacecolor='white', markeredgecolor=TOP_PROP_BORDER,
-                markeredgewidth=0.7, zorder=6.4)
+        w = TOP_PROP_W
+        x, y = min(px0, px1), min(py0, py1)
+        if px0 == px1:
+            rect = (x - w / 2, y), w, abs(py1 - py0)
+        else:
+            rect = (x, y - w / 2), abs(px1 - px0), w
+        ax.add_patch(patches.Rectangle(*rect, facecolor=TOP_EX, edgecolor=TOP_EX_BORDER, linewidth=0.7, zorder=6))
+        for t in (0.25, 0.5, 0.75):
+            ax.plot(px0 + t * (px1 - px0), py0 + t * (py1 - py0), 'o', markersize=1.2,
+                    color=TOP_EX_BORDER, zorder=6.1)
 
     # Надписи: размер отгоре, наименование под него, размер вляво (вертикално)
     top_y = max(ys)
