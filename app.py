@@ -101,6 +101,16 @@ def _row_float(row, key, default):
     val = row.get(key)
     return float(val) if pd.notna(val) and val != "" else default
 
+DEFAULT_HEIGHT_M = 2.7
+
+def fill_default_height(df, height_m):
+    """Празната „Височина“ се смята със стандартната височина на етажа; въведената остава."""
+    df = df.copy()
+    if "height_m" not in df.columns:
+        df["height_m"] = None
+    df["height_m"] = pd.to_numeric(df["height_m"], errors="coerce").fillna(height_m)
+    return df
+
 def _row_bool(row, key):
     val = row.get(key)
     return bool(val) if pd.notna(val) and val != "" else False
@@ -439,6 +449,34 @@ with tab1:
         )
 
     st.divider()
+    st.subheader("📏 Стандартна височина на етажа")
+    std_choice = st.radio(
+        "Стандартна височина за всички елементи:",
+        ["2.70 м", "3.00 м", "Друга"],
+        index=0,
+        horizontal=True,
+        key="std_height_choice"
+    )
+    if std_choice == "Друга":
+        std_height = st.number_input("Височина (м):", min_value=0.60, max_value=12.00, value=DEFAULT_HEIGHT_M,
+                                     step=0.10, format="%.2f", key="std_height_other")
+    else:
+        std_height = float(std_choice.split()[0])
+    st.session_state["std_height_m"] = std_height
+    st.caption(f"Елементите с празна „Височина (м)“ в таблицата се смятат с {std_height:.2f} м. "
+               "Височината, въведена в таблицата, остава с предимство.")
+    if st.button(f"↕️ Приложи {std_height:.2f} м към всички редове", key="apply_std_height",
+                 help="Записва стандартната височина във всички редове на таблицата, включително разчетените "
+                      "от чертежа. Незапазените промени в таблицата се губят - първо натиснете „Запази и Изчисли“."):
+        df_all = st.session_state["edited_df"].copy()
+        if df_all.empty:
+            st.info("ℹ️ Таблицата е празна - няма редове за промяна.")
+        else:
+            df_all["height_m"] = std_height
+            st.session_state["edited_df"] = df_all
+            st.session_state.pop("elements_form_editor", None)  # таблицата се показва наново с новите височини
+            st.success(f"✅ Височина {std_height:.2f} м е записана в {len(df_all)} реда.")
+
     st.subheader("✏️ Таблица с вертикални кофражни елементи")
     
     st.markdown("""
@@ -480,7 +518,8 @@ with tab1:
 
 with tab2:
     st.header("2. Спецификация на кофражните елементи и панели TEKO")
-    df_calc = st.session_state["edited_df"]
+    df_calc = fill_default_height(st.session_state["edited_df"],
+                                  st.session_state.get("std_height_m", DEFAULT_HEIGHT_M))
     
     if df_calc.empty or len(df_calc) == 0:
         st.info("ℹ️ Въведете елементи в Таб 1 и натиснете 'Запази и Изчисли'.")
