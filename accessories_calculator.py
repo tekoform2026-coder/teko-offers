@@ -140,8 +140,8 @@ def calculate_tie_rods(
 
     bom = {}
     if total_rods > 0:
-        bom["Анкерни шпилки"] = total_rods
-        bom["Затягащи гайки"] = total_nuts
+        bom["Шпилки"] = total_rods
+        bom["Гайки"] = total_nuts
 
     return {
         "bom": bom,
@@ -241,7 +241,7 @@ def calculate_push_pull_props(layout: Dict[str, Any]) -> Dict[str, Any]:
       - стена / рамо на L и U: по _props_per_side на външната страна и толкова срещу тях
     """
     h = layout["height_cm"]
-    prop_code = "Вертикализатор PP 300 (2.0 - 3.2 m)" if h <= 300 else "Вертикализатор PP 450 (3.2 - 4.8 m)"
+    prop_code = "Вертикализатор PP 300" if h <= 300 else "Вертикализатор PP 450"
     faces = {f["name"]: f for f in layout["faces"]}
     details = []
 
