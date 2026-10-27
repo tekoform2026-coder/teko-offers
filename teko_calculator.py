@@ -324,7 +324,7 @@ def calculate_wall(length_m, thickness_m, height_m, count=1):
         "panels_spec": detailed_panels,
         "accessories": {
             "Пластмасови ръкохватки": handles,
-            "Анкерни шпилки": tie_rods,
-            "Затягащи гайки": nuts
+            "Шпилки": tie_rods,
+            "Гайки": nuts
         }
     }
