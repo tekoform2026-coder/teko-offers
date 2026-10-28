@@ -151,7 +151,7 @@ def _plan_geometry(layout):
     t = layout["thickness_cm"]
     k = t + IN_CORNER_CM
     d = layout["dims"]
-    end_1, end_2 = layout["closed"]
+    end_1, end_2 = layout["closed"][:2]
     typ = layout["type"]
 
     if typ == "column":
@@ -180,6 +180,20 @@ def _plan_geometry(layout):
             corners += [("EX", l1, -T), ("EX", l1, t)]
         if end_2:
             corners += [("EX", -T, l2), ("EX", t, l2)]
+
+    elif typ == "t_wall":  # полка A отгоре, ребро B надолу
+        l1, s, p = d["l1"], d["l2"], d["l3"]  # s - дължина на реброто под полката
+        poly = [[0, s], [p, s], [p, 0], [p + t, 0], [p + t, s], [l1, s], [l1, s + t], [0, s + t]]
+        place = {"A": (0, s + t, 'x'), "A1 ляво": (0, s - T, 'x'), "A1 дясно": (p + t + T, s - T, 'x'),
+                 "B": (p - T, 0, 'y'), "B1": (p + t, 0, 'y'),
+                 "Край 1": (l1, s, 'y'), "Край 2": (-T, s, 'y'), "Край 3": (p, -T, 'x')}
+        corners = [("IN", p - T, s - T), ("IN", p + t, s - T)]
+        if end_1:
+            corners += [("EX", l1, s + t), ("EX", l1, s - T)]
+        if end_2:
+            corners += [("EX", -T, s + t), ("EX", -T, s - T)]
+        if layout["closed"][2]:
+            corners += [("EX", p - T, -T), ("EX", p + t, -T)]
 
     else:  # u_wall: рамо A вляво, гръб B отдолу, рамо C вдясно
         l1, m, l3 = d["l1"], d["l2"], d["l3"]
@@ -210,6 +224,8 @@ def _dims_label(layout):
     if typ == "wall":
         return f"L={int(d['length'])} cm, B={int(d['t'])} cm"
     if typ == "l_wall":
+        return f"A={int(d['l1'])}, B={int(d['l2'])}, дебелина {int(d['t'])} cm"
+    if typ == "t_wall":
         return f"A={int(d['l1'])}, B={int(d['l2'])}, дебелина {int(d['t'])} cm"
     return f"A={int(d['l1'])}, B={int(d['l2'])}, C={int(d['l3'])}, дебелина {int(d['t'])} cm"
 
@@ -256,6 +272,9 @@ TOP_PROP = '#9BDB8F'
 TOP_PROP_BORDER = '#3E8E41'
 TOP_WALER_T = 4  # дебелина на ригела в изгледа отгоре (cm)
 TOP_PROP_W = 3   # ширина на вертикализатора в изгледа отгоре (cm)
+PROP_IN_CLEAR_CM = 20  # вертикализатор на вътрешна страна - поне толкова от ъгъла IN (перпендикулярната стена)
+PROP_MIN_DRAW_CM = 12  # по-къс вертикализатор (няма място) не се рисува
+PROP_SHIFTS_CM = (0, 20, -20, 40, -40)  # тясно място - вертикализаторът се измества по стената
 
 
 def _face_strips(layout, place, poly):
@@ -306,7 +325,12 @@ def _prop_marks(layout, strips):
                 if names:
                     opp = min(names, key=lambda n: abs(strips[n][3] - c_lo))
                     o_a0, o_a1 = strips[opp][1], strips[opp][2]
-                    marks.append((opp, min(max(coord, o_a0), o_a1)))
+                    # при ъгъл IN наблизо е перпендикулярната стена - вертикализаторът се отдръпва от нея,
+                    # иначе лежи успоредно на нея (върху ригела ѝ) вместо да укрепва своята стена
+                    lo = o_a0 + (PROP_IN_CLEAR_CM if faces[opp]["start"] == "IN" else 0)
+                    hi = o_a1 - (PROP_IN_CLEAR_CM if faces[opp]["end"] == "IN" else 0)
+                    pos = min(max(coord, lo), hi) if lo <= hi else (o_a0 + o_a1) / 2
+                    marks.append((opp, pos))
     return marks
 
 
@@ -363,22 +387,86 @@ def _top_accessories(layout, place, poly):
     marks = _prop_marks(layout, strips)
     # първо външните страни (пълна дължина), после вътрешните - по-късите страни първи (симетрично)
     marks.sort(key=lambda m: (m[0] not in ("A", "B", "C"), faces[m[0]]["length_cm"]))
+    def overlaps(bx):
+        return any(bx[0] < o[2] and o[0] < bx[2] and bx[1] < o[3] and o[1] < bx[3] for o in drawn)
+
     props = []
     for name, coord in marks:
-        axis, _a0, _a1, c_lo, c_hi, normal = strips[name]
+        axis, a0, a1, c_lo, c_hi, normal = strips[name]
         edge = (c_hi if normal > 0 else c_lo) + (normal * TOP_WALER_T if name in with_waler else 0)
-        p0 = to_xy(axis, coord, edge)
         d = to_xy(axis, 0, normal)
-        length = max(15.0, free_length(p0, d, prop_len, boxes))
-        if free_length(p0, d, length + 6, drawn) < length:
+        # при тясно място (пресича вече начертан вертикализатор) се измества по стената с 20 / 40 см,
+        # без да се доближава до ъгъл IN; избира се мястото, където е най-дълъг (при равни - най-малкото изместване)
+        lo = a0 + (PROP_IN_CLEAR_CM if faces[name]["start"] == "IN" else 0)
+        hi = a1 - (PROP_IN_CLEAR_CM if faces[name]["end"] == "IN" else 0)
+        best = None
+        for shift in PROP_SHIFTS_CM:
+            pos = coord + shift
+            if shift and not (lo <= pos <= hi):
+                continue
+            p0 = to_xy(axis, pos, edge)
+            full = max(15.0, free_length(p0, d, prop_len, boxes))
+            length = free_length(p0, d, full, drawn)   # скъсява се до вече начертан вертикализатор
+            p1 = (p0[0] + d[0] * length, p0[1] + d[1] * length)
+            bx = (min(p0[0], p1[0]) - 4, min(p0[1], p1[1]) - 4, max(p0[0], p1[0]) + 4, max(p0[1], p1[1]) + 4)
+            if length < PROP_MIN_DRAW_CM or overlaps(bx):
+                continue
+            if best is None or length > best[0] + 1e-6:
+                best = (length, p0, p1, bx)
+            if length >= full - 1e-6:
+                break
+        if best is None:
             continue
-        p1 = (p0[0] + d[0] * length, p0[1] + d[1] * length)
-        bx = (min(p0[0], p1[0]) - 4, min(p0[1], p1[1]) - 4, max(p0[0], p1[0]) + 4, max(p0[1], p1[1]) + 4)
-        if any(bx[0] < o[2] and o[0] < bx[2] and bx[1] < o[3] and o[1] < bx[3] for o in drawn):
-            continue
+        _length, p0, p1, bx = best
         props.append((p0, p1))
         drawn.append(bx)
     return walers, props
+
+
+TOP_SIDE_FS = 10          # размер на буквите на страните (pt)
+TOP_SIDE_COLOR = '#1F4E79'
+TOP_SIDE_GAP_PT = 4       # от външния ръб на панела (или ригела) до буквата
+
+
+def _side_labels(layout, strips, walers, props, pt_per_cm):
+    """
+    Букви на страните (A, A1, B, B1 ...) извън кофража - от страната без бетон, след ригела.
+    По дължината на страната се избира място далеч от вертикализаторите (за предпочитане в средата).
+    Челните страни („Край ...“) не се надписват. pt_per_cm - мащабът на чертежа, за да не опира
+    буквата в панела или ригела. Връща [(надпис, x, y)].
+    """
+    def to_xy(axis, along, cross):
+        return (along, cross) if axis == 'x' else (cross, along)
+
+    # точки по цялата дължина на всеки вертикализатор (не само основата му)
+    avoid = [(p0[0] + t * (p1[0] - p0[0]), p0[1] + t * (p1[1] - p0[1])) for p0, p1 in props for t in (0, 0.5, 1)]
+    if layout["type"] == "column":  # размерът на страна B е вдясно, в средата на B1
+        _ax, a0, a1, c_lo, _c_hi, _n = strips["B1"]
+        avoid.append((c_lo, (a0 + a1) / 2))
+    waler_boxes = [(x, y, x + w, y + h) for x, y, w, h in walers]
+    labels = []
+    for name, (axis, a0, a1, c_lo, c_hi, normal) in strips.items():
+        if name.startswith("Край"):
+            continue
+        edge = c_hi if normal > 0 else c_lo
+        mid_pt = to_xy(axis, (a0 + a1) / 2, edge + normal * (TOP_WALER_T / 2))
+        has_waler = any(bx0 - 0.5 <= mid_pt[0] <= bx1 + 0.5 and by0 - 0.5 <= mid_pt[1] <= by1 + 0.5
+                        for bx0, by0, bx1, by1 in waler_boxes)
+        label = name.split()[0]
+        # половината от буквата напречно на страната: ширина при вертикална страна, височина при хоризонтална
+        half_pt = (0.62 * len(label) if axis == 'y' else 0.75) * TOP_SIDE_FS / 2
+        gap_cm = (half_pt + TOP_SIDE_GAP_PT) / pt_per_cm
+        cross = edge + normal * ((TOP_WALER_T if has_waler else 0) + gap_cm)
+
+        def score(frac):
+            x, y = to_xy(axis, a0 + frac * (a1 - a0), cross)
+            dist = min((math.hypot(x - px, y - py) for px, py in avoid), default=1e9)
+            return (min(dist, 25.0), -abs(frac - 0.5))
+
+        frac = max((0.5, 0.35, 0.65, 0.2, 0.8), key=score)
+        x, y = to_xy(axis, a0 + frac * (a1 - a0), cross)
+        labels.append((label, x, y))
+    return labels
 
 
 def generate_top_view_buf(layout, name="Елемент"):
@@ -400,10 +488,17 @@ def generate_top_view_buf(layout, name="Елемент"):
     for (px0, py0), (px1, py1) in props:
         xs += [px0 - 4, px1 - 4, px0 + 4, px1 + 4]
         ys += [py0 - 4, py1 - 4, py0 + 4, py1 + 4]
+
+    fig_w = 6.0
+    # Букви на страните: мащабът е приблизително този без тях (широчината на фигурата е постоянна)
+    side_labels = _side_labels(layout, _face_strips(layout, place, poly), walers, props,
+                               fig_w * 72 / (max(xs) - min(xs) + 2 * TOP_MARGIN_CM))
+    for _label, lx, ly in side_labels:
+        xs += [lx - 5, lx + 5]
+        ys += [ly - 5, ly + 5]
     x_min, x_max = min(xs) - TOP_MARGIN_CM, max(xs) + TOP_MARGIN_CM
     y_min, y_max = min(ys) - TOP_MARGIN_CM, max(ys) + TOP_MARGIN_CM + 8  # място за надписите отгоре
 
-    fig_w = 6.0
     fig_h = max(1.6, fig_w * (y_max - y_min) / (x_max - x_min))
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=DPI_RESOLUTION)
 
@@ -491,6 +586,11 @@ def generate_top_view_buf(layout, name="Елемент"):
         for t in (0.25, 0.5, 0.75):
             ax.plot(px0 + t * (px1 - px0), py0 + t * (py1 - py0), 'o', markersize=1.2,
                     color=TOP_EX_BORDER, zorder=6.1)
+
+    # Букви на страните извън кофража
+    for label, lx, ly in side_labels:
+        ax.text(lx, ly, label, ha='center', va='center', fontsize=TOP_SIDE_FS, fontweight='bold',
+                color=TOP_SIDE_COLOR, zorder=7)
 
     # Надписи: размер отгоре, наименование под него, размер вляво (вертикално)
     top_y = max(ys)
@@ -635,6 +735,7 @@ VIEW_3D = {
     "wall": (28, -62),
     "l_wall": (30, -130),
     "u_wall": (32, -115),
+    "t_wall": (30, -60),
 }
 
 
@@ -674,6 +775,22 @@ def generate_3d_axonometry_buf(layout, name="Елемент"):
         boxes.append((x, y, 0, T, T, top, col, COLOR_3D_CORNER_EDGE))
 
     core = Path(poly)
+
+    # Бетонът - също кутии (ивици по y), за да се подрежда отзад-напред заедно с панелите:
+    # при T-стена панелите зад реброто иначе се рисуват върху бетона
+    ys_cut = sorted({p[1] for p in poly})
+    xs_cut = sorted({p[0] for p in poly})
+    for y0c, y1c in zip(ys_cut, ys_cut[1:]):
+        ym = (y0c + y1c) / 2
+        run = None
+        for x0c, x1c in zip(xs_cut, xs_cut[1:]):
+            if core.contains_point(((x0c + x1c) / 2, ym)):
+                run = (run[0], x1c) if run else (x0c, x1c)
+            elif run:
+                boxes.append((run[0], y0c, 0, run[1] - run[0], y1c - y0c, h, COLOR_3D_CONCRETE, COLOR_3D_CONCRETE))
+                run = None
+        if run:
+            boxes.append((run[0], y0c, 0, run[1] - run[0], y1c - y0c, h, COLOR_3D_CONCRETE, COLOR_3D_CONCRETE))
 
     def in_box(p, skip=None):
         for j, (bx, by, bz, dx, dy, dz, *_) in enumerate(boxes):
@@ -747,10 +864,13 @@ def generate_3d_axonometry_buf(layout, name="Елемент"):
             bi, bj = bbs[i], bbs[j]
             if bi[1] <= bj[0] or bj[1] <= bi[0] or bi[3] <= bj[2] or bj[3] <= bi[2]:
                 continue
-            if behind(boxes[i], boxes[j]):
+            i_behind, j_behind = behind(boxes[i], boxes[j]), behind(boxes[j], boxes[i])
+            if i_behind and j_behind:
+                continue  # разделени по две оси в различни посоки - не се закриват
+            if i_behind:
                 after[i].add(j)
                 n_before[j] += 1
-            elif behind(boxes[j], boxes[i]):
+            elif j_behind:
                 after[j].add(i)
                 n_before[i] += 1
     depth = {i: float(np.array(boxes[i][:3]) @ eye + np.array(boxes[i][3:6]) @ eye / 2) for i in shown}
@@ -765,30 +885,7 @@ def generate_3d_axonometry_buf(layout, name="Елемент"):
         ready.sort(key=lambda k: depth[k])
     order += sorted(set(shown) - set(order), key=lambda i: depth[i])  # при цикъл - по дълбочина
 
-    # Бетон: откритите странични стени (напр. при отворен край на стена) и горната плоскост.
-    # Рисува се преди панелите - не ги закрива, а те могат да го закриват.
-    polys, fcols, ecols, lws = [], [], [], []
-    for (x0, y0), (x1, y1) in zip(poly, poly[1:] + poly[:1]):
-        length = math.hypot(x1 - x0, y1 - y0)
-        if length == 0:
-            continue
-        nx, ny = (y1 - y0) / length, (x0 - x1) / length
-        if core.contains_point(((x0 + x1) / 2 + nx, (y0 + y1) / 2 + ny)):
-            nx, ny = -nx, -ny
-        if nx * eye[0] + ny * eye[1] <= 0:
-            continue
-        samples = [(x0 + f * (x1 - x0) + nx * 0.5, y0 + f * (y1 - y0) + ny * 0.5, z)
-                   for f in (0.1, 0.5, 0.9) for z in (0.1 * h, 0.5 * h, 0.9 * h)]
-        if all(in_box(p) for p in samples):
-            continue
-        polys.append([[x0, y0, 0], [x1, y1, 0], [x1, y1, h], [x0, y0, h]])
-        fcols.append(COLOR_3D_CONCRETE)
-        ecols.append(COLOR_3D_CONCRETE)
-        lws.append(0.5)
-    polys.append([[x, y, h] for x, y in poly])
-    fcols.append(COLOR_3D_CONCRETE)
-    ecols.append(COLOR_3D_CONCRETE)
-    lws.append(0.5)
+    polys = []  # всички начертани четириъгълници - за мащаба
 
     fig = plt.figure(figsize=(5, 5), dpi=DPI_RESOLUTION)
     ax = fig.add_subplot(111, projection='3d')
@@ -817,14 +914,14 @@ def generate_3d_axonometry_buf(layout, name="Елемент"):
     grid.set_clip_on(False)
     ax.add_collection3d(grid)
 
-    concrete = Poly3DCollection(polys, facecolors=fcols, edgecolors=ecols, linewidths=lws, zorder=2)
-    concrete.set_sort_zpos(0)
-    ax.add_collection3d(concrete)
     for rank, i in enumerate(order):
         quads, cols, eds, ws = zip(*box_faces[i])
         polys += quads
-        ax.add_collection3d(Poly3DCollection(list(quads), facecolors=list(cols), edgecolors=list(eds),
-                                             linewidths=list(ws), zorder=3 + rank * 1e-3))
+        faces3d = Poly3DCollection(list(quads), facecolors=list(cols), edgecolors=list(eds),
+                                   linewidths=list(ws), zorder=3 + rank * 1e-3)
+        # при центрирането рамката на осите се измества - без изрязване по нея (иначе краят се отрязва)
+        faces3d.set_clip_on(False)
+        ax.add_collection3d(faces3d)
 
     half = max(plan_span, top) / 2
     ax.set_xlim(cx - half, cx + half)
@@ -837,7 +934,7 @@ def generate_3d_axonometry_buf(layout, name="Елемент"):
     # Мащаб и център: елементът да запълва около 88% от кадъра
     pts = np.array([q for quad in polys for q in quad])
     zoom, pos = 1.0, [0, 0, 1, 1]
-    for _ in range(3):
+    for _ in range(3 if len(pts) else 0):  # без панели (напр. дължина 0) - нищо за мащабиране
         ax.set_box_aspect((1, 1, 1), zoom=zoom)
         ax.set_position(pos)
         fig.canvas.draw()
