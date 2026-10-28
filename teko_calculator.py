@@ -134,16 +134,18 @@ def solve_width_cm(width_cm, height_level_cm=150):
         return _solve_width_lying(w)
     return _solve_width_standing(w)
 
-def _face(name, segments, levels, start=None, end=None):
+def _face(name, segments, levels, start=None, end=None, flip=()):
     """
     Страна от кофража. segments са дължини, всяка се реди самостоятелно с solve_width_cm,
     така че еднаквите сегменти на срещуположните страни излизат огледални.
+    flip: индекси на сегментите, редени в обратен ред (панелите 60 откъм края на сегмента).
     """
     rows = []
     for h in levels:
         row = []
-        for seg in segments:
-            row += solve_width_cm(seg, h)
+        for i, seg in enumerate(segments):
+            widths = solve_width_cm(seg, h)
+            row += widths[::-1] if i in flip else widths
         rows.append(row)
     return {
         "name": name,
@@ -155,16 +157,19 @@ def _face(name, segments, levels, start=None, end=None):
 
 def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=25,
                    l1_cm=0, l2_cm=0, l3_cm=0, closed_ends=0,
-                   closed_end_1=None, closed_end_2=None):
+                   closed_end_1=None, closed_end_2=None, closed_end_3=False):
     """
     Разположение на панелите по страни и редове за един елемент.
 
     elem_type: "column" (width x length), "wall" (length, thickness),
                "l_wall" (l1 = рамо A, l2 = рамо B, thickness),
-               "u_wall" (l1 = рамо A, l2 = гръб B, l3 = рамо C, thickness).
+               "u_wall" (l1 = рамо A, l2 = гръб B, l3 = рамо C, thickness),
+               "t_wall" (l1 = страна A (полката), l2 = страна B / B1 (реброто, от предното лице
+                         на полката до края му), thickness; реброто е в средата на полката).
     closed_end_1 / closed_end_2: затворени челни края (стени). Край 1 е краят на рамо A
                  (при права стена - десният), край 2 - краят на последното рамо B / C
-                 (при права стена - левият).
+                 (при права стена - левият). При T-стена: край 1 - десният край на полката,
+                 край 2 - левият, closed_end_3 - краят на реброто.
     closed_ends: 0/1/2 - кратък запис, когато не е зададено кой край: 1 = край 1, 2 = двата.
 
     Връща речник с height_levels, faces (всяка с rows = ширини по редове отдолу нагоре)
@@ -245,6 +250,36 @@ def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=2
         inn = 2
         dims = {"l1": l1, "l2": l2, "l3": l3, "t": t}
 
+    elif elem_type == "t_wall":
+        # Полка A (задно лице, цяло) и A1 (предно лице, разделено от реброто на ляво и дясно,
+        # винаги с IN при реброто); ребро B / B1 от IN до края на реброто (край 3).
+        # Срещу „IN + ребро + IN“ на A стои сегмент t + 20, така че A е огледална на A1.
+        # EX - само на затворените краища, по 2 на край.
+        # Реброто е винаги в средата на полката (l3 не се ползва).
+        l1, l2 = float(l1_cm), float(l2_cm)
+        p = math.floor((l1 - t) / 2 / 5.0) * 5
+        left, right, stem = p - IN_CORNER_CM, l1 - p - t - IN_CORNER_CM, l2 - IN_CORNER_CM
+        closed.append(bool(closed_end_3))
+        end_1 = "EX" if closed[0] else None
+        end_2 = "EX" if closed[1] else None
+        end_3 = "EX" if closed[2] else None
+        faces = [
+            _face("A", [left, t + 2 * IN_CORNER_CM, right], levels, end_2, end_1, flip=(0,)),
+            _face("A1 ляво", [left], levels, end_2, "IN", flip=(0,)),
+            _face("A1 дясно", [right], levels, "IN", end_1),
+            _face("B", [stem], levels, end_3, "IN", flip=(0,)),
+            _face("B1", [stem], levels, end_3, "IN", flip=(0,)),
+        ]
+        if closed[0]:
+            faces.append(_face("Край 1", [t], levels, "EX", "EX"))
+        if closed[1]:
+            faces.append(_face("Край 2", [t], levels, "EX", "EX"))
+        if closed[2]:
+            faces.append(_face("Край 3", [t], levels, "EX", "EX"))
+        ex = 2 * sum(closed)
+        inn = 2
+        dims = {"l1": l1, "l2": l2, "l3": p, "t": t}
+
     else:
         raise ValueError(f"Непознат тип елемент: {elem_type}")
 
@@ -324,7 +359,7 @@ def calculate_wall(length_m, thickness_m, height_m, count=1):
         "panels_spec": detailed_panels,
         "accessories": {
             "Пластмасови ръкохватки": handles,
-            "Шпилки": tie_rods,
-            "Гайки": nuts
+            "Шпилка TR 12": tie_rods,
+            "Гайка N12": nuts
         }
     }
