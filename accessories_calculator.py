@@ -15,6 +15,7 @@ from teko_calculator import format_panel_code
 WALER_LENGTHS_CM = [300, 200, 100]   # Alignment waling AW300 / AW200 / AW100 (спецификацията)
 NARROW_LIMIT_CM = 35.0               # колони и стени до 35 cm широки - без ригели
 TOP_FREE_CM = 60.0                   # в горните 0-60 cm няма ригел
+WALER_OVERHANG_CM = 10.0             # ригелът може да излиза до 10 см извън края (Алгоритъм, т. 9)
 
 
 def waler_heights_cm(height_cm: float, first_row_height_cm: float) -> List[float]:
@@ -37,15 +38,37 @@ def waler_heights_cm(height_cm: float, first_row_height_cm: float) -> List[float
     return [wh for wh in candidates if (h - wh) >= TOP_FREE_CM]
 
 
-def _waler_pieces(length_cm: float) -> List[int]:
+def _waler_pieces(length_cm: float, max_cm: float = None) -> List[int]:
     """
     Ригели за страна с дадена дължина. Ригелът може да излиза до 10 см извън края или да спре
     до 10 см преди края; когато няма точен размер, се избира най-близката обща дължина
     (при равенство - по-дългата), съставена от AW300 + остатък AW200/AW100.
+    max_cm: най-голямата обща дължина, която се побира (вътрешна страна).
     """
     total = max(100, int(math.floor(length_cm / 100.0 + 0.5)) * 100)
+    if max_cm is not None:
+        total = min(total, int(math.floor(max_cm / 100.0 + 1e-9)) * 100)
+        if total <= 0:
+            return []
     count_300, rem = divmod(total, 300)
     return [300] * count_300 + ([rem] if rem else [])
+
+
+def face_waler_pieces(face: Dict[str, Any]) -> List[int]:
+    """
+    Ригели на една страна (стандартни AW 100 / 200 / 300).
+    Вътрешна страна (с ъгъл IN): ригелите не трябва да удрят в стената - при ъгъла IN ригелът
+    спира на края на страната (отвъд е панелът на перпендикулярната стена), а в другия край
+    може да излиза до 10 см (Алгоритъм, т. 9). Избира се най-дългата комбинация, която се побира.
+    """
+    length = face["length_cm"]
+    if length <= NARROW_LIMIT_CM:
+        return []
+    ends = [face["start"], face["end"]]
+    if "IN" not in ends:
+        return _waler_pieces(length)
+    free_ends = sum(1 for e in ends if e != "IN")
+    return _waler_pieces(length, length + WALER_OVERHANG_CM * free_ends)
 
 
 def _first_row_height(layout: Dict[str, Any]) -> float:
@@ -65,9 +88,9 @@ def calculate_walers(layout: Dict[str, Any]) -> Dict[str, Any]:
 
     for face in layout["faces"]:
         length = face["length_cm"]
-        if length <= NARROW_LIMIT_CM:
+        pieces = face_waler_pieces(face)
+        if not pieces:
             continue
-        pieces = _waler_pieces(length)
         for p in pieces:
             code = f"Ригел AW {p}"
             bom[code] = bom.get(code, 0) + len(heights)
@@ -127,7 +150,7 @@ def calculate_tie_rods(
     if is_column:
         cols_a = get_tie_cols(a, width_breakdown_a)
         total_rods = num_levels * cols_a
-    elif "l" in w_type_lower or "l-образна" in w_type_lower:
+    elif "l" in w_type_lower or "l-образна" in w_type_lower or "t-образна" in w_type_lower:
         cols_a = get_tie_cols(a, width_breakdown_a)
         cols_b = get_tie_cols(b, None)
         total_rods = num_levels * (cols_a + cols_b)
@@ -140,8 +163,8 @@ def calculate_tie_rods(
 
     bom = {}
     if total_rods > 0:
-        bom["Шпилки"] = total_rods
-        bom["Гайки"] = total_nuts
+        bom["Шпилка TR 12"] = total_rods
+        bom["Гайка N12"] = total_nuts
 
     return {
         "bom": bom,
@@ -210,6 +233,7 @@ def calculate_corners(layout: Dict[str, Any]) -> Dict[str, int]:
 # ==========================================
 PROP_EDGE_MAX_CM = 90.0      # до ъгъла/ръба на стената - не повече от 90 cm
 PROP_SPACING_MAX_CM = 180.0  # между два съседни вертикализатора - не повече от 180 cm
+PROP_CODE = "Вертикализатор PP"  # един вид за всички височини
 
 
 def _props_per_side(length_cm: float) -> int:
@@ -227,6 +251,8 @@ def _props_per_side(length_cm: float) -> int:
 
 
 def _prop_positions(length_cm: float, count: int) -> List[float]:
+    if count <= 0:
+        return []
     if count == 1:
         return [round(length_cm / 2.0, 1)]
     edge = min(PROP_EDGE_MAX_CM, length_cm / (2.0 * count))
@@ -241,7 +267,7 @@ def calculate_push_pull_props(layout: Dict[str, Any]) -> Dict[str, Any]:
       - стена / рамо на L и U: по _props_per_side на външната страна и толкова срещу тях
     """
     h = layout["height_cm"]
-    prop_code = "Вертикализатор PP 300" if h <= 300 else "Вертикализатор PP 450"
+    prop_code = PROP_CODE
     faces = {f["name"]: f for f in layout["faces"]}
     details = []
 
