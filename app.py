@@ -11,7 +11,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 from gemini_agent2 import analyze_blueprint
-from drawing_generator import generate_pdf_drawings
+from drawing_generator import generate_pdf_drawings, generate_top_view_buf, generate_front_view_buf
 from excel_export import generate_excel, generate_kss_excel
 from accessories_calculator import calculate_accessories
 from teko_calculator import solve_height_cm, layout_element, count_panels
@@ -265,6 +265,60 @@ def build_drawing_elements(df):
             "bom": elem_bom
         })
     return elements
+
+# === Преглед на елементите под таблицата ===
+@st.cache_data(show_spinner=False, max_entries=300)
+def preview_top_png(row_items):
+    """Изгледът отгоре (PNG) на реда; кешира се по стойностите на реда."""
+    row = dict(row_items)
+    elem_type = str(row.get("type", "wall"))
+    layout = row_to_layout(elem_type, row)
+    return generate_top_view_buf(layout, format_element_label(elem_type, row.get("name", ""))).getvalue()
+
+@st.cache_data(show_spinner=False, max_entries=300)
+def preview_front_png(row_items):
+    """Изгледът отпред (PNG) на реда; кешира се по стойностите на реда."""
+    row = dict(row_items)
+    elem_type = str(row.get("type", "wall"))
+    layout = row_to_layout(elem_type, row)
+    return generate_front_view_buf(layout, format_element_label(elem_type, row.get("name", ""))).getvalue()
+
+def preview_counts(elem_type, row):
+    """Бройките за реда по групи: панели, ъгли, ригели, вертикализатори, ръкохватки, шпилки."""
+    acc = get_element_accessories(elem_type, row)
+    def group(word):
+        return sum(qty for code, qty in acc.items() if word in code)
+    return [("панела", sum(get_element_teko_panels(elem_type, row).values())),
+            ("ъгли", group("ъгъл")),
+            ("ригели", group("Ригел")),
+            ("верт.", group("Вертикализатор")),
+            ("ръкохватки", group("Ръкохватка")),
+            ("шпилки", group("Шпилка"))]
+
+def render_element_preview(idx, row):
+    """Сгъваемо поле за един ред: размери, бройки, изглед отгоре и (с отметка) изглед отпред."""
+    elem_type = str(row.get("type", "wall"))
+    if elem_type not in DISPLAY_TYPES:
+        return
+    label = format_element_label(elem_type, row.get("name", ""))
+    dim_str, _ = element_dims_and_area(elem_type, row)
+    cnt = int(_row_float(row, "count", 1))
+    closed = sum(_row_bool(row, k) for k in ("closed_end_1", "closed_end_2", "closed_end_3"))
+    title = f"{label} · {DISPLAY_TYPES[elem_type]} — {dim_str}, затворени краища: {closed}, {cnt} бр."
+    with st.expander(title):
+        for w in check_element_dimensions(row):
+            st.warning(w)
+        row_items = tuple(row.items())
+        try:
+            counts = preview_counts(elem_type, row)
+            top_png = preview_top_png(row_items)
+        except Exception as e:
+            st.error(f"Елементът не може да се начертае - проверете размерите ({e}).")
+            return
+        st.markdown(f"Количества ({cnt} бр.): " + " ".join(f":gray-badge[{qty} {word}]" for word, qty in counts))
+        st.image(top_png, caption="Изглед отгоре", width=700)
+        if st.checkbox("Покажи изгледа отпред", key=f"preview_front_{idx}"):
+            st.image(preview_front_png(row_items), caption="Изглед отпред", width=900)
 
 def format_element_label(elem_type, name):
     name_str = str(name).strip() if name else ""
@@ -613,6 +667,17 @@ with tab1:
             st.session_state["edited_df"] = edited_grid
             st.session_state.pop("excel_bytes", None)  # старият Excel вече не отговаря на таблицата
             st.success("✅ Данните са запазени и преизчислени успешно! Можете да проверите резултатите в следващите табове.")
+
+    st.subheader("👁 Преглед на елементите")
+    st.caption("Прегледът показва записаните данни - обновява се след „Запази и Изчисли“. "
+               "Полетата се отварят без презареждане; отметката „Покажи изгледа отпред“ презарежда страницата, "
+               "затова първо запишете промените в таблицата.")
+    df_preview = fill_default_height(st.session_state["edited_df"],
+                                     st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM))
+    if df_preview.empty:
+        st.info("ℹ️ Няма записани елементи за преглед.")
+    for idx, row in df_preview.iterrows():
+        render_element_preview(idx, row)
 
 with tab2:
     st.header("2. Спецификация на кофражните елементи и панели TEKO")
