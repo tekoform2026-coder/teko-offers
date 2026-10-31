@@ -12,7 +12,8 @@ from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 from gemini_agent2 import analyze_blueprint
 from drawing_generator import generate_pdf_drawings, generate_top_view_buf, generate_front_view_buf
-from excel_export import generate_excel, generate_kss_excel
+from excel_export import generate_excel
+import projects_store
 from accessories_calculator import calculate_accessories
 from teko_calculator import solve_height_cm, layout_element, count_panels
 from weights_db import get_item_weight
@@ -66,12 +67,12 @@ def check_element_dimensions(row):
         warnings.append(f"• **{name}**: Височина {h_cm} cm не е кратна на 10 cm (закръгля се към най-близкия модул).")
 
     if elem_type == "column":
-        w_cm = round(_row_float(row, "width_cm", 30))
-        l_cm = round(_row_float(row, "length_cm", 50))
+        w_cm = round(_row_float(row, "thickness_cm", 25))
+        l_cm = round(_row_float(row, "l1_cm", 50))
         if w_cm % 5 != 0 or l_cm % 5 != 0:
             warnings.append(f"• **{name}**: Размерите ({w_cm}x{l_cm} cm) не са кратни на 5 cm. Запълва се с компенсатор TC 5.")
     elif elem_type == "wall":
-        l_cm = round(_row_float(row, "length_cm", 500))
+        l_cm = round(_row_float(row, "l1_cm", 500))
         if l_cm % 5 != 0:
             warnings.append(f"• **{name}**: Дължината {l_cm} cm не е кратна на 5 cm. Запълва се с компенсатор TC 5.")
     elif elem_type == "l_wall":
@@ -114,8 +115,15 @@ DEFAULT_HEIGHT_CM = 270
 # Размерите в таблицата са в сантиметри
 LENGTH_COLUMNS = ["width_cm", "length_cm", "thickness_cm", "l1_cm", "l2_cm", "l3_cm", "height_cm"]
 
+# Колоните на таблицата по реда на показване; дължината на права стена и колона е в „Рамо 1 / Дължина“,
+# другият размер на колоната - в „Дебелина“
+TABLE_COLUMNS = ["type", "name", "count", "thickness_cm", "l1_cm", "l2_cm", "l3_cm", "height_cm",
+                 "closed_end_1", "closed_end_2", "closed_end_3"]
+
 def columns_to_cm(df):
-    """Стари колони в метри (width_m, height_m ...) -> същите в сантиметри (width_cm, height_cm ...)."""
+    """Стари колони в метри (width_m, height_m ...) -> същите в сантиметри (width_cm, height_cm ...).
+    Старата „Дължина“ (length_cm, напр. от Gemini) отива в „Рамо 1 / Дължина“ (l1_cm),
+    старата „Ширина“ на колона (width_cm) - в „Дебелина“ (thickness_cm)."""
     df = df.copy()
     for col_cm in LENGTH_COLUMNS:
         col_m = col_cm[:-3] + "_m"
@@ -123,6 +131,13 @@ def columns_to_cm(df):
             meters = pd.to_numeric(df[col_m], errors="coerce") * 100
             df[col_cm] = df[col_cm].fillna(meters) if col_cm in df.columns else meters
             df = df.drop(columns=[col_m])
+    if "length_cm" in df.columns:
+        df["l1_cm"] = df["l1_cm"].fillna(df["length_cm"]) if "l1_cm" in df.columns else df["length_cm"]
+        df = df.drop(columns=["length_cm"])
+    if "width_cm" in df.columns:
+        df["thickness_cm"] = (df["thickness_cm"].fillna(df["width_cm"]) if "thickness_cm" in df.columns
+                              else df["width_cm"])
+        df = df.drop(columns=["width_cm"])
     return df
 
 def fill_default_height(df, height_cm):
@@ -133,23 +148,29 @@ def fill_default_height(df, height_cm):
     df["height_cm"] = pd.to_numeric(df["height_cm"], errors="coerce").fillna(height_cm)
     return df
 
-def _row_bool(row, key):
+def _row_bool(row, key, default=False):
     val = row.get(key)
-    return bool(val) if pd.notna(val) and val != "" else False
+    return bool(val) if pd.notna(val) and val != "" else default
+
+CLOSED_END_COLUMNS = ("closed_end_1", "closed_end_2", "closed_end_3")
+
+def _closed_end(row, key):
+    """Краищата на стените са затворени по подразбиране; отворен е само край с махната отметка."""
+    return _row_bool(row, key, default=True)
 
 def row_to_layout(elem_type, row):
     """Превежда ред от таблицата към разположение на панелите (teko_calculator.layout_element)."""
     h_cm = _row_float(row, "height_cm", 300)
     t_cm = _row_float(row, "thickness_cm", 25)
-    closed = {"closed_end_1": _row_bool(row, "closed_end_1"),
-              "closed_end_2": _row_bool(row, "closed_end_2")}
+    closed = {"closed_end_1": _closed_end(row, "closed_end_1"),
+              "closed_end_2": _closed_end(row, "closed_end_2")}
 
     if elem_type == "column":
         return layout_element("column", h_cm,
-                              width_cm=_row_float(row, "width_cm", 30),
-                              length_cm=_row_float(row, "length_cm", 50))
+                              width_cm=t_cm,
+                              length_cm=_row_float(row, "l1_cm", 50))
     elif elem_type == "wall":
-        return layout_element("wall", h_cm, length_cm=_row_float(row, "length_cm", 500),
+        return layout_element("wall", h_cm, length_cm=_row_float(row, "l1_cm", 500),
                               thickness_cm=t_cm, **closed)
     elif elem_type == "l_wall":
         return layout_element("l_wall", h_cm,
@@ -166,7 +187,7 @@ def row_to_layout(elem_type, row):
         return layout_element("t_wall", h_cm,
                               l1_cm=_row_float(row, "l1_cm", 200),
                               l2_cm=_row_float(row, "l2_cm", 200),
-                              thickness_cm=t_cm, closed_end_3=_row_bool(row, "closed_end_3"), **closed)
+                              thickness_cm=t_cm, closed_end_3=_closed_end(row, "closed_end_3"), **closed)
     return None
 
 def get_element_teko_panels(elem_type, row):
@@ -214,11 +235,11 @@ def element_dims_and_area(elem_type, row):
     h = _row_float(row, "height_cm", 300)
     t = _row_float(row, "thickness_cm", 25)
     if elem_type == "column":
-        w, l = _row_float(row, "width_cm", 30), _row_float(row, "length_cm", 50)
+        w, l = t, _row_float(row, "l1_cm", 50)
         perimeter = 2 * (w + l)
         dim_str = f"{w:g}x{l:g} см, H={h:g} см"
     elif elem_type == "wall":
-        l = _row_float(row, "length_cm", 500)
+        l = _row_float(row, "l1_cm", 500)
         perimeter = 2 * l
         dim_str = f"L={l:g} см, B={t:g} см, H={h:g} см"
     elif elem_type == "l_wall":
@@ -303,8 +324,9 @@ def render_element_preview(idx, row):
     label = format_element_label(elem_type, row.get("name", ""))
     dim_str, _ = element_dims_and_area(elem_type, row)
     cnt = int(_row_float(row, "count", 1))
-    closed = sum(_row_bool(row, k) for k in ("closed_end_1", "closed_end_2", "closed_end_3"))
-    title = f"{label} · {DISPLAY_TYPES[elem_type]} — {dim_str}, затворени краища: {closed}, {cnt} бр."
+    ends = CLOSED_END_COLUMNS if elem_type == "t_wall" else CLOSED_END_COLUMNS[:2]
+    closed = "" if elem_type == "column" else f", затворени краища: {sum(_closed_end(row, k) for k in ends)}"
+    title = f"{label} · {DISPLAY_TYPES[elem_type]} — {dim_str}{closed}, {cnt} бр."
     with st.expander(title):
         for w in check_element_dimensions(row):
             st.warning(w)
@@ -493,10 +515,7 @@ if "blueprint_data" not in st.session_state:
 if "used_model" not in st.session_state:
     st.session_state["used_model"] = None
 
-EMPTY_DF = pd.DataFrame(columns=[
-    "type", "name", "count", "width_cm", "length_cm", "thickness_cm", "l1_cm", "l2_cm", "l3_cm", "height_cm", "closed_end_1", "closed_end_2",
-    "closed_end_3"
-])
+EMPTY_DF = pd.DataFrame(columns=TABLE_COLUMNS)
 
 if "edited_df" not in st.session_state:
     st.session_state["edited_df"] = EMPTY_DF.copy()
@@ -511,6 +530,104 @@ with st.sidebar:
         st.success("🔑 API Ключът е зареден!")
 
 st.title("🏗️ ПЛАСПАНЕЛ ООД - Пластмасова Кофражна Система TEKO")
+
+# === ПЪРВА СТРАНИЦА: ПРОЕКТИ (засега без архив - проектите се губят при презареждане) ===
+if "projects" not in st.session_state:
+    st.session_state["projects"] = {}
+if "current_project" not in st.session_state:
+    st.session_state["current_project"] = None
+
+STD_HEIGHT_CHOICES = ["270 см", "300 см"]
+
+def open_project(pid):
+    """Зарежда проекта в табовете: таблицата с елементите и стандартната височина."""
+    project = projects_store.get_project(st.session_state["projects"], pid)
+    st.session_state["current_project"] = pid
+    elements = project["elements"]
+    st.session_state["edited_df"] = EMPTY_DF.copy() if elements is None else elements.copy()
+    for key in ("elements_form_editor", "excel_bytes", "delete_project_id"):
+        st.session_state.pop(key, None)
+    st.session_state["blueprint_data"] = None
+    h = project["std_height_cm"]
+    st.session_state["std_height_cm"] = h
+    choice = f"{h} см"
+    if choice in STD_HEIGHT_CHOICES:
+        st.session_state["std_height_choice_cm"] = choice
+    else:
+        st.session_state["std_height_choice_cm"] = "Друга"
+        st.session_state["std_height_other_cm"] = h
+
+def save_current_project():
+    """Записва таблицата и стандартната височина в отворения проект."""
+    pid = st.session_state["current_project"]
+    if pid in st.session_state["projects"]:
+        projects_store.save_project(st.session_state["projects"], pid,
+                                    elements=st.session_state["edited_df"],
+                                    std_height_cm=st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM))
+
+def close_project():
+    save_current_project()
+    st.session_state["current_project"] = None
+
+def create_project():
+    pid = projects_store.new_project(st.session_state["projects"],
+                                     st.session_state.get("new_project_name", ""),
+                                     st.session_state.get("new_project_client", ""),
+                                     st.session_state.get("new_project_date"),
+                                     std_height_cm=DEFAULT_HEIGHT_CM)
+    for key in ("new_project_name", "new_project_client", "new_project_date"):
+        st.session_state.pop(key, None)
+    open_project(pid)
+
+def duplicate_project(pid):
+    projects_store.duplicate_project(st.session_state["projects"], pid)
+
+def delete_project(pid):
+    projects_store.delete_project(st.session_state["projects"], pid)
+    st.session_state.pop("delete_project_id", None)
+
+def render_projects_page():
+    col_h, col_new = st.columns([4, 1])
+    col_h.header("Проекти")
+    st.caption("Засега без архив: проектите се пазят, докато страницата е отворена - при презареждане се губят.")
+    with col_new.popover("➕ Нов проект", use_container_width=True):
+        st.text_input("Име на проекта:", key="new_project_name")
+        st.text_input("Клиент:", key="new_project_client")
+        st.date_input("Дата:", key="new_project_date")
+        st.button("Създай и отвори", type="primary", on_click=create_project, use_container_width=True)
+
+    rows = projects_store.project_rows(st.session_state["projects"])
+    if not rows:
+        st.info("ℹ️ Няма проекти. Натиснете „Нов проект“.")
+        return
+    widths = [4, 3, 1.5, 1.8, 1, 1]
+    for col, title in zip(st.columns(widths), ["Име", "Клиент", "Дата", "Последна промяна", "", "Действия"]):
+        col.markdown(f"**{title}**")
+    for row in rows:
+        pid = row["id"]
+        c_name, c_client, c_date, c_mod, c_dup, c_del = st.columns(widths, vertical_alignment="center")
+        c_name.button(row["Име"], key=f"open_{pid}", type="tertiary", on_click=open_project, args=(pid,))
+        c_client.write(row["Клиент"] or "")
+        c_date.write(row["Дата"])
+        c_mod.write(row["Последна промяна"])
+        c_dup.button("Дублирай", key=f"dup_{pid}", on_click=duplicate_project, args=(pid,))
+        if st.session_state.get("delete_project_id") == pid:
+            c_del.button("Потвърди", key=f"del_ok_{pid}", type="primary", on_click=delete_project, args=(pid,),
+                         help="Проектът се изтрива окончателно.")
+        else:
+            c_del.button("Изтрий", key=f"del_{pid}", on_click=st.session_state.__setitem__,
+                         args=("delete_project_id", pid))
+
+current = projects_store.get_project(st.session_state["projects"], st.session_state["current_project"])
+if current is None:
+    st.session_state["current_project"] = None
+    render_projects_page()
+    st.stop()
+
+col_proj, col_back = st.columns([5, 1], vertical_alignment="center")
+col_proj.subheader(f"📁 {current['name']}" + (f" · {current['client']}" if current["client"] else ""))
+col_back.button("← Проекти", on_click=close_project, use_container_width=True,
+                help="Записва таблицата и се връща към списъка с проекти.")
 
 tab1, tab2, tab3, tab4 = st.tabs([
     "📐 Чертеж и Редактиране", 
@@ -576,9 +693,9 @@ with tab1:
                                     elements_list = blueprint_data.get("elements", [])
                                     
                                     df_ai = columns_to_cm(pd.DataFrame(elements_list))
-                                    for col in ("closed_end_1", "closed_end_2", "closed_end_3"):
+                                    for col in TABLE_COLUMNS:
                                         if col not in df_ai.columns:
-                                            df_ai[col] = False
+                                            df_ai[col] = True if col in CLOSED_END_COLUMNS else None
                                     st.session_state["edited_df"] = df_ai
                                     st.success(f"✅ Готово! Разчетено с: **{used_model}**")
                                 except Exception as e:
@@ -588,13 +705,13 @@ with tab1:
         st.markdown(
             "📝 **Инструкция за попълване в таблицата по-долу:**\n"
             "- Изберете **тип елемент** (`wall` - стена, `column` - колона, `l_wall` - L-стена, `u_wall` - П/U-стена).\n"
-            "- Всички размери (ширина, дължина, дебелина, рамена, височина) са в **сантиметри**.\n"
-            "- За **права стена (`wall`)**: попълнете `length_cm` (дължина) и `thickness_cm` (дебелина).\n"
-            "- За **колона (`column`)**: попълнете `width_cm` (ширина) и `length_cm` (дължина).\n"
+            "- Всички размери (дебелина, рамена, височина) са в **сантиметри**.\n"
+            "- За **права стена (`wall`)**: попълнете **Рамо 1 / Дължина** и `thickness_cm` (дебелина).\n"
+            "- За **колона (`column`)**: попълнете **Рамо 1 / Дължина** и `thickness_cm` (дебелина) - колона 30x50: дължина 50, дебелина 30.\n"
             "- За **L-стена (`l_wall`)**: попълнете `l1_cm` (рамо 1), `l2_cm` (рамо 2) и `thickness_cm` (дебелина).\n"
             "- За **П/U-стена (`u_wall`)**: попълнете `l1_cm` (рамо 1), `l2_cm` (рамо 2), `l3_cm` (рамо 3) и `thickness_cm` (дебелина).\n"
             "- За **T-стена (`t_wall`)**: **Рамо 1 = страна A** (цялата полка), **Рамо 2 = страна B / B1** (реброто, от полката до края му) и `thickness_cm` (дебелина). Рамо 3 не се попълва - реброто е в средата на полката. Край 1 е десният край на полката, край 2 - левият, **Затворен край 3** - краят на реброто (само за T-стена).\n"
-            "- **Затворен край 1 / Затворен край 2** (отметки) за стени, L- и П/U-стени: челните краища, затворени с панел колкото дебелината. Край 1 е краят на рамо 1 (при права стена - десният), край 2 - краят на последното рамо (при права стена - левият).\n"
+            "- **Затворен край 1 / Затворен край 2** (отметки) за стени, L- и П/U-стени: челните краища, затворени с панел колкото дебелината. Край 1 е краят на рамо 1 (при права стена - десният), край 2 - краят на последното рамо (при права стена - левият). **Всички краища са затворени по подразбиране** - за отворен край махнете отметката.\n"
             "- Непотребните полета за съответния тип могат да се оставят празни — системата автоматично игнорира празни клетки без грешки!"
         )
 
@@ -647,17 +764,16 @@ with tab1:
                 "type": st.column_config.SelectboxColumn("Тип елемент", options=["column", "wall", "l_wall", "u_wall", "t_wall"], required=True, default="wall", width="auto"),
                 "name": st.column_config.TextColumn("Наименование / Маркировка", width="auto"),
                 "count": st.column_config.NumberColumn("Брой", min_value=1, step=1, default=1, width="auto"),
-                "width_cm": st.column_config.NumberColumn("Ширина (см)", format="%g", width="auto"),
-                "length_cm": st.column_config.NumberColumn("Дължина (см)", format="%g", width="auto"),
                 "thickness_cm": st.column_config.NumberColumn("Дебелина (см)", format="%g", width="auto"),
-                "l1_cm": st.column_config.NumberColumn("Рамо 1 (см)", format="%g", width="auto"),
+                "l1_cm": st.column_config.NumberColumn("Рамо 1 / Дължина (см)", format="%g", width="auto"),
                 "l2_cm": st.column_config.NumberColumn("Рамо 2 (см)", format="%g", width="auto"),
                 "l3_cm": st.column_config.NumberColumn("Рамо 3 (см)", format="%g", width="auto"),
                 "height_cm": st.column_config.NumberColumn("Височина (см)", format="%g", width="auto"),
-                "closed_end_1": st.column_config.CheckboxColumn("Затворен край 1", default=False, width="auto"),
-                "closed_end_2": st.column_config.CheckboxColumn("Затворен край 2", default=False, width="auto"),
-                "closed_end_3": st.column_config.CheckboxColumn("Затворен край 3 (само T-стена)", default=False, width="auto")
+                "closed_end_1": st.column_config.CheckboxColumn("Затворен край 1", default=True, width="auto"),
+                "closed_end_2": st.column_config.CheckboxColumn("Затворен край 2", default=True, width="auto"),
+                "closed_end_3": st.column_config.CheckboxColumn("Затворен край 3 (само T-стена)", default=True, width="auto")
             },
+            column_order=TABLE_COLUMNS,
             use_container_width=True,
             key="elements_form_editor"
         )
@@ -665,6 +781,7 @@ with tab1:
         submit_btn = st.form_submit_button("💾 Запази и Изчисли", type="primary", use_container_width=True)
         if submit_btn:
             st.session_state["edited_df"] = edited_grid
+            save_current_project()
             st.session_state.pop("excel_bytes", None)  # старият Excel вече не отговаря на таблицата
             st.success("✅ Данните са запазени и преизчислени успешно! Можете да проверите резултатите в следващите табове.")
 
@@ -812,8 +929,9 @@ with tab3:
     if df_calc.empty or len(df_calc) == 0:
         st.info("ℹ️ Въведете елементи в Таб 1, за да генерирате чертежи.")
     else:
-        proj_name_input = st.text_input("Наименование на обекта:", value="Обект ТЕКО")
-        client_name_input = st.text_input("Име на клиент / инвеститор:", value="Няма посочен клиент")
+        proj_name_input = st.text_input("Наименование на обекта:", value=current["name"])
+        client_name_input = st.text_input("Име на клиент / инвеститор:",
+                                          value=current["client"] or "Няма посочен клиент")
 
         if st.button("📄 Генерирай PDF Чертежи на обект", type="primary"):
             with st.spinner("Генериране на векторни чертежи и PDF документ..."):
@@ -847,9 +965,9 @@ with tab4:
     else:
         col_o1, col_o2 = st.columns(2)
         with col_o1:
-            offer_client = st.text_input("Клиент / Инвеститор:", value="Строителна Компания ООД")
-            offer_project = st.text_input("Име на обект:", value="Жилищна сграда")
-            offer_date_val = st.date_input("Дата на офертата:")
+            offer_client = st.text_input("Клиент / Инвеститор:", value=current["client"] or "Строителна Компания ООД")
+            offer_project = st.text_input("Име на обект:", value=current["name"])
+            offer_date_val = st.date_input("Дата на офертата:", value=current["date"])
         with col_o2:
             offer_type_sel = st.selectbox("Тип на офертата:", ["Наем на кофраж (€/m² за месец)", "Покупка на нов кофраж (€/m²)"])
             default_price = 18.0 if "наем" in offer_type_sel.lower() else 125.0
@@ -886,22 +1004,5 @@ with tab4:
                 data=word_stream,
                 file_name="Teko_Commercial_Offer.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True
-            )
-
-        st.divider()
-        st.subheader("📊 КСС в Excel")
-        st.caption("Количествена сметка за целия обект - артикулите в реда на офертата.")
-        if st.button("📊 Създай КСС (Excel)", key="make_kss_excel"):
-            kss_bom = dict(project_panels_summary)
-            for acc_code, acc_qty in project_accessories_summary.items():
-                kss_bom[acc_code] = kss_bom.get(acc_code, 0) + acc_qty
-            kss_stream = generate_kss_excel(kss_bom, offer_project, offer_client, offer_date_val)
-            st.success("✅ КСС е генерирана в Excel формат!")
-            st.download_button(
-                label="📥 Изтегли КСС (Excel .xlsx)",
-                data=kss_stream,
-                file_name="Teko_KSS.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
