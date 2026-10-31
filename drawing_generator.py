@@ -19,7 +19,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.utils import ImageReader
 
 from accessories_calculator import waler_heights_cm, NARROW_LIMIT_CM
-from teko_calculator import IN_CORNER_CM
+from teko_calculator import IN_CORNER_CM, is_compensator_row
 
 # Висока резолюция за чисти линии и четливи надписи
 DPI_RESOLUTION = 300
@@ -37,6 +37,7 @@ COLOR_CORNER_EX = '#52BE80'     # Външен ъгъл EX (яркозелено
 COLOR_CORNER_IN = '#1E8449'     # Вътрешен ъгъл IN (тъмнозелено)
 COLOR_WALER = '#27AE60'         # Ригел AW / Вертикализатори (зелено)
 COLOR_CONCRETE = '#D5D8DC'      # Бетонно ядро (светлосиво)
+COLOR_COMPENSATOR = '#C8D1DC'   # Компенсатор TC отгоре (сиво-синьо)
 
 def setup_pdf_fonts():
     """Регистрира кирилски шрифт в ReportLab."""
@@ -545,26 +546,11 @@ def generate_top_view_buf(layout, name="Елемент"):
                     ax.plot(x0 + T/2, y0 + s, 'o', markersize=1.8, color=TOP_TEXT, zorder=5)
             s += w
 
-    panel_boxes = []
-    for face in layout["faces"]:
-        x0, y0, axis, *_ = place[face["name"]]
-        length = face["length_cm"]
-        panel_boxes.append((x0, y0, x0 + (length if axis == 'x' else T), y0 + (T if axis == 'x' else length)))
-
-    # Ъгли: EX - светлозелено, надписът отвън; IN - тъмнозелено, надписът вътре
-    center_x = (min(p[0] for p in poly) + max(p[0] for p in poly)) / 2
+    # Ъгли: EX - светлозелено, IN - тъмнозелено; надписът е вътре в квадрата
     for kind, x, y in corners:
         if kind == "EX":
             ax.add_patch(patches.Rectangle((x, y), T, T, facecolor=TOP_EX, edgecolor=TOP_EX_BORDER, linewidth=0.7, zorder=3))
-            left = x + T/2 < center_x
-            # надписът отива от страната без панел до ъгъла
-            side_busy = [any(sx0 <= px <= sx1 and sy0 <= y + T/2 <= sy1 for sx0, sy0, sx1, sy1 in panel_boxes)
-                         for px in (x - 1, x + T + 1)]
-            if side_busy[0 if left else 1] and not side_busy[1 if left else 0]:
-                left = not left
-            gap = 2 + (TOP_WALER_T if walers else 0)  # надписът е извън ригела
-            ax.text(x - gap if left else x + T + gap, y + T/2, "EX", ha='right' if left else 'left', va='center',
-                    fontsize=8.5, fontweight='bold', color=TOP_TEXT, zorder=4)
+            ax.text(x + T/2, y + T/2, "EX", ha='center', va='center', fontsize=6.5, fontweight='bold', color=TOP_TEXT, zorder=4)
         else:
             ax.add_patch(patches.Rectangle((x, y), T, T, facecolor=TOP_IN, edgecolor=TOP_EX_BORDER, linewidth=0.7, zorder=3))
             ax.text(x + T/2, y + T/2, "IN", ha='center', va='center', fontsize=6.5, fontweight='bold', color='white', zorder=4)
@@ -669,14 +655,28 @@ def _front_view_buf(layout, faces, title=True):
             curr_x = 0
             # надписът е в средата на видимата част на панела (горният ред може да излиза над чертежа)
             label_y = (curr_y + min(curr_y + h_val, top_y)) / 2
+            if is_compensator_row(h_val):
+                # компенсаторът отгоре - една сива лента по цялата страна
+                ax.add_patch(patches.Rectangle((0, curr_y), side_len, h_val, linewidth=0.8,
+                                               edgecolor='#4A5560', facecolor=COLOR_COMPENSATOR, zorder=1))
+                ax.text(side_len / 2, curr_y + h_val / 2, f"TC {int(h_val)} см", ha='center', va='center',
+                        fontsize=4.5, color='#111111', fontweight='bold', zorder=5)
+                curr_y += h_val
+                continue
             for w_val in row:
                 rect = patches.Rectangle((curr_x, curr_y), w_val, h_val,
                                          linewidth=0.8, edgecolor=COLOR_PANEL_BORDER, facecolor=COLOR_PANEL, zorder=1)
                 ax.add_patch(rect)
-                text_str = f"{int(h_val)}/{int(w_val)}" if h_val != 60 else f"{int(w_val)}/60"
+                if h_val < 60:
+                    # ред легнали панели 20-35 см: надписът хоризонтално (120/20, 20/15)
+                    text_str = f"{int(max(w_val, h_val))}/{int(min(w_val, h_val))}"
+                    rotation = 0 if w_val >= 40 else 90
+                else:
+                    text_str = f"{int(h_val)}/{int(w_val)}" if h_val != 60 else f"{int(w_val)}/60"
+                    rotation = 90
                 ax.text(curr_x + w_val / 2, label_y, text_str,
-                        ha='center', va='center', fontsize=5, color='#111111', fontweight='bold',
-                        rotation=90, zorder=5,
+                        ha='center', va='center', fontsize=5 if h_val >= 60 else 4, color='#111111',
+                        fontweight='bold', rotation=rotation, zorder=5,
                         bbox=dict(boxstyle='round,pad=0.15', facecolor='white', alpha=0.9, edgecolor='none'))
                 curr_x += w_val
             curr_y += h_val
@@ -721,6 +721,7 @@ def _front_view_buf(layout, faces, title=True):
 # ==========================================
 # Цветове на 3D изгледа (взети от еталона)
 COLOR_3D_PANEL = '#E5BFBE'
+COLOR_3D_COMPENSATOR = '#C8D1DC'
 COLOR_3D_CORNER = '#A0D784'
 COLOR_3D_CORNER_IN = '#4A8F42'
 COLOR_3D_CORNER_EDGE = '#4F8F3A'
@@ -763,11 +764,12 @@ def generate_3d_axonometry_buf(layout, name="Елемент"):
         curr_z = 0
         for h_val, row in zip(layout["height_levels"], face["rows"]):
             s = 0
+            col = COLOR_3D_COMPENSATOR if is_compensator_row(h_val) else COLOR_3D_PANEL
             for w_val in (row[::-1] if rev and rev[0] else row):
                 if axis == 'x':
-                    boxes.append((x0 + s, y0, curr_z, w_val, T, h_val, COLOR_3D_PANEL, COLOR_3D_EDGE))
+                    boxes.append((x0 + s, y0, curr_z, w_val, T, h_val, col, COLOR_3D_EDGE))
                 else:
-                    boxes.append((x0, y0 + s, curr_z, T, w_val, h_val, COLOR_3D_PANEL, COLOR_3D_EDGE))
+                    boxes.append((x0, y0 + s, curr_z, T, w_val, h_val, col, COLOR_3D_EDGE))
                 s += w_val
             curr_z += h_val
     for kind, x, y in corners:
