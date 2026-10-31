@@ -39,16 +39,19 @@ def set_cell_background(cell, hex_color):
     cell._tc.get_or_add_tcPr().append(shading_elm)
 
 # === СТЪПКА 3: Описание на редовете по височина ===
-def format_height_breakdown_text(height_cm):
+def format_height_breakdown_text(height_cm, layout=None):
     """
     Форматира височината на елемента в ясен текст за използваните нива от панели.
+    layout: разположението на елемента (основата може да е сменена според дължините).
     """
     h_cm = round(float(height_cm or 300))
-    h_levels = solve_height_cm(h_cm)
+    h_levels = layout["height_levels"] if layout else solve_height_cm(h_cm)
     parts = []
     for idx, h_val in enumerate(h_levels, 1):
-        if h_val == 60:
-            parts.append(f"Ред {idx}: Полегнал (60 cm)")
+        if h_val <= 15:
+            parts.append(f"Ред {idx}: Компенсатор TC ({h_val} cm)")
+        elif h_val <= 60:
+            parts.append(f"Ред {idx}: Полегнал ({h_val} cm)")
         else:
             parts.append(f"Ред {idx}: Изправен ({h_val} cm)")
     return " | ".join(parts)
@@ -56,15 +59,15 @@ def format_height_breakdown_text(height_cm):
 # === СТЪПКА 4: Проверка за нестандартни размери ===
 def check_element_dimensions(row):
     """
-    Проверява дали въведените размери са кратни на стандартните модули на TEKO (5 cm за ширина, 10 cm за височина).
+    Проверява дали въведените размери са кратни на стандартните модули на TEKO (5 cm за ширина и височина).
     """
     warnings = []
     h_cm = round(_row_float(row, "height_cm", 300))
     elem_type = str(row.get("type", "wall"))
     name = format_element_label(elem_type, str(row.get("name", "Елемент")))
 
-    if h_cm % 10 != 0:
-        warnings.append(f"• **{name}**: Височина {h_cm} cm не е кратна на 10 cm (закръгля се към най-близкия модул).")
+    if h_cm % 5 != 0:
+        warnings.append(f"• **{name}**: Височина {h_cm} cm не е кратна на 5 cm (закръгля се нагоре до 5 cm).")
 
     if elem_type == "column":
         w_cm = round(_row_float(row, "thickness_cm", 25))
@@ -529,9 +532,60 @@ with st.sidebar:
     else:
         st.success("🔑 API Ключът е зареден!")
 
-st.title("🏗️ ПЛАСПАНЕЛ ООД - Пластмасова Кофражна Система TEKO")
+# === ГОРНА ЛЕНТА И ВИД НА СТРАНИЦАТА „ПРОЕКТИ“ (по снимка 19 в reference/screenshots) ===
+st.markdown("""
+    <style>
+    .teko-header {display: flex; align-items: center; gap: 14px; background: #0f1b2d; color: #fff;
+                  padding: 14px 22px; border-radius: 10px; margin-bottom: 18px;}
+    .teko-logo {background: #0ea5e9; color: #fff; font-weight: 800; font-size: 20px; width: 42px;
+                height: 42px; border-radius: 8px; display: flex; align-items: center; justify-content: center;}
+    .teko-title {font-weight: 800; font-size: 19px; line-height: 1.2;}
+    .teko-sub {color: #9fb3c8; font-size: 13px;}
+    .teko-right {margin-left: auto; color: #9fb3c8; font-size: 13px;}
+    .teko-projects-title {font-size: 26px !important; font-weight: 700; color: #0f172a; margin: 0;}
+    .teko-right-head {text-align: right;}
+    .st-key-new_project button {background: #0b84d8; color: #fff; border: none; font-weight: 600;}
+    .st-key-new_project button:hover {background: #0a73bd; color: #fff;}
+    .st-key-projects_table {background: #fff; border-radius: 10px; gap: 0;}
+    .st-key-projects_head {background: #f8fafc; border-bottom: 1px solid #e5e7eb; padding: 12px 16px;}
+    .st-key-projects_head p {color: #475569; font-weight: 700; font-size: 14px;}
+    [class*="st-key-prow_"] {border-bottom: 1px solid #eef0f3; padding: 4px 16px;}
+    [class*="st-key-prow_"] p {font-size: 14px; color: #1f2937;}
+    .teko-mono {font-family: ui-monospace, Consolas, monospace; font-size: 13px; color: #475569;}
+    [class*="st-key-open_"] button {padding: 0; justify-content: flex-start; text-align: left;}
+    [class*="st-key-open_"] button p {color: #0b6fb8; font-weight: 500; font-size: 15px;}
+    [class*="st-key-act_"] {flex-wrap: nowrap;}
+    [class*="st-key-dup_"] button p, [class*="st-key-del_"] button p {white-space: nowrap;}
+    [class*="st-key-dup_"] button p {color: #475569; font-size: 13px;}
+    [class*="st-key-del_"] button p {color: #94a3b8; font-size: 13px;}
+    </style>
+    <div class="teko-header">
+      <div class="teko-logo">TK</div>
+      <div><div class="teko-title">TEKO — Оптимизация на панели</div>
+           <div class="teko-sub">AI система за кофражно планиране</div></div>
+      <div class="teko-right">ПЛАСПАНЕЛ ООД</div>
+    </div>
+""", unsafe_allow_html=True)
 
-# === ПЪРВА СТРАНИЦА: ПРОЕКТИ (засега без архив - проектите се губят при презареждане) ===
+# === ПЪРВА СТРАНИЦА: ПРОЕКТИ (архив в Google Sheets; без ключ в secrets - само докато страницата е отворена) ===
+@st.cache_resource(show_spinner=False)
+def connect_projects_archive():
+    """Връзка с таблицата „TEKO Проекти“ (веднъж за приложението); (архив, грешка)."""
+    try:
+        info = st.secrets.get("gcp_service_account")
+        sheet_id = st.secrets.get("PROJECTS_SHEET_ID", "")
+    except FileNotFoundError:
+        return None, None
+    if not info or not sheet_id:
+        return None, None
+    try:
+        return projects_store.connect_google_sheets(info, sheet_id), None
+    except Exception as exc:  # noqa: BLE001 - архивът не е достъпен, приложението работи без него
+        return None, f"{type(exc).__name__}: {exc}"
+
+archive, archive_error = connect_projects_archive()
+projects_store.use_archive(archive)
+
 if "projects" not in st.session_state:
     st.session_state["projects"] = {}
 if "current_project" not in st.session_state:
@@ -587,36 +641,59 @@ def delete_project(pid):
     st.session_state.pop("delete_project_id", None)
 
 def render_projects_page():
-    col_h, col_new = st.columns([4, 1])
-    col_h.header("Проекти")
-    st.caption("Засега без архив: проектите се пазят, докато страницата е отворена - при презареждане се губят.")
-    with col_new.popover("➕ Нов проект", use_container_width=True):
-        st.text_input("Име на проекта:", key="new_project_name")
-        st.text_input("Клиент:", key="new_project_client")
-        st.date_input("Дата:", key="new_project_date")
-        st.button("Създай и отвори", type="primary", on_click=create_project, use_container_width=True)
+    _, page, _ = st.columns([1, 6, 1])
+    with page:
+        col_h, col_new = st.columns([5, 1], vertical_alignment="center")
+        col_h.markdown('<p class="teko-projects-title">Проекти</p>', unsafe_allow_html=True)
+        with col_new.container(key="new_project"):
+            with st.popover("Нов проект", use_container_width=True):
+                st.text_input("Име на проекта:", key="new_project_name")
+                st.text_input("Клиент:", key="new_project_client")
+                st.date_input("Дата:", key="new_project_date")
+                st.button("Създай и отвори", type="primary", on_click=create_project, use_container_width=True)
 
-    rows = projects_store.project_rows(st.session_state["projects"])
-    if not rows:
-        st.info("ℹ️ Няма проекти. Натиснете „Нов проект“.")
-        return
-    widths = [4, 3, 1.5, 1.8, 1, 1]
-    for col, title in zip(st.columns(widths), ["Име", "Клиент", "Дата", "Последна промяна", "", "Действия"]):
-        col.markdown(f"**{title}**")
-    for row in rows:
-        pid = row["id"]
-        c_name, c_client, c_date, c_mod, c_dup, c_del = st.columns(widths, vertical_alignment="center")
-        c_name.button(row["Име"], key=f"open_{pid}", type="tertiary", on_click=open_project, args=(pid,))
-        c_client.write(row["Клиент"] or "")
-        c_date.write(row["Дата"])
-        c_mod.write(row["Последна промяна"])
-        c_dup.button("Дублирай", key=f"dup_{pid}", on_click=duplicate_project, args=(pid,))
-        if st.session_state.get("delete_project_id") == pid:
-            c_del.button("Потвърди", key=f"del_ok_{pid}", type="primary", on_click=delete_project, args=(pid,),
-                         help="Проектът се изтрива окончателно.")
+        if archive_error:
+            st.error(f"Архивът в Google не е достъпен ({archive_error}). Проектите се пазят само докато "
+                     "страницата е отворена.")
+        elif not projects_store.has_archive():
+            st.caption("Без архив (няма ключ за Google в secrets): проектите се губят при презареждане.")
         else:
-            c_del.button("Изтрий", key=f"del_{pid}", on_click=st.session_state.__setitem__,
-                         args=("delete_project_id", pid))
+            try:
+                projects_store.refresh(st.session_state["projects"])
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Списъкът не може да се зареди от Google: {exc}")
+
+        rows = projects_store.project_rows(st.session_state["projects"])
+        if not rows:
+            st.info("ℹ️ Няма проекти. Натиснете „Нов проект“.")
+            return
+        widths = [3.6, 2.8, 1.4, 1.7, 2.3]
+        with st.container(border=True, key="projects_table"):
+            with st.container(key="projects_head"):
+                head = st.columns(widths, vertical_alignment="center")
+                for col, title in zip(head, ["Име", "Клиент", "Дата", "Последна промяна"]):
+                    col.markdown(title)
+                head[-1].markdown('<p class="teko-right-head">Действия</p>', unsafe_allow_html=True)
+            for row in rows:
+                pid = row["id"]
+                with st.container(key=f"prow_{pid}"):
+                    c_name, c_client, c_date, c_mod, c_act = st.columns(widths, vertical_alignment="center")
+                    actions = c_act.container(horizontal=True, horizontal_alignment="right", gap="small",
+                                              key=f"act_{pid}")
+                    c_name.button(row["Име"], key=f"open_{pid}", type="tertiary", on_click=open_project, args=(pid,))
+                    c_client.markdown(row["Клиент"] or "")
+                    c_date.markdown(f'<span class="teko-mono">{row["Дата"]}</span>', unsafe_allow_html=True)
+                    c_mod.markdown(f'<span class="teko-mono">{row["Последна промяна"]}</span>',
+                                   unsafe_allow_html=True)
+                    actions.button("Дублирай", key=f"dup_{pid}", type="tertiary", width="content", on_click=duplicate_project,
+                                 args=(pid,))
+                    if st.session_state.get("delete_project_id") == pid:
+                        actions.button("Потвърди", key=f"delok_{pid}", type="primary", width="content", on_click=delete_project,
+                                     args=(pid,),
+                                     help="Проектът се маха от списъка (в архива остава с отметка „Изтрит“).")
+                    else:
+                        actions.button("Изтрий", key=f"del_{pid}", type="tertiary", width="content",
+                                     on_click=st.session_state.__setitem__, args=("delete_project_id", pid))
 
 current = projects_store.get_project(st.session_state["projects"], st.session_state["current_project"])
 if current is None:
@@ -824,7 +901,7 @@ with tab2:
 
             total_a += area
             
-            h_breakdown_str = format_height_breakdown_text(h)
+            h_breakdown_str = format_height_breakdown_text(h, row_to_layout(elem_type, row))
 
             panels_dict = get_element_teko_panels(elem_type, row)
             for p_name, p_qty in panels_dict.items():
