@@ -60,7 +60,13 @@ def format_panel_code(width_cm, height_cm):
     Генерира каталожното наименование според официалната спецификация ТЕКО.
     Полегнал ред (височина 60): ширини 150/120 са полегнали големи панели,
     останалите са TK 60/x (TC 60/x за компенсаторите до 15 см).
+    Ред 20-35 см (полегнали панели): TK по-голям/по-малък размер, напр. 150/20, 20/15.
+    Ред 5/10/15 см - компенсатор отгоре: TC 150/x.
     """
+    if is_compensator_row(height_cm):
+        return f"TC 150/{int(height_cm)}"
+    if height_cm < 60:
+        return f"TK {max(width_cm, height_cm)}/{min(width_cm, height_cm)}"
     if height_cm == 60:
         if width_cm == 150:
             return "TK 150/60 (полегнал)"
@@ -75,33 +81,86 @@ def format_panel_code(width_cm, height_cm):
 
     return f"TK {height_cm}/{width_cm}"
 
+COMPENSATOR_PIECE_CM = 150  # компенсаторът отгоре се смята на парчета по 150 см
+
+# Остатък над редовете 150/120/60 (под 60 см), отдолу нагоре:
+# 5/10/15 - компенсатор TC отгоре; 20-35 - ред легнали панели; 40-55 - два реда.
+TOP_REMAINDERS = {
+    0: [], 5: [5], 10: [10], 15: [15],
+    20: [20], 25: [25], 30: [30], 35: [35],
+    40: [20, 20], 45: [25, 20], 50: [30, 20], 55: [30, 25],
+}
+
+# Дължини на панелите в ред с височина 20-35 см (легнали големи и малки панели от спецификацията)
+STRIP_PIECES = {
+    20: [150, 120, 60, 20, 15],   # TK 150/20, 120/20, 60/20, 20/20, 20/15
+    25: [150, 120, 60, 40, 30],   # TK 150/25, 120/25, 60/25, 40/25, 30/25
+    30: [150, 120, 60, 25],       # TK 150/30, 120/30, 60/30, 30/25
+    35: [150, 120, 60],           # TK 150/35, 120/35, 60/35
+}
+
+def is_compensator_row(height_cm):
+    """Ред с височина 5/10/15 см - компенсатор TC отгоре (винаги най-горният ред)."""
+    return 0 < height_cm <= 15
+
+def compensator_pieces(length_cm):
+    """Брой компенсатори по 150 см за дължина (закръглено нагоре: 1000 см -> 7 бр.)."""
+    return int(math.ceil(round(length_cm, 6) / COMPENSATOR_PIECE_CM))
+
+def _height_bases(height_cm):
+    """
+    Точните комбинации от редове 150 / 120 / 60 до височината, с остатък под 60 см -
+    от най-високата към по-ниските. За всяка сума - с по-малко редове, после повече 150.
+    Подредени отдолу нагоре: 150, 120, 60.
+    """
+    best = {}
+    for n150 in range(height_cm // 150 + 1):
+        for n120 in range((height_cm - 150 * n150) // 120 + 1):
+            for n60 in range((height_cm - 150 * n150 - 120 * n120) // 60 + 1):
+                levels = [150] * n150 + [120] * n120 + [60] * n60
+                total = sum(levels)
+                key = (-len(levels), n150)
+                if height_cm - total < 60 and (total not in best or key > best[total][0]):
+                    best[total] = (key, levels)
+    return [best[total][1] for total in sorted(best, reverse=True)]
+
+def _remainder_options(rem):
+    """
+    Начини за остатъка отгоре, по ред на предпочитане. Първо TOP_REMAINDERS; при 40-55 см -
+    и другите два реда легнали, после два реда + компенсатор (по-големият TC първи),
+    напр. 55 = 30 + 25, 35 + 20, после 20 + 20 + TC 15 (55.pdf).
+    """
+    options = [TOP_REMAINDERS[rem]]
+    if rem >= 40:
+        strips = sorted(STRIP_PIECES, reverse=True)
+        pairs = lambda r: [[a, b] for a in strips for b in strips if a >= b and a + b == r]
+        options += [p for p in pairs(rem) if p not in options]
+        for tc in (15, 10, 5):
+            options += [p + [tc] for p in pairs(rem - tc)]
+    return options
+
+def height_candidates(height_cm):
+    """
+    Възможните разпределения по височина (отдолу нагоре), по ред на предпочитане:
+    най-високата основа от 150 / 120 / 60 с остатъка отгоре, после по-ниските основи.
+    layout_element взима първото, при което редовете легнали панели покриват страните точно.
+    """
+    height_cm = _round_up_to_5(height_cm)
+    if height_cm in STANDARD_HEIGHT_MAP:
+        return [list(STANDARD_HEIGHT_MAP[height_cm])]
+    return [base + rest for base in _height_bases(height_cm)
+            for rest in _remainder_options(height_cm - sum(base))]
+
 def solve_height_cm(height_cm):
     """
-    Пресмята височинното разпределение на панелите (отдолу нагоре).
-    За стандартни височини връща фиксираната комбинация.
-    За нестандартни височини използва първо изправени панели (150/120 см),
-    а остатъкът под 120 см се запълва с полегнали панели (с височина 60 см).
+    Пресмята височинното разпределение на панелите (отдолу нагоре), без да гледа дължините.
+    За стандартни височини връща фиксираната комбинация. Иначе - най-високата точна
+    комбинация от 150 / 120 / 60, а остатъкът (под 60 см) отгоре: 20-55 см - един или два реда
+    легнали панели, 5/10/15 см - компенсатор TC (най-отгоре, никога два един до друг).
+    Височината се закръгля нагоре до 5 см. Окончателното е в layout_element (сменя основата,
+    когато ред легнали не покрива страна точно).
     """
-    height_cm = int(round(height_cm))
-    if height_cm in STANDARD_HEIGHT_MAP:
-        return list(STANDARD_HEIGHT_MAP[height_cm])
-
-    remaining = height_cm
-    levels = []
-
-    while remaining >= 150:
-        levels.append(150)
-        remaining -= 150
-
-    while remaining >= 120:
-        levels.append(120)
-        remaining -= 120
-
-    while remaining > 0:
-        levels.append(60)
-        remaining -= 60 if remaining >= 60 else remaining
-
-    return levels
+    return height_candidates(height_cm)[0]
 
 def _round_up_to_5(width_cm):
     """Размер, некратен на 5 см, се закръгля нагоре (допълва се с компенсатор TC 5)."""
@@ -122,14 +181,35 @@ def _solve_width_lying(width_cm):
     small = LYING_REMAINDERS.get(rem) or STANDING_REMAINDERS[rem]
     return [150] * count_150 + [120] * count_120 + small
 
+def _solve_width_strip(width_cm, pieces):
+    """
+    Ред легнали панели с височина 20-35 см: точно покритие с възможно най-малко панели,
+    големите отляво, малките допълват отдясно (200 = 120 + 60 + 20, 205 = 150 + 20 + 20 + 15).
+    Когато не може точно - най-малкото надхвърляне (последният панел излиза).
+    """
+    limit = width_cm + max(pieces)
+    best = {0: []}   # дължина -> най-малко панели, по-големите първи
+    for total in range(5, limit + 1, 5):
+        options = [sorted(best[total - p] + [p], reverse=True)
+                   for p in pieces if total - p in best]
+        if options:
+            best[total] = min(options, key=lambda r: (len(r), [-x for x in r]))
+    reach = min(t for t in best if t >= width_cm)
+    return best[reach]
+
 def solve_width_cm(width_cm, height_level_cm=150):
     """
     Подреден списък с ширините на панелите за един ред с дадена височина.
-    Сумата е равна на ширината (закръглена нагоре до 5 см) - никога не я надхвърля.
+    Сумата е равна на ширината (закръглена нагоре до 5 см); надхвърля я само ред легнали
+    панели 20-35 см, когато няма точно покритие.
     """
     if width_cm <= 0:
         return []
     w = _round_up_to_5(width_cm)
+    if is_compensator_row(height_level_cm):
+        return [w]
+    if height_level_cm in STRIP_PIECES:
+        return _solve_width_strip(w, STRIP_PIECES[height_level_cm])
     if height_level_cm == 60:
         return _solve_width_lying(w)
     return _solve_width_standing(w)
@@ -140,20 +220,35 @@ def _face(name, segments, levels, start=None, end=None, flip=()):
     така че еднаквите сегменти на срещуположните страни излизат огледални.
     flip: индекси на сегментите, редени в обратен ред (панелите 60 откъм края на сегмента).
     """
-    rows = []
-    for h in levels:
-        row = []
-        for i, seg in enumerate(segments):
-            widths = solve_width_cm(seg, h)
-            row += widths[::-1] if i in flip else widths
-        rows.append(row)
     return {
         "name": name,
         "length_cm": sum(max(0, s) for s in segments),
         "start": start,
         "end": end,
-        "rows": rows,
+        "rows": _face_rows(segments, levels, flip),
+        "segments": list(segments),
+        "flip": tuple(flip),
     }
+
+def _face_rows(segments, levels, flip=()):
+    rows = []
+    for h in levels:
+        if is_compensator_row(h):
+            # компенсаторът е една лента по цялата страна
+            rows.append([sum(_round_up_to_5(seg) for seg in segments if seg > 0)])
+            continue
+        row = []
+        for i, seg in enumerate(segments):
+            widths = solve_width_cm(seg, h)
+            row += widths[::-1] if i in flip else widths
+        rows.append(row)
+    return rows
+
+def _strip_misses(faces, levels):
+    """Брой сегменти, които някой ред легнали 20-35 см не покрива точно (последният панел излиза)."""
+    strips = [h for h in levels if h in STRIP_PIECES]
+    return sum(1 for face in faces for seg in face["segments"] if seg > 0
+               and any(sum(solve_width_cm(seg, h)) != _round_up_to_5(seg) for h in strips))
 
 def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=25,
                    l1_cm=0, l2_cm=0, l3_cm=0, closed_ends=0,
@@ -283,6 +378,15 @@ def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=2
     else:
         raise ValueError(f"Непознат тип елемент: {elem_type}")
 
+    # Ред легнали, който не покрива страна точно -> следващата по-ниска основа (55.pdf: 205 см).
+    # Избира се разпределението с най-малко непокрити сегменти (челата 25 см често не се покриват).
+    candidates = height_candidates(height_cm)
+    best = min(candidates, key=lambda c: _strip_misses(faces, c))
+    if best != levels:
+        levels = best
+        for face in faces:
+            face["rows"] = _face_rows(face["segments"], levels, face["flip"])
+
     return {
         "type": elem_type,
         "height_cm": float(height_cm),
@@ -300,6 +404,9 @@ def count_panels(layout, count=1):
     totals = Counter()
     for face in layout["faces"]:
         for h, row in zip(layout["height_levels"], face["rows"]):
+            if is_compensator_row(h):
+                totals[format_panel_code(0, h)] += sum(compensator_pieces(w) for w in row) * count
+                continue
             for w in row:
                 totals[format_panel_code(w, h)] += count
     return dict(totals)
