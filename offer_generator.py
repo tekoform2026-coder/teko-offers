@@ -14,7 +14,7 @@ def set_cell_background(cell, hex_color):
 
 def generate_word_offer(client_name, project_name, elements, price_per_m2=15.00, offer_type="rental", filename="TEKO_Offer.docx"):
     """
-    Генерира професионална търговска оферта в Word (.docx) за ПЛАСПАНЕЛ ООД / TEKO.
+    Генерира професионална търговска оферта в Word (.docx) за ТЕКО БЪЛГАРИЯ ООД.
     offer_type: "rental" / "наем" или "sale" / "продажба"
     """
     doc = Document()
@@ -44,7 +44,7 @@ def generate_word_offer(client_name, project_name, elements, price_per_m2=15.00,
     p_left = cell_left.paragraphs[0]
     p_left.alignment = WD_ALIGN_PARAGRAPH.LEFT
     
-    r_comp = p_left.add_run("ПЛАСПАНЕЛ ООД | ЕИК 208141542\n")
+    r_comp = p_left.add_run("ТЕКО БЪЛГАРИЯ ООД | ЕИК 208141542\n")
     r_comp.bold = True
     r_comp.font.size = Pt(10.5)
     r_comp.font.color.rgb = BLUE_COLOR
@@ -185,7 +185,7 @@ def generate_word_offer(client_name, project_name, elements, price_per_m2=15.00,
     sign_p = doc.add_paragraph()
     sign_p.paragraph_format.space_before = Pt(12)
     sign_p.add_run("С уважение,\n").bold = True
-    run_sign = sign_p.add_run("Екипът на ПЛАСПАНЕЛ ООД\nwww.tekoform.com")
+    run_sign = sign_p.add_run("Екипът на ТЕКО БЪЛГАРИЯ ООД\nwww.tekoform.com")
     run_sign.font.color.rgb = BLUE_COLOR
     run_sign.bold = True
 
