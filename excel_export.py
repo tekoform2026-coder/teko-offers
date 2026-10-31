@@ -3,7 +3,8 @@ excel_export.py
 Количествена сметка (КСС) и чертежи в Excel за редактиране - по образеца reference/expected/12345676.xlsx:
   - лист „Кол. сметка“: всички артикули в реда на офертата, количествата са формули към листовете на елементите;
   - лист „Елемент N“: изглед отгоре и изглед отпред на всяка страна от слети клетки (1 клетка = 5 см),
-    до тях таблица „Артикул / Бр.“ за елемента;
+    всеки панел и ъгъл с дебела външна граница; вдясно от чертежите - пълната КСС за елемента
+    (за 1 бр. и общо = за 1 бр. x брой);
   - лист „Елементи Plaspanel“: всички панели и ъгли като готови блокове за копиране при редакция.
 Разположението идва от teko_calculator.layout_element, геометрията в план - от drawing_generator.
 """
@@ -27,13 +28,13 @@ FILL_IN = "00B050"
 FILL_CONCRETE = "FAFAFA"
 FILL_TITLE = "D9D9D9"
 FILL_HEADER = "F2F2F2"
-BORDER_COLOR = "808080"
 SIDE_COLOR = "1F4E79"
 
-_thin = Side(style="thin", color=BORDER_COLOR)
-BORDER = Border(left=_thin, right=_thin, top=_thin, bottom=_thin)
 _black = Side(style="thin")
 BORDER_KSS = Border(left=_black, right=_black, top=_black, bottom=_black)
+_thick = Side(style="thick", color="000000")
+HIDE_ZERO = "0;-0;;@"   # нулите в КСС не се показват
+FILL_COUNT = "FFF2CC"
 
 # Редът на артикулите в КСС (като в офертата) и кодовете от сметката, които влизат във всеки ред
 KSS_ITEMS = [
@@ -113,7 +114,10 @@ def _cells(cm):
 
 
 class _Sheet:
-    """Рисуване с блокове от слети клетки; застъпващи се блокове не се сливат (Excel не ги приема)."""
+    """
+    Рисуване с блокове от слети клетки; застъпващи се блокове не се сливат (Excel не ги приема).
+    Блокът (панел, ъгъл) е с дебела външна граница, вътре - без линии.
+    """
 
     def __init__(self, ws):
         self.ws = ws
@@ -132,15 +136,16 @@ class _Sheet:
             return
         self.used.update(free)
         fill_obj = PatternFill("solid", fgColor=fill) if fill else None
+        last_row, last_col = row + n_rows - 1, col + n_cols - 1
         for r, c in free:
             cell = self.ws.cell(r, c)
             if fill_obj:
                 cell.fill = fill_obj
             if border:
-                cell.border = BORDER
+                cell.border = Border(left=_thick if c == col else None, right=_thick if c == last_col else None,
+                                     top=_thick if r == row else None, bottom=_thick if r == last_row else None)
         if len(free) == len(cells) and len(cells) > 1:
-            self.ws.merge_cells(start_row=row, start_column=col,
-                                end_row=row + n_rows - 1, end_column=col + n_cols - 1)
+            self.ws.merge_cells(start_row=row, start_column=col, end_row=last_row, end_column=last_col)
         r0, c0 = free[0]
         cell = self.ws.cell(r0, c0)
         if text is not None:
@@ -148,8 +153,26 @@ class _Sheet:
             cell.font = Font(bold=bold, size=size, color=color)
             cell.alignment = Alignment(horizontal="center", vertical="center",
                                        text_rotation=rotation, wrap_text=wrap)
-        self.max_row = max(self.max_row, row + n_rows - 1)
+        self.max_row = max(self.max_row, last_row)
+        self.max_col = max(self.max_col, last_col)
+
+    def cell(self, row, col, n_cols, value, bold=False, align="center", fill=None, number_format=None):
+        """Клетка от таблица (слята по ширина) с тънка рамка; връща адреса ѝ."""
+        self.ws.merge_cells(start_row=row, start_column=col, end_row=row, end_column=col + n_cols - 1)
+        for c in range(col, col + n_cols):
+            self.ws.cell(row, c).border = BORDER_KSS
+            if fill:
+                self.ws.cell(row, c).fill = PatternFill("solid", fgColor=fill)
+            self.used.add((row, c))
+        cell = self.ws.cell(row, col)
+        cell.value = value
+        cell.font = Font(size=10, bold=bold)
+        cell.alignment = Alignment(horizontal=align, vertical="center", wrap_text=True)
+        if number_format:
+            cell.number_format = number_format
+        self.max_row = max(self.max_row, row)
         self.max_col = max(self.max_col, col + n_cols - 1)
+        return f"{get_column_letter(col)}{row}"
 
     def fill(self, row, col, color):
         if (row, col) in self.used:
@@ -314,50 +337,45 @@ def _element_title(index, element):
 
 
 def _element_sheet(wb, index, element):
-    """Лист „Елемент N“; връща {наименование в КСС: адрес на клетката с броя}."""
+    """Лист „Елемент N“; връща {наименование в КСС: адрес на клетката „Кол. общо“}."""
     ws = wb.create_sheet(f"Елемент {index}")
     sheet = _Sheet(ws)
     layout = element["layout"]
+    count = max(1, int(element.get("count", 1)))
 
+    # Изглед отгоре, под него изгледите отпред
     sheet.text(4, FIRST_COL, "Изглед отгоре")
-    top_end = _top_view(sheet, layout, 5)
-
-    # Таблица „Артикул / Бр.“ вдясно от изгледа отгоре
-    t_col = sheet.max_col + 3
-    name_cols, qty_cols = 14, 5
-    refs = {}
-    rows = kss_rows(element["bom"])
-    for i, (label, qty) in enumerate([("Артикул", "Бр.")] + rows):
-        r = 5 + i
-        head = i == 0
-        for c0, n, value, align in ((t_col, name_cols, label, "center" if head else "left"),
-                                    (t_col + name_cols, qty_cols, qty, "center")):
-            ws.merge_cells(start_row=r, start_column=c0, end_row=r, end_column=c0 + n - 1)
-            for c in range(c0, c0 + n):
-                ws.cell(r, c).border = BORDER
-                if head:
-                    ws.cell(r, c).fill = PatternFill("solid", fgColor=FILL_HEADER)
-                sheet.used.add((r, c))
-            cell = ws.cell(r, c0)
-            cell.value = value
-            cell.font = Font(size=9, bold=head)
-            cell.alignment = Alignment(horizontal=align)
-        if not head:
-            refs[label] = f"{get_column_letter(t_col + name_cols)}{r}"
-    table_end = 5 + len(rows)
-    sheet.max_col = max(sheet.max_col, t_col + name_cols + qty_cols - 1)
-
-    # Изгледи отпред, един под друг
-    last = top_end
+    last = _top_view(sheet, layout, 5)
     for group in _face_groups(layout):
         label_row = last + 3
-        width = 2 * bool(group[0]["start"]) + 2 * bool(group[0]["end"]) + \
-            max(sum(_cells(w) for w in row) for row in group[0]["rows"])
-        if FIRST_COL + width > t_col and label_row <= table_end:
-            label_row = table_end + 3   # широк изглед - под таблицата
         names = " / ".join(f["name"] for f in group)
         sheet.text(label_row, FIRST_COL, f"Изглед — {names}")
         last = _front_view(sheet, layout, group[0], label_row + 1)
+
+    # КСС за елемента вдясно от чертежите: всички артикули като в „Кол. сметка“
+    name_col = sheet.max_col + 3
+    unit_col = name_col + 16
+    one_col = unit_col + 3
+    all_col = one_col + 4
+    sheet.cell(4, name_col, all_col - name_col, "Брой елементи:", bold=True, align="right")
+    sheet.cell(4, all_col, 4, count, bold=True, fill=FILL_COUNT)
+    count_ref = f"${get_column_letter(all_col)}$4"
+    ws.row_dimensions[5].height = 30
+    for col, n, title in ((name_col, 16, "Елемент"), (unit_col, 3, "Мярка"),
+                          (one_col, 4, "Кол. за 1 бр."), (all_col, 4, "Кол. общо")):
+        sheet.cell(5, col, n, title, bold=True, fill=FILL_HEADER)
+
+    totals = dict(kss_rows(element["bom"]))
+    order = [name for name, _codes in KSS_ITEMS]
+    refs = {}
+    for i, name in enumerate(order + sorted(n for n in totals if n not in order)):
+        r = 6 + i
+        one = totals.get(name, 0) / count
+        sheet.cell(r, name_col, 16, name, align="left")
+        sheet.cell(r, unit_col, 3, "бр")
+        one_ref = sheet.cell(r, one_col, 4, (int(one) if one == int(one) else one) or None, number_format=HIDE_ZERO)
+        refs[name] = sheet.cell(r, all_col, 4, f'=IF({one_ref}="","",{one_ref}*{count_ref})', bold=True,
+                                number_format=HIDE_ZERO)
 
     ws.merge_cells(start_row=2, start_column=FIRST_COL, end_row=2, end_column=max(sheet.max_col, FIRST_COL + 20))
     title = ws.cell(2, FIRST_COL)
@@ -399,6 +417,7 @@ def _kss_sheet(ws, names, quantity):
         qty = quantity(name)
         if qty:
             ws[f"D{r}"] = qty
+            ws[f"D{r}"].number_format = HIDE_ZERO
         for col in "BCD":
             cell = ws[f"{col}{r}"]
             cell.font = Font(size=11)
@@ -470,31 +489,6 @@ def generate_excel(elements):
     _kss_sheet(kss, [name for name, _codes in KSS_ITEMS] + extra, formula)
     _palette_sheet(wb)
     wb.calculation.fullCalcOnLoad = True
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return buf
-
-
-def generate_kss_excel(bom, project="", client="", offer_date=None):
-    """
-    Само КСС (за офертата): един лист като „Кол. сметка“, количествата са числа.
-    bom: {код: брой} за целия обект. Над таблицата - обект, клиент и дата. Връща BytesIO с .xlsx.
-    """
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "КСС"
-    rows = dict(kss_rows(bom))
-    names = [name for name, _codes in KSS_ITEMS] + [n for n in rows if n not in _KSS_NAME_BY_CODE.values()]
-    _kss_sheet(ws, names, rows.get)
-
-    ws["B2"] = f"КСС - кофраж TEKO{f' - обект: {project}' if project else ''}"
-    ws["B2"].font = Font(size=12, bold=True)
-    info = [t for t in (f"Клиент: {client}" if client else "",
-                        f"Дата: {offer_date.strftime('%d.%m.%Y')}" if offer_date else "") if t]
-    ws["B3"] = " · ".join(info) or None
-    ws["B3"].font = Font(size=10, color="555555")
 
     buf = io.BytesIO()
     wb.save(buf)
