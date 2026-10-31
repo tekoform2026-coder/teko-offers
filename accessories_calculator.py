@@ -6,7 +6,7 @@
 import math
 from typing import Dict, List, Any, Tuple
 
-from teko_calculator import format_panel_code
+from teko_calculator import format_panel_code, is_compensator_row
 
 
 # ==========================================
@@ -184,9 +184,36 @@ EX_ONE_PIECE_MAX_CM = 270  # до 270 cm височина - 1 външен ъг�
 
 
 def ex_corner_pieces(height_cm: float) -> int:
-    """Брой парчета EX240 на една позиция: 1 до 270 cm, после по едно на всеки следващи 240 cm."""
+    """Брой парчета EX240 на една позиция без рязане: 1 до 270 cm, после по едно на всеки следващи 240 cm."""
     over = max(0.0, float(height_cm) - EX_ONE_PIECE_MAX_CM)
     return 1 + math.ceil(over / EX_PIECE_HEIGHT_CM)
+
+
+def ex_corner_cover(height_cm: float) -> Tuple[int, float]:
+    """
+    Една позиция EX: (цели EX240, дължина на отрязаното допълнение в cm).
+    Допускът 30 cm остава (1 EX240 до 270 cm); над него допълнението е височината - 270
+    (вариант А, 31.10.2026), отрязано от EX240.
+    """
+    over = max(0.0, float(height_cm) - EX_ONE_PIECE_MAX_CM)
+    full, cut = divmod(over, EX_PIECE_HEIGHT_CM)
+    return 1 + int(full), cut
+
+
+def ex_corner_total(height_cm: float, positions: int) -> int:
+    """
+    Брой EX240 за всички позиции на елемента: целите парчета + EX240, от които се режат
+    допълненията (от едно EX240 - толкова допълнения, колкото се побират; остатъците не се ползват).
+    Напр. 4 позиции, 310 cm: 4 цели + 1 EX240 нарязан на 4 x 40 cm = 5.
+    """
+    if positions <= 0:
+        return 0
+    full, cut = ex_corner_cover(height_cm)
+    total = positions * full
+    if cut > 0:
+        per_bar = int(EX_PIECE_HEIGHT_CM // cut)
+        total += math.ceil(positions / per_bar)
+    return total
 
 
 def in_corner_pieces(height_cm: float) -> List[int]:
@@ -220,7 +247,7 @@ def calculate_corners(layout: Dict[str, Any]) -> Dict[str, int]:
     bom = {}
     ex_positions = layout["corners"]["EX"]
     if ex_positions:
-        bom[EX_CORNER_CODE] = ex_positions * ex_corner_pieces(h)
+        bom[EX_CORNER_CODE] = ex_corner_total(h, ex_positions)
     in_positions = layout["corners"]["IN"]
     if in_positions:
         for size in in_corner_pieces(h):
@@ -353,12 +380,15 @@ def calculate_handles(layout: Dict[str, Any]) -> Dict[str, Any]:
     Ръкохватки само там, където елемент опира в елемент (не към земята, въздуха или отворен край):
       - вертикални фуги между съседни панели в ред: отворите по височината на реда
       - хоризонтални фуги между редовете: отворите по общия ръб
-      - панел до ъгъл EX (H4): до 16 отвора на рамо на всяко парче EX240
+      - компенсатор TC отгоре (H4): отворите по горния ръб на всеки панел под него
+      - панел до ъгъл EX (H4): до 16 отвора на рамо на цял EX240, на отрязаното парче - пропорционално
       - панел до ъгъл IN (H4): IN150/IN120 по редове, отворите по височината на реда
     layout е резултатът от teko_calculator.layout_element.
     """
     levels = layout["height_levels"]
-    ex_pieces = ex_corner_pieces(layout["height_cm"])
+    ex_full, ex_cut = ex_corner_cover(layout["height_cm"])
+    # отвори на рамо по височината на ъгъла: 16 на цял EX240, на отрязаното - пропорционално
+    ex_holes = EX_HOLES_PER_SIDE * ex_full + int(EX_HOLES_PER_SIDE * ex_cut // EX_PIECE_HEIGHT_CM)
     bom: Dict[str, int] = {}
 
     def add(code, qty):
@@ -386,7 +416,11 @@ def calculate_handles(layout: Dict[str, Any]) -> Dict[str, Any]:
                 up_x = 0
                 for w_up in rows[r + 1]:
                     overlap = min(low_x + w_low, up_x + w_up) - max(low_x, up_x)
-                    if overlap > 0:
+                    if overlap > 0 and is_compensator_row(h_up):
+                        # компенсатор отгоре (H4): отворите по горния ръб на панела под него
+                        if _panel_kind(w_low, h_low) != "METAL":
+                            add("Ръкохватка H4", min(_horizontal_edge_holes(w_low, h_low), _holes_for_length(overlap)))
+                    elif overlap > 0:
                         qty = min(_horizontal_edge_holes(w_low, h_low), _horizontal_edge_holes(w_up, h_up))
                         if not (low_x == up_x and w_low == w_up):
                             qty = min(qty, _holes_for_length(overlap))
@@ -403,7 +437,7 @@ def calculate_handles(layout: Dict[str, Any]) -> Dict[str, Any]:
             row_holes = [_vertical_edge_holes(row[idx], h) for h, row in zip(levels, rows)
                          if row and _panel_kind(row[idx], h) != "METAL"]
             if corner == "EX":
-                add("Ръкохватка H4", min(sum(row_holes), EX_HOLES_PER_SIDE * ex_pieces))
+                add("Ръкохватка H4", min(sum(row_holes), ex_holes))
             else:
                 add("Ръкохватка H4", sum(row_holes))
 
