@@ -12,3 +12,4 @@ plotly
 reportlab
 pdfplumber
 openpyxl
+gspread
