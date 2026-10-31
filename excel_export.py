@@ -15,7 +15,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from drawing_generator import PANEL_T, _face_strips, _plan_geometry
-from teko_calculator import format_panel_code
+from teko_calculator import format_panel_code, is_compensator_row
 
 CELL_CM = 5          # една клетка = 5 см
 FIRST_COL = 3        # чертежите започват от колона C
@@ -23,6 +23,7 @@ COL_WIDTH = 2.6      # почти квадратни клетки
 ROW_HEIGHT = 15
 
 FILL_PANEL = "E6B9B8"
+FILL_COMPENSATOR = "C8D1DC"
 FILL_EX = "92D050"
 FILL_IN = "00B050"
 FILL_CONCRETE = "FAFAFA"
@@ -303,8 +304,11 @@ def _front_view(sheet, layout, face, top_row):
     for h, widths in reversed(list(zip(levels, face["rows"]))):
         c = col
         for w in widths:
-            sheet.block(row, c, _cells(h), _cells(w), _panel_label(w, h), FILL_PANEL, size=14,
-                        rotation=90 if h > w else 0)
+            if is_compensator_row(h):
+                sheet.block(row, c, _cells(h), _cells(w), f"TC {int(h)} см", FILL_COMPENSATOR, size=9)
+            else:
+                sheet.block(row, c, _cells(h), _cells(w), _panel_label(w, h), FILL_PANEL, size=14,
+                            rotation=90 if h > w else 0)
             c += _cells(w)
         end_col = max(end_col, c)
         row += _cells(h)
