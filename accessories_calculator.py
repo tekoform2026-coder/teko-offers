@@ -54,6 +54,15 @@ def _waler_pieces(length_cm: float, max_cm: float = None) -> List[int]:
     return [300] * count_300 + ([rem] if rem else [])
 
 
+def waler_levels_cm(height_cm: float, first_row_height_cm: float) -> List[float]:
+    """
+    Нива на ригелите: waler_heights_cm, а при нисък елемент без нито едно ниво - един ред
+    ригели в средата на височината (Solar farm Tipperary: H=35 см - по един ригел на страна).
+    Шпилките остават по waler_heights_cm.
+    """
+    return waler_heights_cm(height_cm, first_row_height_cm) or [float(height_cm or 0) / 2.0]
+
+
 def face_waler_pieces(face: Dict[str, Any]) -> List[int]:
     """
     Ригели на една страна (стандартни AW 100 / 200 / 300).
@@ -82,7 +91,7 @@ def calculate_walers(layout: Dict[str, Any]) -> Dict[str, Any]:
     на всяко ниво по един комплект ригели на всяка страна, по-широка от 35 cm.
     """
     h = layout["height_cm"]
-    heights = waler_heights_cm(h, _first_row_height(layout))
+    heights = waler_levels_cm(h, _first_row_height(layout))
     bom: Dict[str, int] = {}
     positions = []
 
@@ -261,20 +270,25 @@ def calculate_corners(layout: Dict[str, Any]) -> Dict[str, int]:
 PROP_EDGE_MAX_CM = 90.0      # до ъгъла/ръба на стената - не повече от 90 cm
 PROP_SPACING_MAX_CM = 180.0  # между два съседни вертикализатора - не повече от 180 cm
 PROP_CODE = "Вертикализатор PP"  # един вид за всички височини
+LOW_ELEMENT_CM = 60.0        # под 60 cm - вертикализатори като в Solar farm Tipperary (H=35)
 
 
-def _props_per_side(length_cm: float) -> int:
+def _props_on_sides(length_cm: float, height_cm: float) -> Tuple[int, int]:
     """
-    Стена (всяко рамо на L/U): до 120 cm - по един от двете дълги страни, един срещу друг;
-    над 120 cm - по два на дългата страна, повече при нужда, така че до ръба да са <= 90 cm
-    и между съседни <= 180 cm.
+    Стена (всяко рамо на L/U): (брой на външната страна, брой срещу тях).
+    До 120 cm - по един от двете дълги страни, един срещу друг; над 120 cm - по два на дългата
+    страна, повече при нужда, така че до ръба да са <= 90 cm и между съседни <= 180 cm.
+    Нисък елемент (под 60 cm, Solar farm Tipperary): срещу - само колкото трябват по 90 / 180 cm,
+    на външната страна - поне 2 (110-170 cm - 2 + 1, 190-220 cm - 2 + 2).
     """
     if length_cm <= 0:
-        return 0
+        return 0, 0
+    needed = max(1, 1 + int(math.ceil((length_cm - 2 * PROP_EDGE_MAX_CM) / PROP_SPACING_MAX_CM)))
+    if height_cm < LOW_ELEMENT_CM:
+        return max(2, needed), needed
     if length_cm <= 120.0:
-        return 1
-    needed = 1 + int(math.ceil((length_cm - 2 * PROP_EDGE_MAX_CM) / PROP_SPACING_MAX_CM))
-    return max(2, needed)
+        return 1, 1
+    return max(2, needed), max(2, needed)
 
 
 def _prop_positions(length_cm: float, count: int) -> List[float]:
@@ -291,7 +305,7 @@ def calculate_push_pull_props(layout: Dict[str, Any]) -> Dict[str, Any]:
     """
     Вертикализатори по Алгоритъма:
       - колона: по два на колона, на две съседни страни
-      - стена / рамо на L и U: по _props_per_side на външната страна и толкова срещу тях
+      - стена / рамо на L и U: по _props_on_sides на външната страна и срещу тях
     """
     h = layout["height_cm"]
     prop_code = PROP_CODE
@@ -308,10 +322,11 @@ def calculate_push_pull_props(layout: Dict[str, Any]) -> Dict[str, Any]:
             if name not in faces:
                 continue
             length = faces[name]["length_cm"]
-            per_side = _props_per_side(length)
-            total += per_side * 2
-            details.append({"side": f"Страна {name} (двустранно)", "count": per_side * 2,
-                            "positions_cm": _prop_positions(length, per_side)})
+            outer, opposite = _props_on_sides(length, h)
+            total += outer + opposite
+            details.append({"side": f"Страна {name} (двустранно)", "count": outer + opposite,
+                            "positions_cm": _prop_positions(length, outer),
+                            "opposite_positions_cm": _prop_positions(length, opposite)})
 
     return {
         "bom": {prop_code: total} if total > 0 else {},
@@ -345,8 +360,18 @@ def _holes_for_length(length_cm: float) -> int:
     return EDGE_HOLES[max(keys)] if keys else 0
 
 
+def _overlap_holes(overlap_cm: float) -> int:
+    """
+    Отвори по общия ръб на два разминати панела (хоризонтална фуга): по таблицата, но
+    застъпване 10 см има 1 отвор (Solar farm Tipperary: ред 20 под ред 15, 20 срещу 15 и 150 срещу 20).
+    """
+    if 10 <= overlap_cm < 15:
+        return 1
+    return _holes_for_length(overlap_cm)
+
+
 def _panel_kind(width_cm: float, height_cm: float) -> str:
-    code = format_panel_code(int(width_cm), int(height_cm))
+    code = format_panel_code(int(width_cm), height_cm)  # без int(): редът панели 15 не е TC
     if code.startswith("TC"):
         return "METAL"
     if code in SMALL_PANEL_CODES:
@@ -423,7 +448,7 @@ def calculate_handles(layout: Dict[str, Any]) -> Dict[str, Any]:
                     elif overlap > 0:
                         qty = min(_horizontal_edge_holes(w_low, h_low), _horizontal_edge_holes(w_up, h_up))
                         if not (low_x == up_x and w_low == w_up):
-                            qty = min(qty, _holes_for_length(overlap))
+                            qty = min(qty, _overlap_holes(overlap))
                         add(_handle_code(_panel_kind(w_low, h_low), _panel_kind(w_up, h_up)), qty)
                         horiz_joints += 1
                     up_x += w_up
@@ -437,7 +462,9 @@ def calculate_handles(layout: Dict[str, Any]) -> Dict[str, Any]:
             row_holes = [_vertical_edge_holes(row[idx], h) for h, row in zip(levels, rows)
                          if row and _panel_kind(row[idx], h) != "METAL"]
             if corner == "EX":
-                add("Ръкохватка H4", min(sum(row_holes), ex_holes))
+                # по всички отвори на рамото на EX240, и при нисък елемент (Solar farm Tipperary:
+                # H=35 см, 4 EX - 128 H4)
+                add("Ръкохватка H4", ex_holes)
             else:
                 add("Ръкохватка H4", sum(row_holes))
 
