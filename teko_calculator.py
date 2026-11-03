@@ -99,9 +99,18 @@ STRIP_PIECES = {
     35: [150, 120, 60],           # TK 150/35, 120/35, 60/35
 }
 
+# Ред панели с височина 15 см (TK 60/15, 20/15, 15/15) - не компенсатор (Solar farm Tipperary):
+# 35 = ред 20 + ред 15, когато един ред легнали 35 не покрива страните точно.
+PANEL_ROW_15_PIECES = [60, 20, 15]
+
+class PanelRow(int):
+    """Височина на ред панели 15 см (за разлика от компенсатора TC 15)."""
+
+PANEL_ROW_15 = PanelRow(15)
+
 def is_compensator_row(height_cm):
     """Ред с височина 5/10/15 см - компенсатор TC отгоре (винаги най-горният ред)."""
-    return 0 < height_cm <= 15
+    return 0 < height_cm <= 15 and not isinstance(height_cm, PanelRow)
 
 def compensator_pieces(length_cm):
     """Брой компенсатори по 150 см за дължина (закръглено нагоре: 1000 см -> 7 бр.)."""
@@ -124,13 +133,17 @@ def _height_bases(height_cm):
                     best[total] = (key, levels)
     return [best[total][1] for total in sorted(best, reverse=True)]
 
-def _remainder_options(rem):
+def _remainder_options(rem, low=False):
     """
     Начини за остатъка отгоре, по ред на предпочитане. Първо TOP_REMAINDERS; при 40-55 см -
     и другите два реда легнали, после два реда + компенсатор (по-големият TC първи),
     напр. 55 = 30 + 25, 35 + 20, после 20 + 20 + TC 15 (55.pdf).
+    low: нисък елемент (под 60 см, без редове 150 / 120 / 60) - само там 35 може да е ред 20 +
+    ред панели 15 (Solar); при по-високите 5 / 10 / 15 см отгоре е компенсатор TC.
     """
     options = [TOP_REMAINDERS[rem]]
+    if rem == 35 and low:
+        options.append([20, PANEL_ROW_15])   # Solar farm Tipperary: 35 = ред 20 + ред панели 15
     if rem >= 40:
         strips = sorted(STRIP_PIECES, reverse=True)
         pairs = lambda r: [[a, b] for a in strips for b in strips if a >= b and a + b == r]
@@ -149,7 +162,7 @@ def height_candidates(height_cm):
     if height_cm in STANDARD_HEIGHT_MAP:
         return [list(STANDARD_HEIGHT_MAP[height_cm])]
     return [base + rest for base in _height_bases(height_cm)
-            for rest in _remainder_options(height_cm - sum(base))]
+            for rest in _remainder_options(height_cm - sum(base), low=not base)]
 
 def solve_height_cm(height_cm):
     """
@@ -208,6 +221,8 @@ def solve_width_cm(width_cm, height_level_cm=150):
     w = _round_up_to_5(width_cm)
     if is_compensator_row(height_level_cm):
         return [w]
+    if isinstance(height_level_cm, PanelRow):
+        return _solve_width_strip(w, PANEL_ROW_15_PIECES)
     if height_level_cm in STRIP_PIECES:
         return _solve_width_strip(w, STRIP_PIECES[height_level_cm])
     if height_level_cm == 60:
@@ -246,13 +261,45 @@ def _face_rows(segments, levels, flip=()):
 
 def _strip_misses(faces, levels):
     """Брой сегменти, които някой ред легнали 20-35 см не покрива точно (последният панел излиза)."""
-    strips = [h for h in levels if h in STRIP_PIECES]
+    strips = [h for h in levels if h in STRIP_PIECES or isinstance(h, PanelRow)]
     return sum(1 for face in faces for seg in face["segments"] if seg > 0
                and any(sum(solve_width_cm(seg, h)) != _round_up_to_5(seg) for h in strips))
 
+def _cm_or_default(value, default):
+    """Размер от таблицата; празен (None, NaN, 0) = default (напр. общата дебелина на елемента)."""
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return default
+    return value if value == value and value > 0 else default
+
+def arm_thicknesses(layout):
+    """Дебелините на рамената (рамо 1, 2, 3) на L-, П- и Т-стена; при другите - празен списък."""
+    d = layout["dims"]
+    return [d[k] for k in ("t1", "t2", "t3") if k in d]
+
+def thickness_label(layout, unit=" см"):
+    """„дебелина 25 см“; при различни рамена - „рамо 1 дебелина 30 см, рамо 2 дебелина 25 см“."""
+    arms = arm_thicknesses(layout) or [layout["thickness_cm"]]
+    if len(set(arms)) == 1:
+        return f"дебелина {arms[0]:g}{unit}"
+    return ", ".join(f"рамо {i} дебелина {t:g}{unit}" for i, t in enumerate(arms, 1))
+
+def t_wall_middle_cm(l1_cm, stem_thickness_cm):
+    """Ребро в средата на полката: от левия край до лявото лице на реброто, надолу до 5 см."""
+    return math.floor((float(l1_cm) - stem_thickness_cm) / 2 / 5.0) * 5
+
+def t_wall_offset_label(layout, unit=" см"):
+    """„ребро на 100 см от левия край“, когато реброто на Т-стена не е в средата; иначе празно."""
+    d = layout["dims"]
+    if layout["type"] != "t_wall" or d["l3"] == t_wall_middle_cm(d["l1"], d["t2"]):
+        return ""
+    return f"ребро на {d['l3']:g}{unit} от левия край"
+
 def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=25,
                    l1_cm=0, l2_cm=0, l3_cm=0, closed_ends=0,
-                   closed_end_1=None, closed_end_2=None, closed_end_3=False):
+                   closed_end_1=None, closed_end_2=None, closed_end_3=False,
+                   thickness1_cm=None, thickness2_cm=None, thickness3_cm=None):
     """
     Разположение на панелите по страни и редове за един елемент.
 
@@ -260,19 +307,23 @@ def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=2
                "l_wall" (l1 = рамо A, l2 = рамо B, thickness),
                "u_wall" (l1 = рамо A, l2 = гръб B, l3 = рамо C, thickness),
                "t_wall" (l1 = страна A (полката), l2 = страна B / B1 (реброто, от предното лице
-                         на полката до края му), thickness; реброто е в средата на полката).
+                         на полката до края му), l3 = от левия край на полката (край 2) до лявото
+                         лице на реброто - празно / 0 = реброто е в средата, thickness).
     closed_end_1 / closed_end_2: затворени челни края (стени). Край 1 е краят на рамо A
                  (при права стена - десният), край 2 - краят на последното рамо B / C
                  (при права стена - левият). При T-стена: край 1 - десният край на полката,
                  край 2 - левият, closed_end_3 - краят на реброто.
     closed_ends: 0/1/2 - кратък запис, когато не е зададено кой край: 1 = край 1, 2 = двата.
+    thickness1_cm / thickness2_cm / thickness3_cm: дебелина на рамо 1 / 2 / 3 (при T-стена - полката
+                 и реброто); празна = thickness_cm. До външния ъгъл EX на всяко рамо: дебелината на
+                 перпендикулярното рамо + 10; челото на затворен край е колкото дебелината на своето рамо.
 
     Връща речник с height_levels, faces (всяка с rows = ширини по редове отдолу нагоре)
     и corners (брой позиции EX / IN).
     """
     levels = solve_height_cm(height_cm)
     t = float(thickness_cm or 0)
-    k = t + IN_CORNER_CM
+    t1, t2, t3 = (_cm_or_default(v, t) for v in (thickness1_cm, thickness2_cm, thickness3_cm))
     if closed_end_1 is None and closed_end_2 is None:
         n = max(0, min(2, int(closed_ends or 0)))
         closed_end_1, closed_end_2 = n >= 1, n >= 2
@@ -311,69 +362,76 @@ def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=2
         l1, l2 = float(l1_cm), float(l2_cm)
         end_a = "EX" if closed[0] else None
         end_b = "EX" if closed[1] else None
+        k_a, k_b = t2 + IN_CORNER_CM, t1 + IN_CORNER_CM  # до EX: перпендикулярното рамо + 10
         faces = [
-            _face("A", [k, l1 - k], levels, "EX", end_a),
-            _face("A1", [l1 - k], levels, "IN", end_a),
-            _face("B", [k, l2 - k], levels, "EX", end_b),
-            _face("B1", [l2 - k], levels, "IN", end_b),
+            _face("A", [k_a, l1 - k_a], levels, "EX", end_a),
+            _face("A1", [l1 - k_a], levels, "IN", end_a),
+            _face("B", [k_b, l2 - k_b], levels, "EX", end_b),
+            _face("B1", [l2 - k_b], levels, "IN", end_b),
         ]
         if closed[0]:
-            faces.append(_face("Край A", [t], levels, "EX", "EX"))
+            faces.append(_face("Край A", [t1], levels, "EX", "EX"))
         if closed[1]:
-            faces.append(_face("Край B", [t], levels, "EX", "EX"))
+            faces.append(_face("Край B", [t2], levels, "EX", "EX"))
         ex = 1 + 2 * sum(closed)
         inn = 1
-        dims = {"l1": l1, "l2": l2, "t": t}
+        dims = {"l1": l1, "l2": l2, "t": t, "t1": t1, "t2": t2}
 
     elif elem_type == "u_wall":
         l1, l2, l3 = float(l1_cm), float(l2_cm), float(l3_cm)
         end_a = "EX" if closed[0] else None
         end_c = "EX" if closed[1] else None
+        # рамо 1 = A, рамо 2 = гърбът B, рамо 3 = C
+        k_b, k_a, k_c = t2 + IN_CORNER_CM, t1 + IN_CORNER_CM, t3 + IN_CORNER_CM
+        back = l2 - k_a - k_c
         faces = [
-            _face("A", [k, l1 - k], levels, "EX", end_a),
-            _face("A1", [l1 - k], levels, "IN", end_a),
-            _face("B", [k, l2 - 2 * k, k], levels, "EX", "EX"),
-            _face("B1", [l2 - 2 * k], levels, "IN", "IN"),
-            _face("C", [k, l3 - k], levels, "EX", end_c),
-            _face("C1", [l3 - k], levels, "IN", end_c),
+            _face("A", [k_b, l1 - k_b], levels, "EX", end_a),
+            _face("A1", [l1 - k_b], levels, "IN", end_a),
+            _face("B", [k_a, back, k_c], levels, "EX", "EX"),
+            _face("B1", [back], levels, "IN", "IN"),
+            _face("C", [k_b, l3 - k_b], levels, "EX", end_c),
+            _face("C1", [l3 - k_b], levels, "IN", end_c),
         ]
         if closed[0]:
-            faces.append(_face("Край A", [t], levels, "EX", "EX"))
+            faces.append(_face("Край A", [t1], levels, "EX", "EX"))
         if closed[1]:
-            faces.append(_face("Край C", [t], levels, "EX", "EX"))
+            faces.append(_face("Край C", [t3], levels, "EX", "EX"))
         ex = 2 + 2 * sum(closed)
         inn = 2
-        dims = {"l1": l1, "l2": l2, "l3": l3, "t": t}
+        dims = {"l1": l1, "l2": l2, "l3": l3, "t": t, "t1": t1, "t2": t2, "t3": t3}
 
     elif elem_type == "t_wall":
         # Полка A (задно лице, цяло) и A1 (предно лице, разделено от реброто на ляво и дясно,
         # винаги с IN при реброто); ребро B / B1 от IN до края на реброто (край 3).
         # Срещу „IN + ребро + IN“ на A стои сегмент t + 20, така че A е огледална на A1.
         # EX - само на затворените краища, по 2 на край.
-        # Реброто е винаги в средата на полката (l3 не се ползва).
+        # Мястото на реброто p (от левия край на полката до лявото лице на реброто) е l3;
+        # празно / 0 - реброто е в средата. Реброто до самия край остава Т-стена (не L-стена).
+        # Рамо 1 = полката (дебелина t1), рамо 2 = реброто (дебелина ts).
         l1, l2 = float(l1_cm), float(l2_cm)
-        p = math.floor((l1 - t) / 2 / 5.0) * 5
-        left, right, stem = p - IN_CORNER_CM, l1 - p - t - IN_CORNER_CM, l2 - IN_CORNER_CM
+        ts = t2
+        p = _cm_or_default(l3_cm, t_wall_middle_cm(l1, ts))
+        left, right, stem = p - IN_CORNER_CM, l1 - p - ts - IN_CORNER_CM, l2 - IN_CORNER_CM
         closed.append(bool(closed_end_3))
         end_1 = "EX" if closed[0] else None
         end_2 = "EX" if closed[1] else None
         end_3 = "EX" if closed[2] else None
         faces = [
-            _face("A", [left, t + 2 * IN_CORNER_CM, right], levels, end_2, end_1, flip=(0,)),
+            _face("A", [left, ts + 2 * IN_CORNER_CM, right], levels, end_2, end_1, flip=(0,)),
             _face("A1 ляво", [left], levels, end_2, "IN", flip=(0,)),
             _face("A1 дясно", [right], levels, "IN", end_1),
             _face("B", [stem], levels, end_3, "IN", flip=(0,)),
             _face("B1", [stem], levels, end_3, "IN", flip=(0,)),
         ]
         if closed[0]:
-            faces.append(_face("Край 1", [t], levels, "EX", "EX"))
+            faces.append(_face("Край 1", [t1], levels, "EX", "EX"))
         if closed[1]:
-            faces.append(_face("Край 2", [t], levels, "EX", "EX"))
+            faces.append(_face("Край 2", [t1], levels, "EX", "EX"))
         if closed[2]:
-            faces.append(_face("Край 3", [t], levels, "EX", "EX"))
+            faces.append(_face("Край 3", [ts], levels, "EX", "EX"))
         ex = 2 * sum(closed)
         inn = 2
-        dims = {"l1": l1, "l2": l2, "l3": p, "t": t}
+        dims = {"l1": l1, "l2": l2, "l3": p, "t": t, "t1": t1, "t2": ts}
 
     else:
         raise ValueError(f"Непознат тип елемент: {elem_type}")
