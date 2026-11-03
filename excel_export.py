@@ -15,7 +15,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from drawing_generator import PANEL_T, _face_strips, _plan_geometry
-from teko_calculator import format_panel_code, is_compensator_row
+from teko_calculator import format_panel_code, is_compensator_row, thickness_label, t_wall_offset_label
 
 CELL_CM = 5          # една клетка = 5 см
 FIRST_COL = 3        # чертежите започват от колона C
@@ -106,7 +106,7 @@ def kss_rows(bom):
 
 def _panel_label(width_cm, height_cm):
     """Надпис на панел в изгледа отпред: 150/60, 60/30, TC 150/15 (без „TK“)."""
-    code = format_panel_code(int(width_cm), int(height_cm))
+    code = format_panel_code(int(width_cm), height_cm)  # без int(): редът панели 15 не е TC
     return code.replace(" (полегнал)", "").replace("TK ", "")
 
 
@@ -332,10 +332,10 @@ def _element_title(index, element):
     elif typ == "u_wall":
         parts += [f"A {d['l1']:g}", f"B {d['l2']:g}", f"C {d['l3']:g}"]
     else:
-        parts += [f"A {d['l1']:g}", f"B {d['l2']:g}"]
+        parts += [f"A {d['l1']:g}", f"B {d['l2']:g}", t_wall_offset_label(layout, "")]
     parts.append(f"височина {layout['height_cm']:g}")
     if typ != "column":
-        parts.append(f"дебелина {layout['thickness_cm']:g}")
+        parts.append(thickness_label(layout, ""))
     parts.append(f"бр. {element.get('count', 1)}")
     return f"Елемент {index}  —  " + " · ".join(p for p in parts if p)
 
