@@ -14,9 +14,11 @@ import pandas as pd
 
 COPY_SUFFIX = " (копие)"
 
-# Колоните на таблицата с елементите, които се пазят в архива (като TABLE_COLUMNS в app.py)
+# Колоните на таблицата с елементите, които се пазят в архива (като TABLE_COLUMNS в app.py).
+# Дебелините на рамената са накрая, за да се четат правилно и редовете, записани преди тях.
 ELEMENT_COLUMNS = ["type", "name", "count", "thickness_cm", "l1_cm", "l2_cm", "l3_cm", "height_cm",
-                   "closed_end_1", "closed_end_2", "closed_end_3"]
+                   "closed_end_1", "closed_end_2", "closed_end_3",
+                   "thickness1_cm", "thickness2_cm", "thickness3_cm"]
 
 _archive = None
 
