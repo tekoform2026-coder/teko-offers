@@ -18,8 +18,8 @@ from reportlab.pdfbase.ttfonts import TTFont
 
 from reportlab.lib.utils import ImageReader
 
-from accessories_calculator import waler_heights_cm, NARROW_LIMIT_CM
-from teko_calculator import IN_CORNER_CM, is_compensator_row
+from accessories_calculator import waler_levels_cm, NARROW_LIMIT_CM
+from teko_calculator import IN_CORNER_CM, is_compensator_row, thickness_label, t_wall_offset_label
 
 # Висока резолюция за чисти линии и четливи надписи
 DPI_RESOLUTION = 300
@@ -150,8 +150,8 @@ def _plan_geometry(layout):
     """
     T = PANEL_T
     t = layout["thickness_cm"]
-    k = t + IN_CORNER_CM
     d = layout["dims"]
+    t1, t2, t3 = d.get("t1", t), d.get("t2", t), d.get("t3", t)  # дебелините на рамената
     end_1, end_2 = layout["closed"][:2]
     typ = layout["type"]
 
@@ -172,42 +172,44 @@ def _plan_geometry(layout):
             corners += [("EX", -T, -T), ("EX", -T, t)]
 
     elif typ == "l_wall":
-        l1, l2 = d["l1"], d["l2"]
-        poly = [[0, 0], [l1, 0], [l1, t], [t, t], [t, l2], [0, l2]]
-        place = {"A": (0, -T, 'x'), "A1": (k, t, 'x'), "B": (-T, 0, 'y'), "B1": (t, k, 'y'),
+        l1, l2 = d["l1"], d["l2"]  # рамо A по x (дебелина t1), рамо B по y (дебелина t2)
+        poly = [[0, 0], [l1, 0], [l1, t1], [t2, t1], [t2, l2], [0, l2]]
+        place = {"A": (0, -T, 'x'), "A1": (t2 + IN_CORNER_CM, t1, 'x'),
+                 "B": (-T, 0, 'y'), "B1": (t2, t1 + IN_CORNER_CM, 'y'),
                  "Край A": (l1, 0, 'y'), "Край B": (0, l2, 'x')}
-        corners = [("EX", -T, -T), ("IN", t, t)]
+        corners = [("EX", -T, -T), ("IN", t2, t1)]
         if end_1:
-            corners += [("EX", l1, -T), ("EX", l1, t)]
+            corners += [("EX", l1, -T), ("EX", l1, t1)]
         if end_2:
-            corners += [("EX", -T, l2), ("EX", t, l2)]
+            corners += [("EX", -T, l2), ("EX", t2, l2)]
 
-    elif typ == "t_wall":  # полка A отгоре, ребро B надолу
+    elif typ == "t_wall":  # полка A отгоре (дебелина t1), ребро B надолу (дебелина ts)
         l1, s, p = d["l1"], d["l2"], d["l3"]  # s - дължина на реброто под полката
-        poly = [[0, s], [p, s], [p, 0], [p + t, 0], [p + t, s], [l1, s], [l1, s + t], [0, s + t]]
-        place = {"A": (0, s + t, 'x'), "A1 ляво": (0, s - T, 'x'), "A1 дясно": (p + t + T, s - T, 'x'),
-                 "B": (p - T, 0, 'y'), "B1": (p + t, 0, 'y'),
+        ts = t2
+        poly = [[0, s], [p, s], [p, 0], [p + ts, 0], [p + ts, s], [l1, s], [l1, s + t1], [0, s + t1]]
+        place = {"A": (0, s + t1, 'x'), "A1 ляво": (0, s - T, 'x'), "A1 дясно": (p + ts + T, s - T, 'x'),
+                 "B": (p - T, 0, 'y'), "B1": (p + ts, 0, 'y'),
                  "Край 1": (l1, s, 'y'), "Край 2": (-T, s, 'y'), "Край 3": (p, -T, 'x')}
-        corners = [("IN", p - T, s - T), ("IN", p + t, s - T)]
+        corners = [("IN", p - T, s - T), ("IN", p + ts, s - T)]
         if end_1:
-            corners += [("EX", l1, s + t), ("EX", l1, s - T)]
+            corners += [("EX", l1, s + t1), ("EX", l1, s - T)]
         if end_2:
-            corners += [("EX", -T, s + t), ("EX", -T, s - T)]
+            corners += [("EX", -T, s + t1), ("EX", -T, s - T)]
         if layout["closed"][2]:
-            corners += [("EX", p - T, -T), ("EX", p + t, -T)]
+            corners += [("EX", p - T, -T), ("EX", p + ts, -T)]
 
-    else:  # u_wall: рамо A вляво, гръб B отдолу, рамо C вдясно
+    else:  # u_wall: рамо A вляво (t1), гръб B отдолу (t2), рамо C вдясно (t3)
         l1, m, l3 = d["l1"], d["l2"], d["l3"]
-        poly = [[0, 0], [m, 0], [m, l3], [m - t, l3], [m - t, t], [t, t], [t, l1], [0, l1]]
-        place = {"B": (0, -T, 'x'), "B1": (k, t, 'x'),
-                 "A": (-T, 0, 'y'), "A1": (t, k, 'y'),
-                 "C": (m, 0, 'y'), "C1": (m - t - T, k, 'y'),
-                 "Край A": (0, l1, 'x'), "Край C": (m - t, l3, 'x')}
-        corners = [("EX", -T, -T), ("EX", m, -T), ("IN", t, t), ("IN", m - t - T, t)]
+        poly = [[0, 0], [m, 0], [m, l3], [m - t3, l3], [m - t3, t2], [t1, t2], [t1, l1], [0, l1]]
+        place = {"B": (0, -T, 'x'), "B1": (t1 + IN_CORNER_CM, t2, 'x'),
+                 "A": (-T, 0, 'y'), "A1": (t1, t2 + IN_CORNER_CM, 'y'),
+                 "C": (m, 0, 'y'), "C1": (m - t3 - T, t2 + IN_CORNER_CM, 'y'),
+                 "Край A": (0, l1, 'x'), "Край C": (m - t3, l3, 'x')}
+        corners = [("EX", -T, -T), ("EX", m, -T), ("IN", t1, t2), ("IN", m - t3 - T, t2)]
         if end_1:
-            corners += [("EX", -T, l1), ("EX", t, l1)]
+            corners += [("EX", -T, l1), ("EX", t1, l1)]
         if end_2:
-            corners += [("EX", m - t - T, l3), ("EX", m, l3)]
+            corners += [("EX", m - t3 - T, l3), ("EX", m, l3)]
 
 
     return poly, place, corners
@@ -225,10 +227,11 @@ def _dims_label(layout):
     if typ == "wall":
         return f"L={int(d['length'])} cm, B={int(d['t'])} cm"
     if typ == "l_wall":
-        return f"A={int(d['l1'])}, B={int(d['l2'])}, дебелина {int(d['t'])} cm"
+        return f"A={int(d['l1'])}, B={int(d['l2'])}, {thickness_label(layout, ' cm')}"
     if typ == "t_wall":
-        return f"A={int(d['l1'])}, B={int(d['l2'])}, дебелина {int(d['t'])} cm"
-    return f"A={int(d['l1'])}, B={int(d['l2'])}, C={int(d['l3'])}, дебелина {int(d['t'])} cm"
+        offset = t_wall_offset_label(layout, " cm")
+        return f"A={int(d['l1'])}, B={int(d['l2'])}, {offset + ', ' if offset else ''}{thickness_label(layout, ' cm')}"
+    return f"A={int(d['l1'])}, B={int(d['l2'])}, C={int(d['l3'])}, {thickness_label(layout, ' cm')}"
 
 # ==========================================
 # 3. ИЗГЛЕД ОТГОРЕ (TOP VIEW)
@@ -300,7 +303,7 @@ def _face_strips(layout, place, poly):
 
 def _prop_marks(layout, strips):
     """Местата на вертикализаторите в план: [(страна, координата по оста)], по calculate_push_pull_props."""
-    from accessories_calculator import _prop_positions, _props_per_side
+    from accessories_calculator import _prop_positions, _props_on_sides
     faces = {f["name"]: f for f in layout["faces"]}
 
     def covering(axis, coord, normal):
@@ -317,10 +320,12 @@ def _prop_marks(layout, strips):
                 continue
             axis, a0, _a1, c_lo, _c_hi, normal = strips[name]
             length = faces[name]["length_cm"]
-            for pos in _prop_positions(length, _props_per_side(length)):
+            outer, opposite = _props_on_sides(length, layout["height_cm"])
+            for pos in _prop_positions(length, outer):
+                marks.append((name, a0 + pos))
+            for pos in _prop_positions(length, opposite):
                 coord = a0 + pos
-                marks.append((name, coord))
-                # срещу него, от другата страна на същата стена (най-близката лента)
+                # от другата страна на същата стена (най-близката лента)
                 names = covering(axis, coord, -normal) or [n for n, s in strips.items()
                                                            if s[0] == axis and s[5] == -normal and not n.startswith("Край")]
                 if names:
@@ -626,7 +631,7 @@ def _front_faces(layout):
 def _front_view_buf(layout, faces, title=True):
     h_cm = layout["height_cm"]
     h_levels = layout["height_levels"]
-    waler_levels = waler_heights_cm(h_cm, h_levels[0] if h_levels else 150)
+    waler_levels = waler_levels_cm(h_cm, h_levels[0] if h_levels else 150)
 
     n_rows = int(math.ceil(len(faces) / 2.0))
     fig, axes = plt.subplots(n_rows, 2, figsize=(FRONT_FIG_W_IN, 2.9 * n_rows), dpi=DPI_RESOLUTION, squeeze=False)
