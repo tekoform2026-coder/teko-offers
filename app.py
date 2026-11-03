@@ -15,7 +15,8 @@ from drawing_generator import generate_pdf_drawings, generate_top_view_buf, gene
 from excel_export import generate_excel
 import projects_store
 from accessories_calculator import calculate_accessories
-from teko_calculator import solve_height_cm, layout_element, count_panels
+from teko_calculator import (solve_height_cm, layout_element, count_panels, is_compensator_row, thickness_label,
+                             t_wall_offset_label)
 from weights_db import get_item_weight
 
 st.set_page_config(
@@ -48,7 +49,7 @@ def format_height_breakdown_text(height_cm, layout=None):
     h_levels = layout["height_levels"] if layout else solve_height_cm(h_cm)
     parts = []
     for idx, h_val in enumerate(h_levels, 1):
-        if h_val <= 15:
+        if is_compensator_row(h_val):
             parts.append(f"Ред {idx}: Компенсатор TC ({h_val} cm)")
         elif h_val <= 60:
             parts.append(f"Ред {idx}: Полегнал ({h_val} cm)")
@@ -92,11 +93,19 @@ def check_element_dimensions(row):
     elif elem_type == "t_wall":
         l1_cm = round(_row_float(row, "l1_cm", 200))
         l2_cm = round(_row_float(row, "l2_cm", 200))
-        t_cm = round(_row_float(row, "thickness_cm", 25))
+        # реброто: „Дебелина рамо 2“, празна = общата „Дебелина“
+        t_cm = round(_row_float(row, "thickness2_cm", None) or _row_float(row, "thickness_cm", 25))
+        # Рамо 3: от левия край на полката до лявото лице на реброто; празно = реброто е в средата
+        l3_cm = round(_row_float(row, "l3_cm", 0))
         if l1_cm % 5 != 0 or l2_cm % 5 != 0:
             warnings.append(f"• **{name}**: Страните A / B ({l1_cm} cm / {l2_cm} cm) съдържат стойности некратни на 5 cm.")
-        # реброто е в средата: от всяка страна на полката трябва да остане място за IN (10 cm) и панел
-        if (l1_cm - t_cm) / 2 <= 10 or l2_cm <= 10:
+        if l3_cm % 5 != 0:
+            warnings.append(f"• **{name}**: Мястото на реброто (Рамо 3 = {l3_cm} cm) не е кратно на 5 cm.")
+        # от всяка страна на реброто трябва да остане място за IN (10 cm) и поне 5 cm панел
+        if l3_cm and (l3_cm - 10 < 5 or l1_cm - l3_cm - t_cm - 10 < 5):
+            warnings.append(f"• **{name}**: Реброто на {l3_cm} cm от левия край не оставя място за ъгъл IN (10 cm) "
+                            f"и поне 5 cm панел от двете страни на полката ({l1_cm} cm) - проверете Рамо 3.")
+        if (not l3_cm and (l1_cm - t_cm) / 2 <= 10) or l2_cm <= 10:
             warnings.append(f"• **{name}**: Страна A ({l1_cm} cm) или B ({l2_cm} cm) е твърде къса за T-стена "
                             f"с дебелина {t_cm} cm - проверете Рамо 1 (страна A) и Рамо 2 (страна B).")
 
@@ -116,11 +125,16 @@ def _row_float(row, key, default):
 DEFAULT_HEIGHT_CM = 270
 
 # Размерите в таблицата са в сантиметри
-LENGTH_COLUMNS = ["width_cm", "length_cm", "thickness_cm", "l1_cm", "l2_cm", "l3_cm", "height_cm"]
+LENGTH_COLUMNS = ["width_cm", "length_cm", "thickness_cm", "l1_cm", "l2_cm", "l3_cm", "height_cm",
+                  "thickness1_cm", "thickness2_cm", "thickness3_cm"]
+
+# Дебелина на рамо 1 / 2 / 3 (L-, П- и Т-стена) - само когато е различна от общата „Дебелина“
+ARM_THICKNESS_COLUMNS = ("thickness1_cm", "thickness2_cm", "thickness3_cm")
 
 # Колоните на таблицата по реда на показване; дължината на права стена и колона е в „Рамо 1 / Дължина“,
 # другият размер на колоната - в „Дебелина“
 TABLE_COLUMNS = ["type", "name", "count", "thickness_cm", "l1_cm", "l2_cm", "l3_cm", "height_cm",
+                 "thickness1_cm", "thickness2_cm", "thickness3_cm",
                  "closed_end_1", "closed_end_2", "closed_end_3"]
 
 def columns_to_cm(df):
@@ -167,6 +181,8 @@ def row_to_layout(elem_type, row):
     t_cm = _row_float(row, "thickness_cm", 25)
     closed = {"closed_end_1": _closed_end(row, "closed_end_1"),
               "closed_end_2": _closed_end(row, "closed_end_2")}
+    # празна „Дебелина рамо N“ = общата „Дебелина“ (само L-, П- и Т-стена)
+    arms = {col: _row_float(row, col, None) for col in ("thickness1_cm", "thickness2_cm", "thickness3_cm")}
 
     if elem_type == "column":
         return layout_element("column", h_cm,
@@ -179,18 +195,22 @@ def row_to_layout(elem_type, row):
         return layout_element("l_wall", h_cm,
                               l1_cm=_row_float(row, "l1_cm", 200),
                               l2_cm=_row_float(row, "l2_cm", 200),
-                              thickness_cm=t_cm, **closed)
+                              thickness_cm=t_cm, thickness1_cm=arms["thickness1_cm"],
+                              thickness2_cm=arms["thickness2_cm"], **closed)
     elif elem_type == "u_wall":
         return layout_element("u_wall", h_cm,
                               l1_cm=_row_float(row, "l1_cm", 200),
                               l2_cm=_row_float(row, "l2_cm", 200),
                               l3_cm=_row_float(row, "l3_cm", 200),
-                              thickness_cm=t_cm, **closed)
+                              thickness_cm=t_cm, **arms, **closed)
     elif elem_type == "t_wall":
         return layout_element("t_wall", h_cm,
                               l1_cm=_row_float(row, "l1_cm", 200),
                               l2_cm=_row_float(row, "l2_cm", 200),
-                              thickness_cm=t_cm, closed_end_3=_closed_end(row, "closed_end_3"), **closed)
+                              l3_cm=_row_float(row, "l3_cm", 0),  # мястото на реброто; празно = средата
+                              thickness_cm=t_cm, thickness1_cm=arms["thickness1_cm"],
+                              thickness2_cm=arms["thickness2_cm"],
+                              closed_end_3=_closed_end(row, "closed_end_3"), **closed)
     return None
 
 def get_element_teko_panels(elem_type, row):
@@ -237,6 +257,11 @@ def element_dims_and_area(elem_type, row):
     cnt = int(_row_float(row, "count", 1))
     h = _row_float(row, "height_cm", 300)
     t = _row_float(row, "thickness_cm", 25)
+    if elem_type in ("l_wall", "u_wall", "t_wall"):
+        # с „Дебелина рамо N“: една дебелина (B=30 см) или по рамена (рамо 1 дебелина 30 см, ...)
+        layout = row_to_layout(elem_type, row)
+        t = layout["dims"]["t1"]
+        b_str = f"B={t:g} см" if thickness_label(layout).startswith("дебелина") else thickness_label(layout)
     if elem_type == "column":
         w, l = t, _row_float(row, "l1_cm", 50)
         perimeter = 2 * (w + l)
@@ -248,15 +273,16 @@ def element_dims_and_area(elem_type, row):
     elif elem_type == "l_wall":
         l1, l2 = _row_float(row, "l1_cm", 200), _row_float(row, "l2_cm", 200)
         perimeter = 2 * (l1 + l2)
-        dim_str = f"L={l1:g}+{l2:g} см, B={t:g} см, H={h:g} см"
+        dim_str = f"L={l1:g}+{l2:g} см, {b_str}, H={h:g} см"
     elif elem_type == "u_wall":
         l1, l2, l3 = _row_float(row, "l1_cm", 200), _row_float(row, "l2_cm", 200), _row_float(row, "l3_cm", 200)
         perimeter = 2 * (l1 + l2 + l3)
-        dim_str = f"L={l1:g}+{l2:g}+{l3:g} см, B={t:g} см, H={h:g} см"
+        dim_str = f"L={l1:g}+{l2:g}+{l3:g} см, {b_str}, H={h:g} см"
     elif elem_type == "t_wall":
         l1, l2 = _row_float(row, "l1_cm", 200), _row_float(row, "l2_cm", 200)
         perimeter = 2 * (l1 + l2)
-        dim_str = f"T: A={l1:g} см, B={l2:g} см, дебелина {t:g} см, H={h:g} см"
+        offset = t_wall_offset_label(layout)
+        dim_str = f"T: A={l1:g} см, B={l2:g} см, {offset + ', ' if offset else ''}{thickness_label(layout)}, H={h:g} см"
     else:
         return "", 0.0
     return dim_str, perimeter * h / 10000.0 * cnt
@@ -524,6 +550,9 @@ if "edited_df" not in st.session_state:
     st.session_state["edited_df"] = EMPTY_DF.copy()
 else:
     st.session_state["edited_df"] = columns_to_cm(st.session_state["edited_df"])
+    for _col in ARM_THICKNESS_COLUMNS:  # таблица отпреди колоните „Дебелина рамо 1 / 2 / 3“
+        if _col not in st.session_state["edited_df"].columns:
+            st.session_state["edited_df"][_col] = None
 
 with st.sidebar:
     st.header("⚙️ Настройки")
@@ -787,7 +816,8 @@ with tab1:
             "- За **колона (`column`)**: попълнете **Рамо 1 / Дължина** и `thickness_cm` (дебелина) - колона 30x50: дължина 50, дебелина 30.\n"
             "- За **L-стена (`l_wall`)**: попълнете `l1_cm` (рамо 1), `l2_cm` (рамо 2) и `thickness_cm` (дебелина).\n"
             "- За **П/U-стена (`u_wall`)**: попълнете `l1_cm` (рамо 1), `l2_cm` (рамо 2), `l3_cm` (рамо 3) и `thickness_cm` (дебелина).\n"
-            "- За **T-стена (`t_wall`)**: **Рамо 1 = страна A** (цялата полка), **Рамо 2 = страна B / B1** (реброто, от полката до края му) и `thickness_cm` (дебелина). Рамо 3 не се попълва - реброто е в средата на полката. Край 1 е десният край на полката, край 2 - левият, **Затворен край 3** - краят на реброто (само за T-стена).\n"
+            "- За **T-стена (`t_wall`)**: **Рамо 1 = страна A** (цялата полка), **Рамо 2 = страна B / B1** (реброто, от полката до края му) и `thickness_cm` (дебелина). **Рамо 3** - мястото на реброто: от левия край на полката до лявото лице на реброто; празно = реброто е в средата на полката. Реброто може да е и до самия край - остава Т-стена. Край 1 е десният край на полката, край 2 - левият, **Затворен край 3** - краят на реброто (само за T-стена).\n"
+            "- **Дебелина рамо 1 / 2 / 3** (L-, П- и T-стена): попълва се само когато рамото е с различна дебелина от `Дебелина`; празното поле = `Дебелина`. При T-стена рамо 1 е полката, рамо 2 - реброто.\n"
             "- **Затворен край 1 / Затворен край 2** (отметки) за стени, L- и П/U-стени: челните краища, затворени с панел колкото дебелината. Край 1 е краят на рамо 1 (при права стена - десният), край 2 - краят на последното рамо (при права стена - левият). **Всички краища са затворени по подразбиране** - за отворен край махнете отметката.\n"
             "- Непотребните полета за съответния тип могат да се оставят празни — системата автоматично игнорира празни клетки без грешки!"
         )
@@ -844,8 +874,16 @@ with tab1:
                 "thickness_cm": st.column_config.NumberColumn("Дебелина (см)", format="%g", width="auto"),
                 "l1_cm": st.column_config.NumberColumn("Рамо 1 / Дължина (см)", format="%g", width="auto"),
                 "l2_cm": st.column_config.NumberColumn("Рамо 2 (см)", format="%g", width="auto"),
-                "l3_cm": st.column_config.NumberColumn("Рамо 3 (см)", format="%g", width="auto"),
+                "l3_cm": st.column_config.NumberColumn("Рамо 3 (см)", format="%g", width="auto",
+                                                       help="При Т-стена: от левия край на полката до лявото лице "
+                                                            "на реброто; празно = реброто е в средата"),
                 "height_cm": st.column_config.NumberColumn("Височина (см)", format="%g", width="auto"),
+                "thickness1_cm": st.column_config.NumberColumn("Дебелина рамо 1 (см)", format="%g", width="auto",
+                                                               help="Само ако е различна от „Дебелина“; празна = „Дебелина“"),
+                "thickness2_cm": st.column_config.NumberColumn("Дебелина рамо 2 (см)", format="%g", width="auto",
+                                                               help="Само ако е различна от „Дебелина“; празна = „Дебелина“"),
+                "thickness3_cm": st.column_config.NumberColumn("Дебелина рамо 3 (см)", format="%g", width="auto",
+                                                               help="Само за П-стена; празна = „Дебелина“"),
                 "closed_end_1": st.column_config.CheckboxColumn("Затворен край 1", default=True, width="auto"),
                 "closed_end_2": st.column_config.CheckboxColumn("Затворен край 2", default=True, width="auto"),
                 "closed_end_3": st.column_config.CheckboxColumn("Затворен край 3 (само T-стена)", default=True, width="auto")
