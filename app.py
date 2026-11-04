@@ -67,6 +67,13 @@ def check_element_dimensions(row):
     elem_type = str(row.get("type", "wall"))
     name = format_element_label(elem_type, str(row.get("name", "Елемент")))
 
+    # Задължителните размери за типа; празен или 0 (напр. непопълнен от Gemini) - сметката не е вярна
+    missing = [label for col, label in REQUIRED_DIMENSIONS.get(elem_type, [])
+               if not _row_float(row, col, 0) > 0]
+    if missing:
+        warnings.append(f"• **{name}**: липсва размер ({', '.join(missing)}) - празен или 0. "
+                        f"Попълнете го в таблицата, иначе сметката и чертежът не са верни.")
+
     if h_cm % 5 != 0:
         warnings.append(f"• **{name}**: Височина {h_cm} cm не е кратна на 5 cm (закръгля се нагоре до 5 cm).")
 
@@ -128,6 +135,16 @@ DEFAULT_HEIGHT_CM = 270
 LENGTH_COLUMNS = ["width_cm", "length_cm", "thickness_cm", "l1_cm", "l2_cm", "l3_cm", "height_cm",
                   "thickness1_cm", "thickness2_cm", "thickness3_cm"]
 
+# Размерите, без които елементът не може да се сметне (Рамо 3 на Т-стена е по желание)
+REQUIRED_DIMENSIONS = {
+    "column": [("thickness_cm", "Дебелина"), ("l1_cm", "Дължина"), ("height_cm", "Височина")],
+    "wall": [("thickness_cm", "Дебелина"), ("l1_cm", "Дължина"), ("height_cm", "Височина")],
+    "l_wall": [("thickness_cm", "Дебелина"), ("l1_cm", "Рамо 1"), ("l2_cm", "Рамо 2"), ("height_cm", "Височина")],
+    "u_wall": [("thickness_cm", "Дебелина"), ("l1_cm", "Рамо 1"), ("l2_cm", "Рамо 2"), ("l3_cm", "Рамо 3"),
+               ("height_cm", "Височина")],
+    "t_wall": [("thickness_cm", "Дебелина"), ("l1_cm", "Рамо 1"), ("l2_cm", "Рамо 2"), ("height_cm", "Височина")],
+}
+
 # Дебелина на рамо 1 / 2 / 3 (L-, П- и Т-стена) - само когато е различна от общата „Дебелина“
 ARM_THICKNESS_COLUMNS = ("thickness1_cm", "thickness2_cm", "thickness3_cm")
 
@@ -140,7 +157,7 @@ TABLE_COLUMNS = ["type", "name", "count", "thickness_cm", "l1_cm", "l2_cm", "l3_
 def columns_to_cm(df):
     """Стари колони в метри (width_m, height_m ...) -> същите в сантиметри (width_cm, height_cm ...).
     Старата „Дължина“ (length_cm, напр. от Gemini) отива в „Рамо 1 / Дължина“ (l1_cm),
-    старата „Ширина“ на колона (width_cm) - в „Дебелина“ (thickness_cm)."""
+    старата „Ширина“ на колона (width_cm) - в „Дебелина“ (thickness_cm), ако там е празно или 0."""
     df = df.copy()
     for col_cm in LENGTH_COLUMNS:
         col_m = col_cm[:-3] + "_m"
@@ -148,13 +165,16 @@ def columns_to_cm(df):
             meters = pd.to_numeric(df[col_m], errors="coerce") * 100
             df[col_cm] = df[col_cm].fillna(meters) if col_cm in df.columns else meters
             df = df.drop(columns=[col_m])
-    if "length_cm" in df.columns:
-        df["l1_cm"] = df["l1_cm"].fillna(df["length_cm"]) if "l1_cm" in df.columns else df["length_cm"]
-        df = df.drop(columns=["length_cm"])
-    if "width_cm" in df.columns:
-        df["thickness_cm"] = (df["thickness_cm"].fillna(df["width_cm"]) if "thickness_cm" in df.columns
-                              else df["width_cm"])
-        df = df.drop(columns=["width_cm"])
+    # Празна или 0 (Gemini връща 0 за непопълнено поле) се попълва от старата колона
+    for old, new in (("length_cm", "l1_cm"), ("width_cm", "thickness_cm")):
+        if old not in df.columns:
+            continue
+        if new in df.columns:
+            current = pd.to_numeric(df[new], errors="coerce")
+            df[new] = df[new].where(current.fillna(0) != 0, df[old])
+        else:
+            df[new] = df[old]
+        df = df.drop(columns=[old])
     return df
 
 def fill_default_height(df, height_cm):
@@ -385,16 +405,24 @@ def format_element_label(elem_type, name):
         return name_str if (name_str.lower().startswith("t-стена") or name_str.lower().startswith("стена")) else f"T-Стена {name_str}".strip()
     return name_str
 
+MAX_PDF_PAGES = 20  # към Gemini отиват най-много толкова страници
+EXTRA_PAGE_MAX_PX = 3500  # страниците след първата - най-много толкова пиксела по дългата страна
+
 def process_uploaded_file(uploaded_file):
+    """Чертежът като списък от изображения: всички страници на PDF (детайлите, напр. страничен изглед с
+    височината, често са на следващите страници); първата - както досега, 200 dpi."""
     uploaded_file.seek(0)
     if uploaded_file.type == "application/pdf":
         doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-        page = doc.load_page(0)
-        pix = page.get_pixmap(dpi=200)
-        img = Image.open(io.BytesIO(pix.tobytes("png")))
-        return img
+        images = []
+        for i in range(min(doc.page_count, MAX_PDF_PAGES)):
+            page = doc.load_page(i)
+            dpi = 200 if i == 0 else min(200, int(EXTRA_PAGE_MAX_PX * 72 / max(page.rect.width, page.rect.height)))
+            pix = page.get_pixmap(dpi=dpi)
+            images.append(Image.open(io.BytesIO(pix.tobytes("png"))))
+        return images
     else:
-        return Image.open(uploaded_file)
+        return [Image.open(uploaded_file)]
 
 def generate_word_offer(client_name, project_name, offer_date, offer_type, price_per_m2, detailed_rows, total_area, subtotal, vat_amount, grand_total):
     doc = docx.Document()
@@ -761,7 +789,10 @@ with tab1:
                 st.subheader("🖼️ Преглед на файла")
                 try:
                     processed_img = process_uploaded_file(uploaded_file)
-                    st.image(processed_img, use_container_width=True, caption="Качен чертеж")
+                    n_pages = len(processed_img)
+                    st.image(processed_img[0], use_container_width=True,
+                             caption="Качен чертеж" + (f" - стр. 1 от {n_pages}; към AI отиват всички {n_pages}"
+                                                       if n_pages > 1 else ""))
                 except Exception as e:
                     st.error(f"Грешка при зареждането: {e}")
                     processed_img = None
@@ -804,6 +835,9 @@ with tab1:
                                             df_ai[col] = True if col in CLOSED_END_COLUMNS else None
                                     st.session_state["edited_df"] = df_ai
                                     st.success(f"✅ Готово! Разчетено с: **{used_model}**")
+                                    # противоречия и несигурности в чертежа - потребителят проверява таблицата
+                                    for note in blueprint_data.get("notes") or []:
+                                        st.warning(f"⚠️ {note}")
                                 except Exception as e:
                                     st.error(f"Грешка при анализа: {e}")
     else:
