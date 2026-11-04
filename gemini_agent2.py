@@ -2,34 +2,45 @@ import json
 from PIL import Image
 import google.generativeai as genai
 
-def analyze_blueprint(image_input, api_key, model_choice=None):
+def _open_image(image_input):
     if isinstance(image_input, Image.Image):
-        img = image_input
-    elif hasattr(image_input, 'read'):
-        img = Image.open(image_input)
+        return image_input
+    return Image.open(image_input)
+
+
+def analyze_blueprint(image_input, api_key, model_choice=None):
+    # Едно изображение или списък (всички страници на PDF-а)
+    if isinstance(image_input, (list, tuple)):
+        images = [_open_image(i) for i in image_input]
     else:
-        img = Image.open(image_input)
+        images = [_open_image(image_input)]
 
     genai.configure(api_key=api_key)
 
     prompt = """
-    Анализирай чертежа/плана и разпознай всички конструктивни елементи (колони, прави стени, L-образни стени, U-образни стени, T-образни стени).
+    Изображенията са страниците на ЕДИН чертеж (може да е една страница). Прегледай ВСИЧКИ страници -
+    таблици, планове, разрези, странични изгледи, детайли - и събери данните за всеки елемент от тях.
+    Разпознай бетонните елементи, които се изливат във вертикален кофраж: колони, прави стени, L-образни,
+    U-образни и T-образни стени, както и ниски правоъгълни бетонни блокове (баласти, фундаментни блокове,
+    цокли и подобни).
+    НЕ включвай: стоманени профили и конструкции (стойки, колове/piles, posts, греди, рейки/rails, подпори/
+    struts, връзки), арматура, анкери, болтове, сглобяеми и готови елементи, панели, оборудване.
+
     Върни САМО валиден JSON обект със следната структура:
 
     {
       "project_name": "Име на обект/проект от чертежа",
+      "notes": ["кратка бележка за всяко противоречие или несигурност в чертежа"],
       "elements": [
         {
-          "type": "column",
-          "name": "К1",
+          "type": "wall",
+          "name": "Ballast A",
           "count": 1,
-          "width_cm": 30,
-          "length_cm": 50,
-          "thickness_cm": 25,
-          "l1_cm": 0,
-          "l2_cm": 0,
-          "l3_cm": 0,
-          "height_cm": 300,
+          "thickness_cm": 100,
+          "l1_cm": 220,
+          "l2_cm": null,
+          "l3_cm": null,
+          "height_cm": 35,
           "thickness1_cm": null,
           "thickness2_cm": null,
           "thickness3_cm": null
@@ -38,9 +49,18 @@ def analyze_blueprint(image_input, api_key, model_choice=None):
     }
 
     Инструкции за размерите:
-    - Всички размери са в САНТИМЕТРИ (см), напр. стена с дължина 5 м -> "length_cm": 500.
-    - За "column" (колона): задай "width_cm", "length_cm", "height_cm".
-    - За "wall" (права стена): задай "length_cm", "thickness_cm", "height_cm".
+    - Всички размери са в САНТИМЕТРИ (см). Провери мерната единица на чертежа (често е посочена в бележките,
+      напр. „measurement unit: millimeters (mm)“) и преобразувай: 2200 mm -> 220, 5 м -> 500.
+    - Височина ("height_cm") е вертикалният размер на елемента - взима се от разрез или страничен изглед
+      (side view, section). Дължина и дебелина са размерите в план (изглед отгоре, top view, plan).
+    - Запис от три числа като „350*2200*1000mm“ или „350x2200x1000“ НЕ е в определен ред. Намери в чертежа
+      кое от трите числа е вертикално (височината) - напр. в страничния изглед 350 е отбелязано вертикално,
+      значи височината е 35 см, а 2200 x 1000 в изгледа отгоре са дължината (220) и дебелината (100).
+      Ако никъде не се вижда кое е височината, остави "height_cm" = null и го запиши в "notes".
+    - За "column" (колона): "l1_cm" = по-дългата страна в план, "thickness_cm" = по-късата, "height_cm".
+    - За "wall" (права стена): "l1_cm" = дължината, "thickness_cm" = дебелината, "height_cm".
+    - Нисък правоъгълен бетонен блок (баласт, фундаментен блок и т.н.) е "wall": "l1_cm" = по-дългият размер
+      в план, "thickness_cm" = по-късият размер в план, "height_cm" = вертикалният размер.
     - За "l_wall" (L-образна стена): задай "l1_cm", "l2_cm", "thickness_cm", "height_cm".
     - За "u_wall" (U-образна стена): задай "l1_cm", "l2_cm", "l3_cm", "thickness_cm", "height_cm".
     - За "t_wall" (T-образна стена - стена, която започва от средата или от друго място по дължината на
@@ -56,8 +76,18 @@ def analyze_blueprint(image_input, api_key, model_choice=None):
       "thickness3_cm" (рамо 3, l3_cm); при "t_wall" рамо 1 е полката, рамо 2 - реброто, "thickness3_cm" = null.
       "thickness_cm" е дебелината на рамо 1. Ако всички рамена са с еднаква дебелина, или при колона и права
       стена, остави "thickness1_cm", "thickness2_cm" и "thickness3_cm" = null.
-    - Ако някоя стойност липсва, сложи разумно отгатната стойност (напр. height_cm=300, thickness_cm=25);
-      това не важи за "thickness1_cm", "thickness2_cm" и "thickness3_cm" - не ги отгатвай, остави ги null.
+    - Неизползваните полета за типа са null (не 0).
+    - Ако някой размер не се вижда в чертежа, остави го null - НЕ го отгатвай и не слагай 0. Програмата ще
+      поиска от потребителя да го попълни (празната височина се попълва със стандартната височина на етажа).
+
+    Инструкции за броя ("count"):
+    - "count" е броят еднакви елементи от този вид (от таблица с количества, спецификация или преброяване).
+    - Ако за един и същ елемент има няколко колони или ревизии с бройки (напр. „Actual“ и „Revised“), вземи
+      най-новата (Revised) и го запиши в "notes".
+    - Ако един и същ тип елемент (едно име) се среща в няколко реда на таблица с еднакви размери, събери го
+      в един елемент с общия брой.
+    - Ако размерите на един елемент се различават в две таблици или изгледи, вземи тези от подробния чертеж
+      на елемента (с размерни линии) и запиши противоречието в "notes".
     """
 
     # Стандартен списък с резервни модели
@@ -102,7 +132,7 @@ def analyze_blueprint(image_input, api_key, model_choice=None):
                 model_name=model_name,
                 generation_config={"response_mime_type": "application/json"}
             )
-            response = model.generate_content([img, prompt])
+            response = model.generate_content([*images, prompt])
             if response and response.text:
                 raw_text = response.text.strip()
                 used_model = model_name
