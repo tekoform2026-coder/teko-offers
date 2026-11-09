@@ -2,6 +2,7 @@
 excel_export.py
 Количествена сметка (КСС) и чертежи в Excel за редактиране - по образеца reference/expected/12345676.xlsx:
   - лист „Кол. сметка“: всички артикули в реда на офертата, количествата са формули към листовете на елементите;
+    колоните от „1. Оферта.xlsx“ - цена и наличност за попълване на ръка, размери, площ, тегло, общо, отстъпка;
   - лист „Елемент N“: изглед отгоре и изглед отпред на всяка страна от слети клетки (1 клетка = 5 см),
     всеки панел и ъгъл с дебела външна граница; вдясно от чертежите - пълната КСС за елемента
     (за 1 бр. и общо = за 1 бр. x брой);
@@ -16,6 +17,7 @@ from openpyxl.utils import get_column_letter
 
 from drawing_generator import PANEL_T, _face_strips, _plan_geometry
 from teko_calculator import format_panel_code, is_compensator_row, thickness_label, t_wall_offset_label
+from weights_db import WEIGHTS_DB
 
 CELL_CM = 5          # една клетка = 5 см
 FIRST_COL = 3        # чертежите започват от колона C
@@ -49,7 +51,6 @@ KSS_ITEMS = [
     ("Панел TEKO  TK 120/30", ["TK 120/30"]),
     ("Панел TEKO  TK 120/25", ["TK 120/25"]),
     ("Панел TEKO  TK 120/20", ["TK 120/20"]),
-    ("Панел TEKO  TK 60/35", ["TK 60/35"]),
     ("Панел TEKO  TK 60/30", ["TK 60/30"]),
     ("Панел TEKO  TK 60/25", ["TK 60/25"]),
     ("Панел TEKO  TK 60/20", ["TK 60/20"]),
@@ -62,9 +63,6 @@ KSS_ITEMS = [
     ("TEKO КОМПЕНСАТОР  TC120/15", ["TC 120/15"]),
     ("TEKO КОМПЕНСАТОР  TC120/10", ["TC 120/10"]),
     ("TEKO КОМПЕНСАТОР  TC120/5", ["TC 120/5"]),
-    ("TEKO КОМПЕНСАТОР  TC60/15", ["TC 60/15"]),
-    ("TEKO КОМПЕНСАТОР  TC60/10", ["TC 60/10"]),
-    ("TEKO КОМПЕНСАТОР  TC60/5", ["TC 60/5"]),
     ("ВЪТРЕШЕН ЪГЪЛ  IN150", ["Вътрешен ъгъл IN150"]),
     ("ВЪТРЕШЕН ЪГЪЛ  IN120", ["Вътрешен ъгъл IN120"]),
     ("ВЪНШЕН ЪГЪЛ  EX240", ["Външен ъгъл EX240"]),
@@ -85,6 +83,41 @@ KSS_ITEMS = [
     ("Гайка N12", ["Гайка N12"]),
 ]
 _KSS_NAME_BY_CODE = {code: name for name, codes in KSS_ITEMS for code in codes}
+
+
+def _kss_dimensions():
+    """Колона „Dimensions“ и покривна площ на 1 бр. [m2] по редовете на КСС (както в „1. Оферта.xlsx“)."""
+    dims = {}
+    for name, codes in KSS_ITEMS:
+        if codes and codes[0].startswith("TK "):
+            h, w = (int(x) for x in codes[0].split()[1].split("/"))
+            dims[name] = (f"{h}/{w}/7,8", round(h * w / 10000, 4))
+    dims.update({
+        "TEKO КОМПЕНСАТОР  TC150/15": ("150/7/15/7", 0.225), "TEKO КОМПЕНСАТОР  TC150/10": ("150/7/10/7", 0.15),
+        "TEKO КОМПЕНСАТОР  TC150/5": ("150/6/5/6", 0.075), "TEKO КОМПЕНСАТОР  TC120/15": ("120/7/15/7", 0.18),
+        "TEKO КОМПЕНСАТОР  TC120/10": ("120/7/10/7", 0.12), "TEKO КОМПЕНСАТОР  TC120/5": ("120/6/5/6", 0.06),
+        "ВЪТРЕШЕН ЪГЪЛ  IN150": ("150/10/10", 0.3), "ВЪТРЕШЕН ЪГЪЛ  IN120": ("120/10/10", 0.24),
+        "ВЪНШЕН ЪГЪЛ  EX240": ("240/7/7", None), "ВЪНШЕН  СКОСЕН ЪГЪЛ EС240": ("240/7/7/3,5", None),
+        "Ръкохватка H8": ("8", None), "Ръкохватка  H6": ("6,5", None), "Ръкохватка  H5": ("5", None),
+        "Ръкохватка  H4": ("4,3", None),
+        "Подравняващ ригел   AW 100 поцинковани": ("100", None),
+        "Подравняващ ригел   AW 200 поцинковани": ("200", None),
+        "Подравняващ ригел   AW 300 поцинковани": ("300", None),
+        "Вертикализатор PP": ("210 - 350", None), "Шпилка TR 12": ("1,2/100", None), "Гайка N12": ("10", None),
+    })
+    return dims
+
+
+KSS_DIMENSIONS = _kss_dimensions()
+KSS_WEIGHTS = {name: WEIGHTS_DB.get(codes[0]) for name, codes in KSS_ITEMS if codes}
+
+# Колоните на „Кол. сметка“ след „Кол.“ (като в „1. Оферта.xlsx“); M и O - мерните единици под „ОБЩО“
+KSS_OFFER_HEADERS = {"E": "Ед. Цена", "F": "Стойност", "G": "Ед. Цена с отстъпка", "H": "Стойност с отстъпка",
+                     "I": "Dimensions,  [cm]", "J": "Покривна площ,  [m2]", "K": "Тегло, [кг]",
+                     "L": "Тегло общо, [кг]", "N": "Кол,  [m2]", "P": "Наличност в склада", "Q": "Остават"}
+KSS_OFFER_WIDTHS = {"E": 9.3, "F": 14.6, "G": 9.7, "H": 13.7, "I": 12.3, "J": 8.1, "K": 7.3, "L": 9.4,
+                    "M": 2.1, "N": 9.1, "O": 2.0, "P": 9.1, "Q": 9.1}
+MONEY = "#,##0.00;-#,##0.00;;@"
 
 TYPE_WORDS = {"column": "колона", "wall": "права стена", "l_wall": "L-стена",
               "u_wall": "П-стена", "t_wall": "T-стена"}
@@ -430,6 +463,75 @@ def _kss_sheet(ws, names, quantity):
                 cell.alignment = Alignment(horizontal="center", vertical="center")
             else:
                 cell.alignment = Alignment(vertical="center")
+    _kss_offer_columns(ws, 7, 6 + len(names))
+
+
+def _kss_offer_columns(ws, first, last):
+    """
+    Колоните от „1. Оферта.xlsx“ вдясно от „Кол.“ и редовете ОБЩО / ОТСТЪПКА под таблицата.
+    Цената, наличността и отстъпката % се попълват на ръка (жълти клетки) - в програмата няма цени и наличност.
+    """
+    for col, width in KSS_OFFER_WIDTHS.items():
+        ws.column_dimensions[col].width = width
+    for col, title in KSS_OFFER_HEADERS.items():
+        cell = ws[f"{col}5"]
+        cell.value = title
+        cell.font = Font(size=10)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = BORDER_KSS
+        ws[f"{col}6"].border = BORDER_KSS
+
+    total = last + 2
+    discount = f"$F${total + 1}"   # ОТСТЪПКА %
+    for r in range(first, last + 1):
+        name = ws[f"B{r}"].value
+        dims, area = KSS_DIMENSIONS.get(name, (None, None))
+        weight = KSS_WEIGHTS.get(name)
+        values = {
+            "F": f'=IF(E{r}="","",N(D{r})*E{r})',
+            "G": f'=IF(E{r}="","",ROUND(E{r}*(100-{discount})/100,2))',
+            "H": f'=IF(E{r}="","",N(D{r})*G{r})',
+            "I": dims, "J": area, "K": weight,
+            "L": f'=IF(K{r}="","",N(D{r})*K{r})' if weight else None,
+            "N": f'=IF(J{r}="","",N(D{r})*J{r})' if area else None,
+            "Q": f'=IF(P{r}="","",P{r}-N(D{r}))',
+        }
+        for col in "EFGHIJKLNPQ":
+            cell = ws[f"{col}{r}"]
+            if values.get(col) is not None:
+                cell.value = values[col]
+            cell.font = Font(size=11)
+            cell.border = BORDER_KSS
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            if col in "FHLNQ":
+                cell.number_format = MONEY
+            if col in "EP":
+                cell.fill = PatternFill("solid", fgColor=FILL_COUNT)
+
+    rows = [("ОБЩО", {"F": f"=SUM(F{first}:F{last})", "H": f"=SUM(H{first}:H{last})",
+                      "L": f"=SUM(L{first}:L{last})", "M": "kg", "N": f"=SUM(N{first}:N{last})", "O": "m2"}),
+            ("ОТСТЪПКА %", {"F": 0}),
+            ("ОТСТЪПКА СТОЙНОСТ", {"F": f"=ROUND(F{total}*{discount}/100,2)", "L": f"=N{total}*0.1", "M": "м3",
+                                   "N": "Приблизителен обем 10м2 - 1 м3"}),
+            ("ОБЩО БЕЗ ДДС", {"F": f"=ROUND(F{total}-F{total + 2},2)", "H": f"=H{total}-H{total + 2}"})]
+    for i, (label, cells) in enumerate(rows):
+        r = total + i
+        ws[f"B{r}"] = label
+        ws[f"B{r}"].font = Font(size=11, bold=True)
+        for col, value in cells.items():
+            cell = ws[f"{col}{r}"]
+            cell.value = value
+            cell.font = Font(size=11, bold=col in "FHLN")
+            if str(value).startswith("="):
+                cell.number_format = "#,##0.00"
+    ws[f"F{total + 1}"].fill = PatternFill("solid", fgColor=FILL_COUNT)
+
+    # печат: хоризонтално, една страница по ширина
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.print_area = f"A1:Q{total + 3}"
 
 
 # ==========================================
