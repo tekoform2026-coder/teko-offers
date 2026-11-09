@@ -1103,20 +1103,23 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         story.append(Paragraph("<b>Необходим артикул за елемента</b>", ParagraphStyle('SubHeading', parent=title_style, fontSize=10, leading=12)))
         story.append(Spacer(1, 2))
 
-        elem_bom = elem['bom']
+        elem_bom = elem['bom']  # умножена по броя
 
         elem_table_data = [[
             Paragraph("<b>Артикул / Код</b>", cell_bold_style),
-            Paragraph("<b>Количество (бр.)</b>", cell_bold_style)
+            Paragraph("<b>За 1 бр.</b>", cell_bold_style),
+            Paragraph(f"<b>Общо за {e_count} бр.</b>", cell_bold_style)
         ]]
-        
+
         for code, qty in sorted(elem_bom.items()):
+            one = qty / e_count
             elem_table_data.append([
                 Paragraph(str(code), cell_style),
+                Paragraph(str(int(one) if one == int(one) else round(one, 2)), cell_style),
                 Paragraph(str(qty), cell_style)
             ])
 
-        elem_table = Table(elem_table_data, colWidths=[300, 180])
+        elem_table = Table(elem_table_data, colWidths=[260, 110, 110])
         elem_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#003366')),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
