@@ -260,13 +260,14 @@ def _text_width_per_pt(text):
 
 
 def _top_view_title(layout, name):
-    """Надпис като в еталона: 'SZ02 колона 80x40' (името без водещото 'Колона')."""
+    """Надпис 'SZ02 колона A=80, B=40 cm' (името без водещото 'Колона'). Размерите са с буквите на
+    страните - само '80x40' до име като 'K1-40/80' се четеше обратно (потребителят, 09.11.2026)."""
     d = layout["dims"]
     if layout["type"] == "column":
         raw = str(name).strip()
         if raw.lower().startswith("колона"):
             raw = raw[len("колона"):].strip()
-        return f"{raw} колона {int(d['a'])}x{int(d['b'])}".strip()
+        return f"{raw} колона A={int(d['a'])}, B={int(d['b'])} cm".strip()
     return str(name)
 
 
@@ -432,6 +433,48 @@ def _top_accessories(layout, place, poly):
 TOP_SIDE_FS = 10          # размер на буквите на страните (pt)
 TOP_SIDE_COLOR = '#1F4E79'
 TOP_SIDE_GAP_PT = 4       # от външния ръб на панела (или ригела) до буквата
+TOP_DIM_FS = 9.5          # размерите на колоната („50 cm“, „25 cm“)
+
+
+def _prop_points(props):
+    """Точки по цялата дължина на всеки вертикализатор (не само основата му)."""
+    return [(p0[0] + t * (p1[0] - p0[0]), p0[1] + t * (p1[1] - p0[1])) for p0, p1 in props for t in (0, 0.5, 1)]
+
+
+def _column_a_dim(layout, strips, walers, props, pt_per_cm):
+    """
+    Размерът на страна A на колона - долу, до страна A и буквата A, на реда на буквата (потребителят,
+    09.11.2026: отгоре, над наименованието, се четеше като част от него). Мястото по дължината е далеч
+    от вертикализаторите. Връща (надпис, x, y, половината ширина на надписа в cm).
+    """
+    _axis, a0, a1, c_lo, _c_hi, _normal = strips["A"]
+    text = f"{int(layout['dims']['a'])} cm"
+    half_w = TOP_DIM_FS * _text_width_per_pt(text) / 2 / pt_per_cm
+    has_waler = any(x - 0.5 <= (a0 + a1) / 2 <= x + w + 0.5 and y - 0.5 <= c_lo - TOP_WALER_T / 2 <= y + h + 0.5
+                    for x, y, w, h in walers)
+    y = c_lo - (TOP_WALER_T if has_waler else 0) - (0.75 * TOP_DIM_FS / 2 + TOP_SIDE_GAP_PT) / pt_per_cm
+    avoid = _prop_points(props)
+
+    def score(frac):
+        x = a0 + frac * (a1 - a0)
+        dist = min((math.hypot(x - px, y - py) for px, py in avoid), default=1e9) - half_w
+        return (min(dist, 25.0), -abs(frac - 0.5))
+
+    frac = max((0.5, 0.65, 0.35, 0.8, 0.2), key=score)
+    return text, a0 + frac * (a1 - a0), y, half_w
+
+
+TOP_DIM_GAP_PT = 6        # между буквата B1 и размера под нея
+
+
+def _column_b_dim(side_labels, pt_per_cm):
+    """
+    Размерът на страна B на колона (вертикален надпис) - под буквата B1, с малко разстояние, по средата ѝ
+    (потребителят, 09.11.2026: при тясна колона, напр. 215x25, „25 cm“ се застъпваше с B1).
+    Връща (x на средата, y на горния край).
+    """
+    lx, ly = next((x, y) for label, x, y in side_labels if label == "B1")
+    return lx, ly - (0.75 * TOP_SIDE_FS / 2 + TOP_DIM_GAP_PT) / pt_per_cm
 
 
 def _side_labels(layout, strips, walers, props, pt_per_cm):
@@ -444,11 +487,11 @@ def _side_labels(layout, strips, walers, props, pt_per_cm):
     def to_xy(axis, along, cross):
         return (along, cross) if axis == 'x' else (cross, along)
 
-    # точки по цялата дължина на всеки вертикализатор (не само основата му)
-    avoid = [(p0[0] + t * (p1[0] - p0[0]), p0[1] + t * (p1[1] - p0[1])) for p0, p1 in props for t in (0, 0.5, 1)]
-    if layout["type"] == "column":  # размерът на страна B е вдясно, в средата на B1
-        _ax, a0, a1, c_lo, _c_hi, _n = strips["B1"]
-        avoid.append((c_lo, (a0 + a1) / 2))
+    avoid = _prop_points(props)
+    if layout["type"] == "column":
+        # размерът на страна A е долу, на реда на буквата A (размерът на B е вдясно от буквата B1)
+        _text, dx, dy, half_w = _column_a_dim(layout, strips, walers, props, pt_per_cm)
+        avoid += [(dx - half_w, dy), (dx, dy), (dx + half_w, dy)]
     waler_boxes = [(x, y, x + w, y + h) for x, y, w, h in walers]
     labels = []
     for name, (axis, a0, a1, c_lo, c_hi, normal) in strips.items():
@@ -497,11 +540,18 @@ def generate_top_view_buf(layout, name="Елемент"):
 
     fig_w = 6.0
     # Букви на страните: мащабът е приблизително този без тях (широчината на фигурата е постоянна)
-    side_labels = _side_labels(layout, _face_strips(layout, place, poly), walers, props,
-                               fig_w * 72 / (max(xs) - min(xs) + 2 * TOP_MARGIN_CM))
+    label_pt_per_cm = fig_w * 72 / (max(xs) - min(xs) + 2 * TOP_MARGIN_CM)
+    side_labels = _side_labels(layout, _face_strips(layout, place, poly), walers, props, label_pt_per_cm)
     for _label, lx, ly in side_labels:
         xs += [lx - 5, lx + 5]
         ys += [ly - 5, ly + 5]
+    if layout["type"] == "column":
+        a_dim = _column_a_dim(layout, _face_strips(layout, place, poly), walers, props, label_pt_per_cm)
+        xs += [a_dim[1] - a_dim[3], a_dim[1] + a_dim[3]]
+        ys += [a_dim[2] - 5]
+        b_dim = _column_b_dim(side_labels, label_pt_per_cm)
+        b_text = f"{int(layout['dims']['b'])} cm"
+        ys += [b_dim[1] - TOP_DIM_FS * _text_width_per_pt(b_text) / label_pt_per_cm - 3]
     x_min, x_max = min(xs) - TOP_MARGIN_CM, max(xs) + TOP_MARGIN_CM
     y_min, y_max = min(ys) - TOP_MARGIN_CM, max(ys) + TOP_MARGIN_CM + 8  # място за надписите отгоре
 
@@ -583,15 +633,16 @@ def generate_top_view_buf(layout, name="Елемент"):
         ax.text(lx, ly, label, ha='center', va='center', fontsize=TOP_SIDE_FS, fontweight='bold',
                 color=TOP_SIDE_COLOR, zorder=7)
 
-    # Надписи: размер отгоре, наименование под него, размер вляво (вертикално)
+    # Надписи: наименование отгоре; при колона - размерът на A долу до буквата A, на B - вдясно (вертикално)
     top_y = max(ys)
     mid_x = (min(p[0] for p in poly) + max(p[0] for p in poly)) / 2
     if layout["type"] == "column":
         d = layout["dims"]
-        ax.text(mid_x, top_y + 7.5, f"{int(d['a'])} cm", ha='center', va='bottom', fontsize=9.5, fontweight='bold', color=TOP_TEXT)
-        # вдясно, където няма вертикализатор
-        ax.text(d["a"] + T + TOP_WALER_T + 4, d["b"] / 2, f"{int(d['b'])} cm", ha='left', va='center', fontsize=9.5,
-                fontweight='bold', color=TOP_TEXT, rotation=90)
+        text, dx, dy, _half_w = a_dim
+        ax.text(dx, dy, text, ha='center', va='center', fontsize=TOP_DIM_FS, fontweight='bold', color=TOP_TEXT)
+        # под буквата B1 (вдясно, където няма вертикализатор)
+        ax.text(b_dim[0], b_dim[1], b_text, ha='center', va='top',
+                fontsize=TOP_DIM_FS, fontweight='bold', color=TOP_TEXT, rotation=90)
     ax.text(mid_x, top_y + 2.5, _top_view_title(layout, name), ha='center', va='bottom', fontsize=11.5,
             fontweight='bold', color=TOP_TEXT)
 
