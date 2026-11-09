@@ -90,31 +90,31 @@ def check_element_dimensions(row):
         l1_cm = round(_row_float(row, "l1_cm", 200))
         l2_cm = round(_row_float(row, "l2_cm", 200))
         if l1_cm % 5 != 0 or l2_cm % 5 != 0:
-            warnings.append(f"• **{name}**: Раменете ({l1_cm} cm / {l2_cm} cm) съдържат стойности некратни на 5 cm.")
+            warnings.append(f"• **{name}**: Стените A / B ({l1_cm} cm / {l2_cm} cm) съдържат стойности некратни на 5 cm.")
     elif elem_type == "u_wall":
         l1_cm = round(_row_float(row, "l1_cm", 200))
         l2_cm = round(_row_float(row, "l2_cm", 200))
         l3_cm = round(_row_float(row, "l3_cm", 200))
         if l1_cm % 5 != 0 or l2_cm % 5 != 0 or l3_cm % 5 != 0:
-            warnings.append(f"• **{name}**: Раменете ({l1_cm}/{l2_cm}/{l3_cm} cm) съдържат стойности некратни на 5 cm.")
+            warnings.append(f"• **{name}**: Стените A / B / C ({l1_cm}/{l2_cm}/{l3_cm} cm) съдържат стойности некратни на 5 cm.")
     elif elem_type == "t_wall":
         l1_cm = round(_row_float(row, "l1_cm", 200))
         l2_cm = round(_row_float(row, "l2_cm", 200))
-        # реброто: „Дебелина рамо 2“, празна = общата „Дебелина“
+        # реброто: „Дебелина стена B“, празна = дебелина стена A
         t_cm = round(_row_float(row, "thickness2_cm", None) or _row_float(row, "thickness_cm", 25))
-        # Рамо 3: от левия край на полката до лявото лице на реброто; празно = реброто е в средата
+        # Стена C: от левия край на полката до лявото лице на реброто; празно = реброто е в средата
         l3_cm = round(_row_float(row, "l3_cm", 0))
         if l1_cm % 5 != 0 or l2_cm % 5 != 0:
-            warnings.append(f"• **{name}**: Страните A / B ({l1_cm} cm / {l2_cm} cm) съдържат стойности некратни на 5 cm.")
+            warnings.append(f"• **{name}**: Стените A / B ({l1_cm} cm / {l2_cm} cm) съдържат стойности некратни на 5 cm.")
         if l3_cm % 5 != 0:
-            warnings.append(f"• **{name}**: Мястото на реброто (Рамо 3 = {l3_cm} cm) не е кратно на 5 cm.")
+            warnings.append(f"• **{name}**: Мястото на реброто (Стена C = {l3_cm} cm) не е кратно на 5 cm.")
         # от всяка страна на реброто трябва да остане място за IN (10 cm) и поне 5 cm панел
         if l3_cm and (l3_cm - 10 < 5 or l1_cm - l3_cm - t_cm - 10 < 5):
             warnings.append(f"• **{name}**: Реброто на {l3_cm} cm от левия край не оставя място за ъгъл IN (10 cm) "
-                            f"и поне 5 cm панел от двете страни на полката ({l1_cm} cm) - проверете Рамо 3.")
+                            f"и поне 5 cm панел от двете страни на полката ({l1_cm} cm) - проверете Стена C.")
         if (not l3_cm and (l1_cm - t_cm) / 2 <= 10) or l2_cm <= 10:
             warnings.append(f"• **{name}**: Страна A ({l1_cm} cm) или B ({l2_cm} cm) е твърде къса за T-стена "
-                            f"с дебелина {t_cm} cm - проверете Рамо 1 (страна A) и Рамо 2 (страна B).")
+                            f"с дебелина {t_cm} cm - проверете Стена A и Стена B.")
 
     # Размерите са в см - стойност под 10 най-вероятно е въведена в метри (напр. 2.5 вместо 250)
     small = [f"{col} = {row.get(col):g}" for col in LENGTH_COLUMNS
@@ -135,28 +135,61 @@ DEFAULT_HEIGHT_CM = 270
 LENGTH_COLUMNS = ["width_cm", "length_cm", "thickness_cm", "l1_cm", "l2_cm", "l3_cm", "height_cm",
                   "thickness1_cm", "thickness2_cm", "thickness3_cm"]
 
-# Размерите, без които елементът не може да се сметне (Рамо 3 на Т-стена е по желание)
+# Размерите, без които елементът не може да се сметне (Стена C на Т-стена е по желание);
+# thickness_cm = „Дебелина стена A“ (thickness_to_walls)
 REQUIRED_DIMENSIONS = {
-    "column": [("thickness_cm", "Дебелина"), ("l1_cm", "Дължина"), ("height_cm", "Височина")],
-    "wall": [("thickness_cm", "Дебелина"), ("l1_cm", "Дължина"), ("height_cm", "Височина")],
-    "l_wall": [("thickness_cm", "Дебелина"), ("l1_cm", "Рамо 1"), ("l2_cm", "Рамо 2"), ("height_cm", "Височина")],
-    "u_wall": [("thickness_cm", "Дебелина"), ("l1_cm", "Рамо 1"), ("l2_cm", "Рамо 2"), ("l3_cm", "Рамо 3"),
+    "column": [("thickness_cm", "Дебелина стена A"), ("l1_cm", "Стена A"), ("height_cm", "Височина")],
+    "wall": [("thickness_cm", "Дебелина стена A"), ("l1_cm", "Стена A"), ("height_cm", "Височина")],
+    "l_wall": [("thickness_cm", "Дебелина стена A"), ("l1_cm", "Стена A"), ("l2_cm", "Стена B"),
                ("height_cm", "Височина")],
-    "t_wall": [("thickness_cm", "Дебелина"), ("l1_cm", "Рамо 1"), ("l2_cm", "Рамо 2"), ("height_cm", "Височина")],
+    "u_wall": [("thickness_cm", "Дебелина стена A"), ("l1_cm", "Стена A"), ("l2_cm", "Стена B"),
+               ("l3_cm", "Стена C"), ("height_cm", "Височина")],
+    "t_wall": [("thickness_cm", "Дебелина стена A"), ("l1_cm", "Стена A"), ("l2_cm", "Стена B"),
+               ("height_cm", "Височина")],
 }
 
-# Дебелина на рамо 1 / 2 / 3 (L-, П- и Т-стена) - само когато е различна от общата „Дебелина“
+# Дебелина стена A / B / C (thickness1_cm ...); общата „Дебелина“ (thickness_cm) не се показва
 ARM_THICKNESS_COLUMNS = ("thickness1_cm", "thickness2_cm", "thickness3_cm")
+# Стените на всеки тип, за които се показва дебелина (колона и права стена - само A)
+WALL_THICKNESS_COLUMNS = {"column": 1, "wall": 1, "l_wall": 2, "t_wall": 2, "u_wall": 3}
 
-# Колоните на таблицата по реда на показване; дължината на права стена и колона е в „Рамо 1 / Дължина“,
-# другият размер на колоната - в „Дебелина“
-TABLE_COLUMNS = ["type", "name", "count", "thickness_cm", "l1_cm", "l2_cm", "l3_cm", "height_cm",
-                 "thickness1_cm", "thickness2_cm", "thickness3_cm",
-                 "closed_end_1", "closed_end_2", "closed_end_3"]
+# Колоните на таблицата по реда на показване; дължината на права стена и колона е в „Стена A“,
+# другият размер на колоната - в „Дебелина стена A“; thickness_cm остава в данните (архив, Gemini), скрита
+TABLE_COLUMNS = ["type", "name", "count", "l1_cm", "thickness1_cm", "l2_cm", "thickness2_cm", "l3_cm",
+                 "thickness3_cm", "height_cm", "closed_end_1", "closed_end_2", "closed_end_3"]
+DATA_COLUMNS = TABLE_COLUMNS + ["thickness_cm"]
+
+def thickness_to_walls(df, migrate=True):
+    """
+    „Дебелина стена A / B / C“ вместо общата „Дебелина“ (потребителят, 09.11.2026). Празна „Дебелина
+    стена B / C“ = като стена A, така че една стойност в A е дебелината на целия елемент; B / C, равни на A,
+    се изчистват. Празна A се попълва от общата дебелина (thickness_cm - стари проекти, Gemini), после
+    thickness_cm = дебелина стена A - сметките са както досега.
+    migrate: стар ред с A, различна от общата - празните B / C са били общата дебелина и я получават
+    (при „Запази и Изчисли“ - не: там thickness_cm е старата A, а празните B / C са „като новата A“).
+    """
+    df = df.copy()
+    for col in ARM_THICKNESS_COLUMNS + ("thickness_cm",):
+        if col not in df.columns:
+            df[col] = None
+    common = pd.to_numeric(df["thickness_cm"], errors="coerce")
+    t1 = pd.to_numeric(df["thickness1_cm"], errors="coerce")
+    t1 = t1.where(t1 > 0, common)
+    n_walls = df["type"].map(WALL_THICKNESS_COLUMNS).fillna(1) if "type" in df.columns else 1
+    for i, col in enumerate(ARM_THICKNESS_COLUMNS[1:], 2):
+        value = pd.to_numeric(df[col], errors="coerce")
+        value = value.where(value > 0)
+        if migrate:
+            old_common = value.isna() & (n_walls >= i) & common.notna() & (common != t1)
+            value = value.where(~old_common, common)
+        df[col] = value.where(value != t1)
+    df["thickness1_cm"] = t1
+    df["thickness_cm"] = t1
+    return df
 
 def columns_to_cm(df):
     """Стари колони в метри (width_m, height_m ...) -> същите в сантиметри (width_cm, height_cm ...).
-    Старата „Дължина“ (length_cm, напр. от Gemini) отива в „Рамо 1 / Дължина“ (l1_cm),
+    Старата „Дължина“ (length_cm, напр. от Gemini) отива в „Стена A“ (l1_cm),
     старата „Ширина“ на колона (width_cm) - в „Дебелина“ (thickness_cm), ако там е празно или 0."""
     df = df.copy()
     for col_cm in LENGTH_COLUMNS:
@@ -201,7 +234,7 @@ def row_to_layout(elem_type, row):
     t_cm = _row_float(row, "thickness_cm", 25)
     closed = {"closed_end_1": _closed_end(row, "closed_end_1"),
               "closed_end_2": _closed_end(row, "closed_end_2")}
-    # празна „Дебелина рамо N“ = общата „Дебелина“ (само L-, П- и Т-стена)
+    # празна „Дебелина стена B / C“ = дебелина стена A (thickness_cm, thickness_to_walls)
     arms = {col: _row_float(row, col, None) for col in ("thickness1_cm", "thickness2_cm", "thickness3_cm")}
 
     if elem_type == "column":
@@ -278,7 +311,7 @@ def element_dims_and_area(elem_type, row):
     h = _row_float(row, "height_cm", 300)
     t = _row_float(row, "thickness_cm", 25)
     if elem_type in ("l_wall", "u_wall", "t_wall"):
-        # с „Дебелина рамо N“: една дебелина (B=30 см) или по рамена (рамо 1 дебелина 30 см, ...)
+        # с „Дебелина стена A / B / C“: една дебелина (B=30 см) или по стени (стена A дебелина 30 см, ...)
         layout = row_to_layout(elem_type, row)
         t = layout["dims"]["t1"]
         b_str = f"B={t:g} см" if thickness_label(layout).startswith("дебелина") else thickness_label(layout)
@@ -405,24 +438,48 @@ def format_element_label(elem_type, name):
         return name_str if (name_str.lower().startswith("t-стена") or name_str.lower().startswith("стена")) else f"T-Стена {name_str}".strip()
     return name_str
 
-MAX_PDF_PAGES = 20  # към Gemini отиват най-много толкова страници
 EXTRA_PAGE_MAX_PX = 3500  # страниците след първата - най-много толкова пиксела по дългата страна
+PREVIEW_MAX_PX = 1460  # картината на чертежа на екрана - колкото е най-широкото показване в Streamlit
 
 def process_uploaded_file(uploaded_file):
-    """Чертежът като списък от изображения: всички страници на PDF (детайлите, напр. страничен изглед с
-    височината, често са на следващите страници); първата - както досега, 200 dpi."""
+    """Чертежът като списък от изображения: всички страници на PDF, без ограничение на броя (детайлите,
+    напр. страничен изглед с височината, често са на следващите страници); първата - 200 dpi."""
     uploaded_file.seek(0)
     if uploaded_file.type == "application/pdf":
         doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
         images = []
-        for i in range(min(doc.page_count, MAX_PDF_PAGES)):
+        for i in range(doc.page_count):
             page = doc.load_page(i)
             dpi = 200 if i == 0 else min(200, int(EXTRA_PAGE_MAX_PX * 72 / max(page.rect.width, page.rect.height)))
             pix = page.get_pixmap(dpi=dpi)
-            images.append(Image.open(io.BytesIO(pix.tobytes("png"))))
+            # точките направо в картина (без запис в PNG и отваряне обратно - същите точки, по-бързо)
+            images.append(Image.frombytes("RGB", (pix.width, pix.height), pix.samples))
         return images
     else:
         return [Image.open(uploaded_file)]
+
+def uploaded_preview(uploaded_file):
+    """Първата страница за екрана (смалена до ширината на показване) и броят страници. Прави се веднъж
+    за качения файл и се пази, докато е качен - кликовете в таба не рисуват чертежа наново.
+    Към Gemini отиват пълните страници от process_uploaded_file."""
+    key = (uploaded_file.file_id, uploaded_file.size)
+    saved = st.session_state.get("upload_preview")
+    if saved and saved[0] == key:
+        return saved[1], saved[2]
+    uploaded_file.seek(0)
+    if uploaded_file.type == "application/pdf":
+        doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+        n_pages = doc.page_count
+        pix = doc.load_page(0).get_pixmap(dpi=200)
+        img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+    else:
+        n_pages = 1
+        img = Image.open(uploaded_file)
+        img.load()
+    if img.width > PREVIEW_MAX_PX:  # както st.image смалява сам при всяко показване
+        img = img.resize((PREVIEW_MAX_PX, int(img.height * PREVIEW_MAX_PX / img.width)), Image.BILINEAR)
+    st.session_state["upload_preview"] = (key, img, n_pages)
+    return img, n_pages
 
 def generate_word_offer(client_name, project_name, offer_date, offer_type, price_per_m2, detailed_rows, total_area, subtotal, vat_amount, grand_total):
     doc = docx.Document()
@@ -572,15 +629,13 @@ if "blueprint_data" not in st.session_state:
 if "used_model" not in st.session_state:
     st.session_state["used_model"] = None
 
-EMPTY_DF = pd.DataFrame(columns=TABLE_COLUMNS)
+EMPTY_DF = pd.DataFrame(columns=DATA_COLUMNS)
 
 if "edited_df" not in st.session_state:
     st.session_state["edited_df"] = EMPTY_DF.copy()
 else:
-    st.session_state["edited_df"] = columns_to_cm(st.session_state["edited_df"])
-    for _col in ARM_THICKNESS_COLUMNS:  # таблица отпреди колоните „Дебелина рамо 1 / 2 / 3“
-        if _col not in st.session_state["edited_df"].columns:
-            st.session_state["edited_df"][_col] = None
+    # стари колони и обща дебелина (архив, Gemini) -> „Дебелина стена A / B / C“
+    st.session_state["edited_df"] = thickness_to_walls(columns_to_cm(st.session_state["edited_df"]))
 
 with st.sidebar:
     st.header("⚙️ Настройки")
@@ -653,6 +708,9 @@ STD_HEIGHT_CHOICES = ["270 см", "300 см"]
 def open_project(pid):
     """Зарежда проекта в табовете: таблицата с елементите и стандартната височина."""
     project = projects_store.get_project(st.session_state["projects"], pid)
+    if project is None:  # друго изпълнение на страницата е обновило списъка от Google преди записа
+        st.session_state["open_project_failed"] = True
+        return
     st.session_state["current_project"] = pid
     elements = project["elements"]
     st.session_state["edited_df"] = EMPTY_DF.copy() if elements is None else elements.copy()
@@ -719,6 +777,11 @@ def render_projects_page():
                 projects_store.refresh(st.session_state["projects"])
             except Exception as exc:  # noqa: BLE001
                 st.error(f"Списъкът не може да се зареди от Google: {exc}")
+
+        if st.session_state.pop("open_project_failed", False):
+            st.warning("Презаредете страницата (F5). Проектът е създаден и записан, но не можа да се отвори "
+                       "веднага, защото бутонът „Създай и отвори“ беше натиснат твърде бързо след въвеждането "
+                       "на името. Следващия път изчакайте 2-3 секунди, преди да натиснете бутона.")
 
         rows = projects_store.project_rows(st.session_state["projects"])
         if not rows:
@@ -788,17 +851,17 @@ with tab1:
             with col_img:
                 st.subheader("🖼️ Преглед на файла")
                 try:
-                    processed_img = process_uploaded_file(uploaded_file)
-                    n_pages = len(processed_img)
-                    st.image(processed_img[0], use_container_width=True,
+                    preview_img, n_pages = uploaded_preview(uploaded_file)
+                    st.image(preview_img, use_container_width=True,
                              caption="Качен чертеж" + (f" - стр. 1 от {n_pages}; към AI отиват всички {n_pages}"
                                                        if n_pages > 1 else ""))
+                    file_ok = True
                 except Exception as e:
                     st.error(f"Грешка при зареждането: {e}")
-                    processed_img = None
+                    file_ok = False
 
             with col_actions:
-                st.subheader("🤖 AI Разчитане")
+                st.subheader("AI Разчитане")
                 
                 selected_model = st.selectbox(
                     "Избери AI модел за разчитане:",
@@ -816,6 +879,13 @@ with tab1:
                     st.warning("⚠️ Моля, въведете Gemini API Key в страничното меню.")
                 else:
                     if st.button("🔍 Разчети чертежа с Vision AI", type="primary", use_container_width=True):
+                        # пълните страници за Gemini се рисуват само тук, не при всеки клик
+                        processed_img = None
+                        if file_ok:
+                            try:
+                                processed_img = process_uploaded_file(uploaded_file)
+                            except Exception as e:
+                                st.error(f"Грешка при зареждането: {e}")
                         if processed_img:
                             with st.spinner("Извличане на вертикални кофражни елементи..."):
                                 try:
@@ -830,10 +900,10 @@ with tab1:
                                     elements_list = blueprint_data.get("elements", [])
                                     
                                     df_ai = columns_to_cm(pd.DataFrame(elements_list))
-                                    for col in TABLE_COLUMNS:
+                                    for col in DATA_COLUMNS:
                                         if col not in df_ai.columns:
                                             df_ai[col] = True if col in CLOSED_END_COLUMNS else None
-                                    st.session_state["edited_df"] = df_ai
+                                    st.session_state["edited_df"] = thickness_to_walls(df_ai)
                                     st.success(f"✅ Готово! Разчетено с: **{used_model}**")
                                     # противоречия и несигурности в чертежа - потребителят проверява таблицата
                                     for note in blueprint_data.get("notes") or []:
@@ -845,14 +915,14 @@ with tab1:
         st.markdown(
             "📝 **Инструкция за попълване в таблицата по-долу:**\n"
             "- Изберете **тип елемент** (`wall` - стена, `column` - колона, `l_wall` - L-стена, `u_wall` - П/U-стена).\n"
-            "- Всички размери (дебелина, рамена, височина) са в **сантиметри**.\n"
-            "- За **права стена (`wall`)**: попълнете **Рамо 1 / Дължина** и `thickness_cm` (дебелина).\n"
-            "- За **колона (`column`)**: попълнете **Рамо 1 / Дължина** и `thickness_cm` (дебелина) - колона 30x50: дължина 50, дебелина 30.\n"
-            "- За **L-стена (`l_wall`)**: попълнете `l1_cm` (рамо 1), `l2_cm` (рамо 2) и `thickness_cm` (дебелина).\n"
-            "- За **П/U-стена (`u_wall`)**: попълнете `l1_cm` (рамо 1), `l2_cm` (рамо 2), `l3_cm` (рамо 3) и `thickness_cm` (дебелина).\n"
-            "- За **T-стена (`t_wall`)**: **Рамо 1 = страна A** (цялата полка), **Рамо 2 = страна B / B1** (реброто, от полката до края му) и `thickness_cm` (дебелина). **Рамо 3** - мястото на реброто: от левия край на полката до лявото лице на реброто; празно = реброто е в средата на полката. Реброто може да е и до самия край - остава Т-стена. Край 1 е десният край на полката, край 2 - левият, **Затворен край 3** - краят на реброто (само за T-стена).\n"
-            "- **Дебелина рамо 1 / 2 / 3** (L-, П- и T-стена): попълва се само когато рамото е с различна дебелина от `Дебелина`; празното поле = `Дебелина`. При T-стена рамо 1 е полката, рамо 2 - реброто.\n"
-            "- **Затворен край 1 / Затворен край 2** (отметки) за стени, L- и П/U-стени: челните краища, затворени с панел колкото дебелината. Край 1 е краят на рамо 1 (при права стена - десният), край 2 - краят на последното рамо (при права стена - левият). **Всички краища са затворени по подразбиране** - за отворен край махнете отметката.\n"
+            "- Всички размери (стени, дебелини, височина) са в **сантиметри**.\n"
+            "- За **права стена (`wall`)**: попълнете **Стена A** (дължината) и **Дебелина стена A**.\n"
+            "- За **колона (`column`)**: попълнете **Стена A** и **Дебелина стена A** - колона 30x50: стена A 50, дебелина 30.\n"
+            "- За **L-стена (`l_wall`)**: попълнете **Стена A**, **Стена B** и **Дебелина стена A**.\n"
+            "- За **П/U-стена (`u_wall`)**: попълнете **Стена A**, **Стена B**, **Стена C** и **Дебелина стена A**.\n"
+            "- За **T-стена (`t_wall`)**: **Стена A** (цялата полка), **Стена B** (реброто, от полката до края му) и **Дебелина стена A**. **Стена C** - мястото на реброто: от левия край на полката до лявото лице на реброто; празно = реброто е в средата на полката. Реброто може да е и до самия край - остава Т-стена. Край 1 е десният край на полката, край 2 - левият, **Затворен край 3** - краят на реброто (само за T-стена).\n"
+            "- **Дебелина стена A** е дебелината на целия елемент. **Дебелина стена B / C** (L-, П- и T-стена) се попълва само когато стената е с различна дебелина; празното поле = като стена A (равна на A се изчиства). При T-стена стена A е полката, стена B - реброто.\n"
+            "- **Затворен край 1 / Затворен край 2** (отметки) за стени, L- и П/U-стени: челните краища, затворени с панел колкото дебелината. Край 1 е краят на стена A (при права стена - десният), край 2 - краят на последната стена (при права стена - левият). **Всички краища са затворени по подразбиране** - за отворен край махнете отметката.\n"
             "- Непотребните полета за съответния тип могат да се оставят празни — системата автоматично игнорира празни клетки без грешки!"
         )
 
@@ -905,19 +975,20 @@ with tab1:
                 "type": st.column_config.SelectboxColumn("Тип елемент", options=["column", "wall", "l_wall", "u_wall", "t_wall"], required=True, default="wall", width="auto"),
                 "name": st.column_config.TextColumn("Наименование / Маркировка", width="auto"),
                 "count": st.column_config.NumberColumn("Брой", min_value=1, step=1, default=1, width="auto"),
-                "thickness_cm": st.column_config.NumberColumn("Дебелина (см)", format="%g", width="auto"),
-                "l1_cm": st.column_config.NumberColumn("Рамо 1 / Дължина (см)", format="%g", width="auto"),
-                "l2_cm": st.column_config.NumberColumn("Рамо 2 (см)", format="%g", width="auto"),
-                "l3_cm": st.column_config.NumberColumn("Рамо 3 (см)", format="%g", width="auto",
+                "l1_cm": st.column_config.NumberColumn("Стена A (см)", format="%g", width="auto",
+                                                       help="При права стена и колона - дължината"),
+                "thickness1_cm": st.column_config.NumberColumn("Дебелина стена A (см)", format="%g", width="auto"),
+                "l2_cm": st.column_config.NumberColumn("Стена B (см)", format="%g", width="auto"),
+                "thickness2_cm": st.column_config.NumberColumn("Дебелина стена B (см)", format="%g", width="auto",
+                                                               help="L-, П- и Т-стена; празна = като стена A "
+                                                                    "(попълва се само когато е различна)"),
+                "l3_cm": st.column_config.NumberColumn("Стена C (см)", format="%g", width="auto",
                                                        help="При Т-стена: от левия край на полката до лявото лице "
                                                             "на реброто; празно = реброто е в средата"),
+                "thickness3_cm": st.column_config.NumberColumn("Дебелина стена C (см)", format="%g", width="auto",
+                                                               help="Само за П-стена; празна = като стена A "
+                                                                    "(попълва се само когато е различна)"),
                 "height_cm": st.column_config.NumberColumn("Височина (см)", format="%g", width="auto"),
-                "thickness1_cm": st.column_config.NumberColumn("Дебелина рамо 1 (см)", format="%g", width="auto",
-                                                               help="Само ако е различна от „Дебелина“; празна = „Дебелина“"),
-                "thickness2_cm": st.column_config.NumberColumn("Дебелина рамо 2 (см)", format="%g", width="auto",
-                                                               help="Само ако е различна от „Дебелина“; празна = „Дебелина“"),
-                "thickness3_cm": st.column_config.NumberColumn("Дебелина рамо 3 (см)", format="%g", width="auto",
-                                                               help="Само за П-стена; празна = „Дебелина“"),
                 "closed_end_1": st.column_config.CheckboxColumn("Затворен край 1", default=True, width="auto"),
                 "closed_end_2": st.column_config.CheckboxColumn("Затворен край 2", default=True, width="auto"),
                 "closed_end_3": st.column_config.CheckboxColumn("Затворен край 3 (само T-стена)", default=True, width="auto")
@@ -929,7 +1000,7 @@ with tab1:
         
         submit_btn = st.form_submit_button("💾 Запази и Изчисли", type="primary", use_container_width=True)
         if submit_btn:
-            st.session_state["edited_df"] = edited_grid
+            st.session_state["edited_df"] = thickness_to_walls(edited_grid, migrate=False)
             save_current_project()
             st.session_state.pop("excel_bytes", None)  # старият Excel вече не отговаря на таблицата
             st.success("✅ Данните са запазени и преизчислени успешно! Можете да проверите резултатите в следващите табове.")
@@ -945,10 +1016,11 @@ with tab1:
     for idx, row in df_preview.iterrows():
         render_element_preview(idx, row)
 
-with tab2:
+# Табове 2-4: всеки е отделна част (st.fragment) - поле или бутон в таба презарежда само него.
+# Таблицата се сменя само в таб 1, а това презарежда цялата страница и всички табове.
+@st.fragment
+def render_specification_tab(df_calc):
     st.header("2. Спецификация на кофражните елементи и панели TEKO")
-    df_calc = fill_default_height(st.session_state["edited_df"],
-                                  st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM))
     
     if df_calc.empty or len(df_calc) == 0:
         st.info("ℹ️ Въведете елементи в Таб 1 и натиснете 'Запази и Изчисли'.")
@@ -1054,7 +1126,7 @@ with tab2:
             st.dataframe(df_panels_sum, use_container_width=True)
 
         with col_p2:
-            st.subheader(f"金具 Аксесоари и Ъгли (Общо: {total_acc_weight:.2f} kg)")
+            st.subheader(f"Аксесоари и Ъгли (Общо: {total_acc_weight:.2f} kg)")
             st.dataframe(df_acc_sum, use_container_width=True)
 
         st.divider()
@@ -1073,7 +1145,8 @@ with tab2:
                 use_container_width=True
             )
 
-with tab3:
+@st.fragment
+def render_pdf_tab(df_calc, current):
     st.header("3. Генериране на PDF чертежи и спецификации")
     if df_calc.empty or len(df_calc) == 0:
         st.info("ℹ️ Въведете елементи в Таб 1, за да генерирате чертежи.")
@@ -1086,11 +1159,11 @@ with tab3:
             with st.spinner("Генериране на векторни чертежи и PDF документ..."):
                 pdf_elements = build_drawing_elements(df_calc)
 
+                # общата сметка - сборът от сметките на елементите (същите числа като в таб 2)
                 project_full_bom = {}
-                for p_code, p_qty in project_panels_summary.items():
-                    project_full_bom[p_code] = project_full_bom.get(p_code, 0) + p_qty
-                for acc_code, acc_qty in project_accessories_summary.items():
-                    project_full_bom[acc_code] = project_full_bom.get(acc_code, 0) + acc_qty
+                for elem in pdf_elements:
+                    for code, qty in elem["bom"].items():
+                        project_full_bom[code] = project_full_bom.get(code, 0) + qty
 
                 proj_info = {
                     "project": proj_name_input,
@@ -1107,7 +1180,8 @@ with tab3:
                     use_container_width=True
                 )
 
-with tab4:
+@st.fragment
+def render_offer_tab(df_calc, current):
     st.header("4. Търговска оферта")
     if df_calc.empty or len(df_calc) == 0:
         st.info("ℹ️ Въведете елементи в Таб 1, за да генерирате оферта.")
@@ -1123,6 +1197,7 @@ with tab4:
             price_m2 = st.number_input("Цена на m² (€):", min_value=0.0, value=default_price, step=0.5)
 
         if st.button("📄 Създай Word оферта", type="primary"):
+            total_a = sum(element_dims_and_area(str(row.get("type", "wall")), row)[1] for _, row in df_calc.iterrows())
             subtotal_val = total_a * price_m2
             vat_val = subtotal_val * 0.20
             grand_total_val = subtotal_val + vat_val
@@ -1155,3 +1230,13 @@ with tab4:
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 use_container_width=True
             )
+
+
+df_calc = fill_default_height(st.session_state["edited_df"],
+                              st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM))
+with tab2:
+    render_specification_tab(df_calc)
+with tab3:
+    render_pdf_tab(df_calc, current)
+with tab4:
+    render_offer_tab(df_calc, current)
