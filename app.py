@@ -81,7 +81,7 @@ def check_element_dimensions(row):
         w_cm = round(_row_float(row, "thickness_cm", 25))
         l_cm = round(_row_float(row, "l1_cm", 50))
         if w_cm % 5 != 0 or l_cm % 5 != 0:
-            warnings.append(f"• **{name}**: Размерите ({w_cm}x{l_cm} cm) не са кратни на 5 cm. Запълва се с компенсатор TC 5.")
+            warnings.append(f"• **{name}**: Размерите ({l_cm}x{w_cm} cm) не са кратни на 5 cm. Запълва се с компенсатор TC 5.")
     elif elem_type == "wall":
         l_cm = round(_row_float(row, "l1_cm", 500))
         if l_cm % 5 != 0:
@@ -238,9 +238,10 @@ def row_to_layout(elem_type, row):
     arms = {col: _row_float(row, col, None) for col in ("thickness1_cm", "thickness2_cm", "thickness3_cm")}
 
     if elem_type == "column":
+        # страна A = „Стена A“ (l1_cm), страна B = „Дебелина стена A“: колона 80x30 - A 80, B 30
         return layout_element("column", h_cm,
-                              width_cm=t_cm,
-                              length_cm=_row_float(row, "l1_cm", 50))
+                              width_cm=_row_float(row, "l1_cm", 50),
+                              length_cm=t_cm)
     elif elem_type == "wall":
         return layout_element("wall", h_cm, length_cm=_row_float(row, "l1_cm", 500),
                               thickness_cm=t_cm, **closed)
@@ -318,7 +319,7 @@ def element_dims_and_area(elem_type, row):
     if elem_type == "column":
         w, l = t, _row_float(row, "l1_cm", 50)
         perimeter = 2 * (w + l)
-        dim_str = f"{w:g}x{l:g} см, H={h:g} см"
+        dim_str = f"{l:g}x{w:g} см, H={h:g} см"   # A x B, както на чертежа
     elif elem_type == "wall":
         l = _row_float(row, "l1_cm", 500)
         perimeter = 2 * l
@@ -917,7 +918,7 @@ with tab1:
             "- Изберете **тип елемент** (`wall` - стена, `column` - колона, `l_wall` - L-стена, `u_wall` - П/U-стена).\n"
             "- Всички размери (стени, дебелини, височина) са в **сантиметри**.\n"
             "- За **права стена (`wall`)**: попълнете **Стена A** (дължината) и **Дебелина стена A**.\n"
-            "- За **колона (`column`)**: попълнете **Стена A** и **Дебелина стена A** - колона 30x50: стена A 50, дебелина 30.\n"
+            "- За **колона (`column`)**: попълнете **Стена A** и **Дебелина стена A** - колона 50x30: стена A 50 (страна A на чертежа), дебелина 30 (страна B).\n"
             "- За **L-стена (`l_wall`)**: попълнете **Стена A**, **Стена B** и **Дебелина стена A**.\n"
             "- За **П/U-стена (`u_wall`)**: попълнете **Стена A**, **Стена B**, **Стена C** и **Дебелина стена A**.\n"
             "- За **T-стена (`t_wall`)**: **Стена A** (цялата полка), **Стена B** (реброто, от полката до края му) и **Дебелина стена A**. **Стена C** - мястото на реброто: от левия край на полката до лявото лице на реброто; празно = реброто е в средата на полката. Реброто може да е и до самия край - остава Т-стена. Край 1 е десният край на полката, край 2 - левият, **Затворен край 3** - краят на реброто (само за T-стена).\n"
