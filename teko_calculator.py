@@ -40,26 +40,30 @@ STANDING_REMAINDERS = {
     75: [35, 20, 20]
 }
 
+# Остатък в ред легнали 60 след 150 и 120. Панел TK 60/35 няма, компенсатор в ред 60 няма (TC 60/x няма):
+# 35 = 20 + 15 (TK 60/20 + TK 60/15); 10 и 15 са панели TK 60/10, TK 60/15 (потребителят, 09.11.2026).
 LYING_REMAINDERS = {
+    35: [20, 15],
     60: [30, 30],
-    65: [35, 30],
-    70: [35, 35],
-    75: [35, 20, 20],
-    80: [35, 25, 20],
-    85: [35, 30, 20],
+    65: [25, 20, 20],
+    70: [30, 20, 20],
+    75: [25, 25, 25],
+    80: [30, 30, 20],
+    85: [30, 30, 25],
     90: [30, 30, 30],
-    95: [35, 35, 25],
-    100: [35, 35, 30],
-    105: [35, 35, 35],
-    110: [35, 35, 20, 20],
-    115: [35, 30, 30, 20]
+    95: [25, 25, 25, 20],
+    100: [30, 30, 20, 20],
+    105: [30, 25, 25, 25],
+    110: [30, 30, 30, 20],
+    115: [30, 30, 30, 25],
+    125: [30, 30, 30, 20, 15],
 }
 
 def format_panel_code(width_cm, height_cm):
     """
     Генерира каталожното наименование според официалната спецификация ТЕКО.
     Полегнал ред (височина 60): ширини 150/120 са полегнали големи панели,
-    останалите са TK 60/x (TC 60/x за компенсаторите до 15 см).
+    останалите са TK 60/x (и 10 / 15 - панели TK 60/10, TK 60/15; компенсатори TC 60/x няма).
     Ред 20-35 см (полегнали панели): TK по-голям/по-малък размер, напр. 150/20, 20/15.
     Ред 5/10/15 см - компенсатор отгоре: TC 150/x.
     """
@@ -72,8 +76,6 @@ def format_panel_code(width_cm, height_cm):
             return "TK 150/60 (полегнал)"
         if width_cm == 120:
             return "TK 120/60 (полегнал)"
-        if width_cm <= 15:
-            return f"TC 60/{width_cm}"
         return f"TK 60/{width_cm}"
 
     if width_cm <= 15 and height_cm in [120, 150]:
@@ -96,7 +98,7 @@ STRIP_PIECES = {
     20: [150, 120, 60, 20, 15],   # TK 150/20, 120/20, 60/20, 20/20, 20/15
     25: [150, 120, 60, 40, 30],   # TK 150/25, 120/25, 60/25, 40/25, 30/25
     30: [150, 120, 60, 25],       # TK 150/30, 120/30, 60/30, 30/25
-    35: [150, 120, 60],           # TK 150/35, 120/35, 60/35
+    35: [150, 120],               # TK 150/35, 120/35 (TK 60/35 няма)
 }
 
 # Ред панели с височина 15 см (TK 60/15, 20/15, 15/15) - не компенсатор (Solar farm Tipperary):
@@ -188,9 +190,19 @@ def _solve_width_standing(width_cm):
     return [60] * count_60 + STANDING_REMAINDERS[rem]
 
 def _solve_width_lying(width_cm):
-    """Полегнал ред (H=60): първо полегнали 150 и 120, после малки модули."""
+    """
+    Полегнал ред (H=60): първо полегнали 150 и 120, после малки модули (LYING_REMAINDERS).
+    Остатък 5 (60/5 няма): 150 + 5 -> 120 + 20 + 15, 120 + 5 -> 30 + 30 + 30 + 20 + 15;
+    само 5 см не се покрива точно (панелът 10 излиза) - layout_element сменя основата.
+    """
     count_150, rem = divmod(width_cm, 150)
     count_120, rem = divmod(rem, 120)
+    if rem == 5 and count_150:
+        count_150, count_120, rem = count_150 - 1, count_120 + 1, 35
+    elif rem == 5 and count_120:
+        count_120, rem = count_120 - 1, 125
+    elif rem == 5:
+        return [10]
     small = LYING_REMAINDERS.get(rem) or STANDING_REMAINDERS[rem]
     return [150] * count_150 + [120] * count_120 + small
 
@@ -260,8 +272,8 @@ def _face_rows(segments, levels, flip=()):
     return rows
 
 def _strip_misses(faces, levels):
-    """Брой сегменти, които някой ред легнали 20-35 см не покрива точно (последният панел излиза)."""
-    strips = [h for h in levels if h in STRIP_PIECES or isinstance(h, PanelRow)]
+    """Брой сегменти, които някой ред легнали 20-60 см не покрива точно (последният панел излиза)."""
+    strips = [h for h in levels if h in STRIP_PIECES or isinstance(h, PanelRow) or h == 60]
     return sum(1 for face in faces for seg in face["segments"] if seg > 0
                and any(sum(solve_width_cm(seg, h)) != _round_up_to_5(seg) for h in strips))
 
@@ -279,11 +291,11 @@ def arm_thicknesses(layout):
     return [d[k] for k in ("t1", "t2", "t3") if k in d]
 
 def thickness_label(layout, unit=" см"):
-    """„дебелина 25 см“; при различни рамена - „рамо 1 дебелина 30 см, рамо 2 дебелина 25 см“."""
+    """„дебелина 25 см“; при различни стени - „стена A дебелина 30 см, стена B дебелина 25 см“."""
     arms = arm_thicknesses(layout) or [layout["thickness_cm"]]
     if len(set(arms)) == 1:
         return f"дебелина {arms[0]:g}{unit}"
-    return ", ".join(f"рамо {i} дебелина {t:g}{unit}" for i, t in enumerate(arms, 1))
+    return ", ".join(f"стена {'ABC'[i]} дебелина {t:g}{unit}" for i, t in enumerate(arms))
 
 def t_wall_middle_cm(l1_cm, stem_thickness_cm):
     """Ребро в средата на полката: от левия край до лявото лице на реброто, надолу до 5 см."""
