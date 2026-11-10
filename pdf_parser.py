@@ -1,7 +1,43 @@
 import pdfplumber
 import re
 import os
-from teko_calculator import calculate_column, calculate_wall
+from teko_calculator import layout_element, count_panels
+from accessories_calculator import calculate_accessories
+
+# Не се ползва от app.py (там чертежите се разчитат с Gemini); поддържа се актуален по правилата в CLAUDE.md:
+# размерите в см, разположението и аксесоарите - от layout_element() и calculate_accessories().
+DEFAULT_HEIGHT_CM = 270  # стандартната височина, както в app.py
+
+
+def _column_element(a_cm, b_cm, height_cm, count):
+    """Колона: страна A = дължината (стена A), страна B = дебелината - както в app.py."""
+    layout = layout_element("column", height_cm, width_cm=a_cm, length_cm=b_cm)
+    acc = calculate_accessories("column", a_cm, b_cm, height_cm, layout["faces"][0]["rows"][0],
+                                layout["height_levels"], layout=layout)
+    return {
+        "type": "Колона",
+        "dimensions": f"{a_cm:g}x{b_cm:g} см, H={height_cm:g} см",   # A x B, както на чертежа
+        "count": count,
+        "area_m2": round(2 * (a_cm + b_cm) * height_cm / 10000.0 * count, 2),
+        "panels_spec": count_panels(layout, count),
+        "accessories": {code: qty * count for code, qty in acc["bom_summary"].items()},
+    }
+
+
+def _wall_element(length_cm, thickness_cm, height_cm, count):
+    """Права стена: двата края затворени (по подразбиране, както в таблицата на app.py)."""
+    layout = layout_element("wall", height_cm, length_cm=length_cm, thickness_cm=thickness_cm,
+                            closed_end_1=True, closed_end_2=True)
+    acc = calculate_accessories("wall", length_cm, thickness_cm, height_cm, layout["faces"][0]["rows"][0],
+                                layout["height_levels"], layout=layout)
+    return {
+        "type": "Права Стена / Шайба",
+        "dimensions": f"L={length_cm:g} см, B={thickness_cm:g} см, H={height_cm:g} см",
+        "count": count,
+        "area_m2": round(2 * length_cm * height_cm / 10000.0 * count, 2),   # площта - както в офертата
+        "panels_spec": count_panels(layout, count),
+        "accessories": {code: qty * count for code, qty in acc["bom_summary"].items()},
+    }
 
 def create_sample_pdf(filename="sample_drawing.pdf"):
     """Генерира примерен PDF файл със спецификация."""
@@ -22,10 +58,11 @@ def create_sample_pdf(filename="sample_drawing.pdf"):
     except Exception:
         pass
 
-def parse_pdf_elements(filename="sample_drawing.pdf", default_height=3.00):
+def parse_pdf_elements(filename="sample_drawing.pdf", default_height_cm=DEFAULT_HEIGHT_CM):
     """
     Универсален парсер за PDF чертежи.
     Декодира CAD CID шрифтове, разпознава размери '04 04' (40x40) и стандартни надписи.
+    Връща елементите (колони и прави стени) с размери в см, панели и аксесоари по сегашните правила.
     """
     print(f"[PDF Parser] Сканиране на PDF файла: '{filename}'...")
     
@@ -97,10 +134,11 @@ def parse_pdf_elements(filename="sample_drawing.pdf", default_height=3.00):
 
     elements = []
     for (w_val, l_val), count in dim_counts.items():
+        w_cm, l_cm = round(w_val * 100, 1), round(l_val * 100, 1)   # засечените размери са в m
         if l_val / w_val <= 3.0:
-            elem = calculate_column(width_m=w_val, length_m=l_val, height_m=default_height, count=count)
+            elem = _column_element(l_cm, w_cm, default_height_cm, count)
         else:
-            elem = calculate_wall(length_m=l_val, thickness_m=w_val, height_m=default_height, count=count)
+            elem = _wall_element(l_cm, w_cm, default_height_cm, count)
         elements.append(elem)
 
     print(f"[PDF Parser] Успешно намерени {sum(dim_counts.values())} конструктивни елемента от чертежа.")
