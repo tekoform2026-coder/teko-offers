@@ -117,55 +117,73 @@ def calculate_walers(layout: Dict[str, Any]) -> Dict[str, Any]:
 # ==========================================
 # 2. ИЗЧИСЛЯВАНЕ НА ШПИЛКИ И ГАЙКИ (TIE RODS & NUTS)
 # ==========================================
+TIE_FACES_PREFIXES = ("A1", "B1", "C1")  # вътрешните страни на L-, П- и Т-стена
+TIE_RODS_PER_M2 = 1.35                   # шпилки на m² кофраж (потребителят, 10.11.2026)
+
+
+def _tie_faces(layout: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Страните, чиито панели се броят за шпилки: шпилката минава през стената там, където два панела
+    стоят един срещу друг - по една на панел от вътрешната страна (10.11.2026).
+    Права стена - A (= A1); колона - A и B; L / П / Т - A1, B1, C1 (без панелите до EX и челата).
+    """
+    faces = [f for f in layout["faces"] if f["length_cm"] > NARROW_LIMIT_CM]
+    if layout["type"] == "column":
+        return [f for f in faces if f["name"] in ("A", "B")]
+    if layout["type"] == "wall":
+        return [f for f in faces if f["name"] == "A"]
+    return [f for f in faces if f["name"].startswith(TIE_FACES_PREFIXES)]
+
+
+def _row_at_height(levels: List[float], height_cm: float) -> int:
+    """Индекс на реда панели (отдолу нагоре), в който е височината."""
+    top = 0.0
+    for i, level in enumerate(levels):
+        top += level
+        if height_cm < top:
+            return i
+    return len(levels) - 1
+
+
 def calculate_tie_rods(
     wall_type: str,
     dim_a_cm: float,
     dim_b_cm: float,
     height_cm: float,
     width_breakdown_a: List[float] = None,
-    first_row_panel_type: str = "150x60_standing"
+    first_row_panel_type: str = "150x60_standing",
+    layout: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
-    Изчислява броя анкерни шпилки и затягащи гайки според нивалата на анкериране (30, 90, 150 cm и т.н.)
-    и броя вертикални модули по дължината на стената.
+    Шпилки и гайки (10.11.2026): по-голямото от 1,35 на m² кофраж (всички страни на layout, вкл.
+    челата, закръглено нагоре) и реденето по панели - на всяко ниво на анкериране (както ригелите -
+    30, 90, 150 cm и т.н.) по една шпилка на всеки панел от страните на _tie_faces. Елемент без шпилки
+    по панели (без нива, страни до 35 cm) - без шпилки. Гайките са 2 на шпилка.
+    Без layout - права стена с панелите width_breakdown_a.
     """
     a = float(dim_a_cm or 0)
     b = float(dim_b_cm or a)
     h = float(height_cm or 0)
-    
-    is_column = "Колона" in wall_type or "колона" in wall_type.lower()
+    empty = {"bom": {}, "rods_count": 0, "nuts_count": 0, "levels_count": 0}
 
-    # 1. Тесни елементи (<= 35 cm) нямат нужда от преминаващи шпилки
-    if a <= 35.0 and (is_column or b <= 35.0):
-        return {"bom": {}, "rods_count": 0, "nuts_count": 0, "levels_count": 0}
-
-    # 2. Височинните нива за анкериране съвпадат с ригелите
+    # Височинните нива за анкериране съвпадат с ригелите
     first_row_h = 120 if "120x60_standing" in first_row_panel_type else 150
     tie_heights = waler_heights_cm(h, first_row_h)
     num_levels = len(tie_heights)
-
     if num_levels == 0:
-        return {"bom": {}, "rods_count": 0, "nuts_count": 0, "levels_count": 0}
+        return empty
 
-    # 3. Преброяване на анкерните оси по дължината
-    def get_tie_cols(width_cm, w_breakdown):
-        if width_cm <= 35.0:
-            return 0
-        if w_breakdown and len(w_breakdown) > 0:
-            return len(w_breakdown)
-        return max(1, int(math.ceil(width_cm / 60.0)))
-
-    w_type_lower = str(wall_type).lower()
-    if is_column:
-        cols_a = get_tie_cols(a, width_breakdown_a)
-        total_rods = num_levels * cols_a
-    elif "l" in w_type_lower or "l-образна" in w_type_lower or "t-образна" in w_type_lower:
-        cols_a = get_tie_cols(a, width_breakdown_a)
-        cols_b = get_tie_cols(b, None)
-        total_rods = num_levels * (cols_a + cols_b)
+    if layout:
+        levels = layout["height_levels"]
+        faces = _tie_faces(layout)
+        by_panels = sum(len(face["rows"][_row_at_height(levels, y)]) for y in tie_heights for face in faces)
+        area_m2 = sum(face["length_cm"] for face in layout["faces"]) * h / 10000.0
+        by_area = int(math.ceil(round(TIE_RODS_PER_M2 * area_m2, 6))) if by_panels else 0
+        total_rods = max(by_area, by_panels)
     else:
-        cols_a = get_tie_cols(a, width_breakdown_a)
-        total_rods = num_levels * cols_a
+        if a <= NARROW_LIMIT_CM:
+            return empty
+        total_rods = num_levels * len(width_breakdown_a or [a])
 
     # За всяка шпилка са необходими 2 броя гайки
     total_nuts = total_rods * 2
@@ -227,19 +245,20 @@ def ex_corner_total(height_cm: float, positions: int) -> int:
 
 def in_corner_pieces(height_cm: float) -> List[int]:
     """
-    Парчета IN (височини в cm, отдолу нагоре) на една позиция:
-    до 120 cm - IN120, до 150 cm - IN150, до 270 cm - IN150 + IN120,
-    над 270 cm - продължава се редом с IN150, IN120, ...
+    Парчета IN (височини в cm, отдолу нагоре) на една позиция: комбинацията от IN150 и IN120, която
+    покрива височината с най-малко излишък, при равенство - с по-малко парчета (10.11.2026, вместо
+    редуване 150 / 120): 240 - 120 + 120, 270 - 150 + 120, 300 - 150 + 150, 360 - 3 x 120.
     """
     h = float(height_cm)
-    if h <= 120:
-        return [120]
-    if h <= 150:
-        return [150]
-    pieces = [150, 120]
-    while sum(pieces) < h:
-        pieces.append(150 if pieces[-1] == 120 else 120)
-    return pieces
+    best = None
+    n = 1
+    while best is None or 120 * n <= best[0]:
+        for k in range(n + 1):   # k парчета IN150, останалите IN120
+            total = 150 * k + 120 * (n - k)
+            if total >= h and (best is None or (total, n) < best[:2]):
+                best = (total, n, [150] * k + [120] * (n - k))
+        n += 1
+    return best[2]
 
 
 def calculate_corners(layout: Dict[str, Any]) -> Dict[str, int]:
@@ -271,18 +290,24 @@ PROP_EDGE_MAX_CM = 90.0      # до ъгъла/ръба на стената - н
 PROP_SPACING_MAX_CM = 180.0  # между два съседни вертикализатора - не повече от 180 cm
 PROP_CODE = "Вертикализатор PP"  # един вид за всички височини
 LOW_ELEMENT_CM = 60.0        # под 60 cm - вертикализатори като в Solar farm Tipperary (H=35)
+STRAIGHT_WALL_2_1_CM = (60.0, 175.0)  # права стена 60-175 cm - 2 + 1 (потребителят, 10.11.2026)
+STRAIGHT_WALL_2_1_MAX_H_CM = 300.0    # над 300 cm височина - 2 + 2
 
 
-def _props_on_sides(length_cm: float, height_cm: float) -> Tuple[int, int]:
+def _props_on_sides(length_cm: float, height_cm: float, straight_wall: bool = False) -> Tuple[int, int]:
     """
     Стена (всяко рамо на L/U): (брой на външната страна, брой срещу тях).
     До 120 cm - по един от двете дълги страни, един срещу друг; над 120 cm - по два на дългата
     страна, повече при нужда, така че до ръба да са <= 90 cm и между съседни <= 180 cm.
+    Права стена 60-175 cm (straight_wall): 2 на външната страна и 1 в средата срещу тях, а при височина
+    над 300 cm - 2 + 2; рамената на L-, П- и Т-стена - без промяна.
     Нисък елемент (под 60 cm, Solar farm Tipperary): срещу - само колкото трябват по 90 / 180 cm,
     на външната страна - поне 2 (110-170 cm - 2 + 1, 190-220 cm - 2 + 2).
     """
     if length_cm <= 0:
         return 0, 0
+    if straight_wall and STRAIGHT_WALL_2_1_CM[0] <= length_cm <= STRAIGHT_WALL_2_1_CM[1]:
+        return (2, 2) if height_cm > STRAIGHT_WALL_2_1_MAX_H_CM else (2, 1)
     needed = max(1, 1 + int(math.ceil((length_cm - 2 * PROP_EDGE_MAX_CM) / PROP_SPACING_MAX_CM)))
     if height_cm < LOW_ELEMENT_CM:
         return max(2, needed), needed
@@ -322,7 +347,7 @@ def calculate_push_pull_props(layout: Dict[str, Any]) -> Dict[str, Any]:
             if name not in faces:
                 continue
             length = faces[name]["length_cm"]
-            outer, opposite = _props_on_sides(length, h)
+            outer, opposite = _props_on_sides(length, h, layout["type"] == "wall")
             total += outer + opposite
             details.append({"side": f"Страна {name} (двустранно)", "count": outer + opposite,
                             "positions_cm": _prop_positions(length, outer),
@@ -501,7 +526,8 @@ def calculate_accessories(wall_type: str, dim_a_cm: float, dim_b_cm: float, heig
     if layout:
         first_row_panel_type = "120x60_standing" if _first_row_height(layout) == 120 else "150x60_standing"
     walers_res = calculate_walers(layout) if layout else empty
-    ties_res = calculate_tie_rods(wall_type, a, b, h, width_breakdown_a=width_breakdown_a, first_row_panel_type=first_row_panel_type)
+    ties_res = calculate_tie_rods(wall_type, a, b, h, width_breakdown_a=width_breakdown_a,
+                                  first_row_panel_type=first_row_panel_type, layout=layout)
     props_res = calculate_push_pull_props(layout) if layout else empty
     clamps_res = calculate_handles(layout) if layout else empty
     corners_res = calculate_corners(layout)
