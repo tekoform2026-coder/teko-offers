@@ -321,7 +321,7 @@ def _prop_marks(layout, strips):
                 continue
             axis, a0, _a1, c_lo, _c_hi, normal = strips[name]
             length = faces[name]["length_cm"]
-            outer, opposite = _props_on_sides(length, layout["height_cm"])
+            outer, opposite = _props_on_sides(length, layout["height_cm"], layout["type"] == "wall")
             for pos in _prop_positions(length, outer):
                 marks.append((name, a0 + pos))
             for pos in _prop_positions(length, opposite):
