@@ -1,5 +1,5 @@
 """
-Word оферта на ТЕКО БЪЛГАРИЯ ООД.
+Word оферта на ТЕКО България ООД.
 
 Не се ползва от app.py - там е собствената функция generate_word_offer() (таб „Оферта“). Този файл се
 поддържа като нейно копие, за да е актуален, ако някой ден се ползва: test_offer_generator_matches_app
@@ -54,7 +54,7 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
     p_comp.paragraph_format.space_after = Pt(12)
     p_comp.paragraph_format.line_spacing = 1.15
 
-    r_comp = p_comp.add_run("ТЕКО БЪЛГАРИЯ ООД | ЕИК 208141542\n")
+    r_comp = p_comp.add_run("ТЕКО България ООД | ЕИК 208141542\n")
     r_comp.bold = True
     r_comp.font.size = Pt(10.5)
     r_comp.font.color.rgb = BLUE_COLOR
@@ -155,7 +155,7 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
     p_sign = doc.add_paragraph()
     p_sign.paragraph_format.space_before = Pt(8)
     p_sign.add_run("С уважение,\n").bold = True
-    run_sign = p_sign.add_run("Екипът на ТЕКО БЪЛГАРИЯ ООД\nwww.tekoform.com")
+    run_sign = p_sign.add_run("Екипът на ТЕКО България ООД\nwww.tekoform.com")
     run_sign.font.color.rgb = BLUE_COLOR
     run_sign.bold = True
 
