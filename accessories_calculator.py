@@ -1,547 +1,520 @@
+# teko_calculator.py
 """
-Модул за изчисляване на аксесоари и окомплектовка (TEKO Formwork System)
-Напълно съобразен с документа "Алгоритъм за редене на кофража".
+Единствената логика за редене на панели TEKO (височина, ширина, разположение по страни).
+Ползва се от app.py и drawing_generator.py.
+Правилата следват "Алгоритъм за редене на кофража":
+  - първо панели 60, после по-малки; страните A и A1 са огледални (60 срещу 60 и т.н.)
+  - при L/U стени до външния ъгъл EX идва панел "дебелина + 10" (10 = ширина на IN),
+    след което страната се реди като права стена
 """
-
 import math
-from typing import Dict, List, Any, Tuple
+from collections import Counter
 
-from teko_calculator import format_panel_code, is_compensator_row
+IN_CORNER_CM = 10
 
-
-# ==========================================
-# 1. ИЗЧИСЛЯВАНЕ НА РИГЕЛИ (WALERS)
-# ==========================================
-WALER_LENGTHS_CM = [300, 200, 100]   # Alignment waling AW300 / AW200 / AW100 (спецификацията)
-NARROW_LIMIT_CM = 35.0               # колони и стени до 35 cm широки - без ригели
-TOP_FREE_CM = 60.0                   # в горните 0-60 cm няма ригел
-WALER_OVERHANG_CM = 10.0             # ригелът може да излиза до 10 см извън края (Алгоритъм, т. 9)
-
-
-def waler_heights_cm(height_cm: float, first_row_height_cm: float) -> List[float]:
-    """
-    Височини на ригелите (и анкерните нива) според Алгоритъма:
-      - долен ред изправени 120x60: 18 см, после +42 (=60), после през 60 см
-      - иначе (изправени 150x60 или полегнали): 30 см, после през 60 см
-      - нов ригел само ако над него остават поне 60 см (0-60 см отгоре - празно)
-    """
-    h = float(height_cm or 0)
-    if first_row_height_cm == 120:
-        candidates = [18.0, 60.0]
-        curr = 120.0
-    else:
-        candidates = [30.0]
-        curr = 90.0
-    while curr < h:
-        candidates.append(curr)
-        curr += 60.0
-    return [wh for wh in candidates if (h - wh) >= TOP_FREE_CM]
-
-
-def _waler_pieces(length_cm: float, max_cm: float = None) -> List[int]:
-    """
-    Ригели за страна с дадена дължина. Ригелът може да излиза до 10 см извън края или да спре
-    до 10 см преди края; когато няма точен размер, се избира най-близката обща дължина
-    (при равенство - по-дългата), съставена от AW300 + остатък AW200/AW100.
-    max_cm: най-голямата обща дължина, която се побира (вътрешна страна).
-    """
-    total = max(100, int(math.floor(length_cm / 100.0 + 0.5)) * 100)
-    if max_cm is not None:
-        total = min(total, int(math.floor(max_cm / 100.0 + 1e-9)) * 100)
-        if total <= 0:
-            return []
-    count_300, rem = divmod(total, 300)
-    return [300] * count_300 + ([rem] if rem else [])
-
-
-def waler_levels_cm(height_cm: float, first_row_height_cm: float) -> List[float]:
-    """
-    Нива на ригелите: waler_heights_cm, а при нисък елемент без нито едно ниво - един ред
-    ригели в средата на височината (Solar farm Tipperary: H=35 см - по един ригел на страна).
-    Шпилките остават по waler_heights_cm.
-    """
-    return waler_heights_cm(height_cm, first_row_height_cm) or [float(height_cm or 0) / 2.0]
-
-
-def face_waler_pieces(face: Dict[str, Any]) -> List[int]:
-    """
-    Ригели на една страна (стандартни AW 100 / 200 / 300).
-    Вътрешна страна (с ъгъл IN): ригелите не трябва да удрят в стената - при ъгъла IN ригелът
-    спира на края на страната (отвъд е панелът на перпендикулярната стена), а в другия край
-    може да излиза до 10 см (Алгоритъм, т. 9). Избира се най-дългата комбинация, която се побира.
-    """
-    length = face["length_cm"]
-    if length <= NARROW_LIMIT_CM:
-        return []
-    ends = [face["start"], face["end"]]
-    if "IN" not in ends:
-        return _waler_pieces(length)
-    free_ends = sum(1 for e in ends if e != "IN")
-    return _waler_pieces(length, length + WALER_OVERHANG_CM * free_ends)
-
-
-def _first_row_height(layout: Dict[str, Any]) -> float:
-    levels = layout.get("height_levels") or [150]
-    return levels[0]
-
-
-def calculate_walers(layout: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Ригели по страни от teko_calculator.layout_element:
-    на всяко ниво по един комплект ригели на всяка страна, по-широка от 35 cm.
-    """
-    h = layout["height_cm"]
-    heights = waler_levels_cm(h, _first_row_height(layout))
-    bom: Dict[str, int] = {}
-    positions = []
-
-    for face in layout["faces"]:
-        length = face["length_cm"]
-        pieces = face_waler_pieces(face)
-        if not pieces:
-            continue
-        for p in pieces:
-            code = f"Ригел AW {p}"
-            bom[code] = bom.get(code, 0) + len(heights)
-        positions.append({"side": face["name"], "length_cm": length,
-                          "walers": [f"AW {p}" for p in pieces], "heights_cm": heights})
-
-    return {
-        "bom": bom,
-        "levels_count": len(heights),
-        "height_positions_cm": heights,
-        "detailed_positions": positions
-    }
-
-
-# ==========================================
-# 2. ИЗЧИСЛЯВАНЕ НА ШПИЛКИ И ГАЙКИ (TIE RODS & NUTS)
-# ==========================================
-TIE_FACES_PREFIXES = ("A1", "B1", "C1")  # вътрешните страни на L-, П- и Т-стена
-TIE_RODS_PER_M2 = 1.35                   # шпилки на m² кофраж (потребителят, 10.11.2026)
-
-
-def _tie_faces(layout: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    Страните, чиито панели се броят за шпилки: шпилката минава през стената там, където два панела
-    стоят един срещу друг - по една на панел от вътрешната страна (10.11.2026).
-    Права стена - A (= A1); колона - A и B; L / П / Т - A1, B1, C1 (без панелите до EX и челата).
-    """
-    faces = [f for f in layout["faces"] if f["length_cm"] > NARROW_LIMIT_CM]
-    if layout["type"] == "column":
-        return [f for f in faces if f["name"] in ("A", "B")]
-    if layout["type"] == "wall":
-        return [f for f in faces if f["name"] == "A"]
-    return [f for f in faces if f["name"].startswith(TIE_FACES_PREFIXES)]
-
-
-def _row_at_height(levels: List[float], height_cm: float) -> int:
-    """Индекс на реда панели (отдолу нагоре), в който е височината."""
-    top = 0.0
-    for i, level in enumerate(levels):
-        top += level
-        if height_cm < top:
-            return i
-    return len(levels) - 1
-
-
-def calculate_tie_rods(
-    wall_type: str,
-    dim_a_cm: float,
-    dim_b_cm: float,
-    height_cm: float,
-    width_breakdown_a: List[float] = None,
-    first_row_panel_type: str = "150x60_standing",
-    layout: Dict[str, Any] = None
-) -> Dict[str, Any]:
-    """
-    Шпилки и гайки (10.11.2026): по-голямото от 1,35 на m² кофраж (всички страни на layout, вкл.
-    челата, закръглено нагоре) и реденето по панели - на всяко ниво на анкериране (както ригелите -
-    30, 90, 150 cm и т.н.) по една шпилка на всеки панел от страните на _tie_faces. Елемент без шпилки
-    по панели (без нива, страни до 35 cm) - без шпилки. Гайките са 2 на шпилка.
-    Без layout - права стена с панелите width_breakdown_a.
-    """
-    a = float(dim_a_cm or 0)
-    b = float(dim_b_cm or a)
-    h = float(height_cm or 0)
-    empty = {"bom": {}, "rods_count": 0, "nuts_count": 0, "levels_count": 0}
-
-    # Височинните нива за анкериране съвпадат с ригелите
-    first_row_h = 120 if "120x60_standing" in first_row_panel_type else 150
-    tie_heights = waler_heights_cm(h, first_row_h)
-    num_levels = len(tie_heights)
-    if num_levels == 0:
-        return empty
-
-    if layout:
-        levels = layout["height_levels"]
-        faces = _tie_faces(layout)
-        by_panels = sum(len(face["rows"][_row_at_height(levels, y)]) for y in tie_heights for face in faces)
-        area_m2 = sum(face["length_cm"] for face in layout["faces"]) * h / 10000.0
-        by_area = int(math.ceil(round(TIE_RODS_PER_M2 * area_m2, 6))) if by_panels else 0
-        total_rods = max(by_area, by_panels)
-    else:
-        if a <= NARROW_LIMIT_CM:
-            return empty
-        total_rods = num_levels * len(width_breakdown_a or [a])
-
-    # За всяка шпилка са необходими 2 броя гайки
-    total_nuts = total_rods * 2
-
-    bom = {}
-    if total_rods > 0:
-        bom["Шпилка TR 12"] = total_rods
-        bom["Гайка N12"] = total_nuts
-
-    return {
-        "bom": bom,
-        "rods_count": total_rods,
-        "nuts_count": total_nuts,
-        "levels_count": num_levels,
-        "height_positions_cm": tie_heights
-    }
-
-
-# ==========================================
-# 3. ИЗЧИСЛЯВАНЕ НА ЪГЛИ (EX И IN CORNERS)
-# ==========================================
-EX_CORNER_CODE = "Външен ъгъл EX240"
-IN_CORNER_CODES = {150: "Вътрешен ъгъл IN150", 120: "Вътрешен ъгъл IN120"}
-EX_ONE_PIECE_MAX_CM = 270  # до 270 cm височина - 1 външен ъгъл EX240
-
-
-def ex_corner_pieces(height_cm: float) -> int:
-    """Брой парчета EX240 на една позиция без рязане: 1 до 270 cm, после по едно на всеки следващи 240 cm."""
-    over = max(0.0, float(height_cm) - EX_ONE_PIECE_MAX_CM)
-    return 1 + math.ceil(over / EX_PIECE_HEIGHT_CM)
-
-
-def ex_corner_cover(height_cm: float) -> Tuple[int, float]:
-    """
-    Една позиция EX: (цели EX240, дължина на отрязаното допълнение в cm).
-    Допускът 30 cm остава (1 EX240 до 270 cm); над него допълнението е височината - 270
-    (вариант А, 31.10.2026), отрязано от EX240.
-    """
-    over = max(0.0, float(height_cm) - EX_ONE_PIECE_MAX_CM)
-    full, cut = divmod(over, EX_PIECE_HEIGHT_CM)
-    return 1 + int(full), cut
-
-
-def ex_corner_total(height_cm: float, positions: int) -> int:
-    """
-    Брой EX240 за всички позиции на елемента: целите парчета + EX240, от които се режат
-    допълненията (от едно EX240 - толкова допълнения, колкото се побират; остатъците не се ползват).
-    Напр. 4 позиции, 310 cm: 4 цели + 1 EX240 нарязан на 4 x 40 cm = 5.
-    """
-    if positions <= 0:
-        return 0
-    full, cut = ex_corner_cover(height_cm)
-    total = positions * full
-    if cut > 0:
-        per_bar = int(EX_PIECE_HEIGHT_CM // cut)
-        total += math.ceil(positions / per_bar)
-    return total
-
-
-def in_corner_pieces(height_cm: float) -> List[int]:
-    """
-    Парчета IN (височини в cm, отдолу нагоре) на една позиция: комбинацията от IN150 и IN120, която
-    покрива височината с най-малко излишък, при равенство - с по-малко парчета (10.11.2026, вместо
-    редуване 150 / 120): 240 - 120 + 120, 270 - 150 + 120, 300 - 150 + 150, 360 - 3 x 120.
-    """
-    h = float(height_cm)
-    best = None
-    n = 1
-    while best is None or 120 * n <= best[0]:
-        for k in range(n + 1):   # k парчета IN150, останалите IN120
-            total = 150 * k + 120 * (n - k)
-            if total >= h and (best is None or (total, n) < best[:2]):
-                best = (total, n, [150] * k + [120] * (n - k))
-        n += 1
-    return best[2]
-
-
-def calculate_corners(layout: Dict[str, Any]) -> Dict[str, int]:
-    """
-    Брой външни (EX240) и вътрешни (IN150 / IN120) ъгли: позициите от разположението на панелите
-    (layout["corners"] - отчита типа елемент и затворените краища) по парчетата по височина.
-    """
-    if not layout:
-        return {}
-    h = float(layout["height_cm"] or 0)
-    if h <= 0:
-        return {}
-
-    bom = {}
-    ex_positions = layout["corners"]["EX"]
-    if ex_positions:
-        bom[EX_CORNER_CODE] = ex_corner_total(h, ex_positions)
-    in_positions = layout["corners"]["IN"]
-    if in_positions:
-        for size in in_corner_pieces(h):
-            code = IN_CORNER_CODES[size]
-            bom[code] = bom.get(code, 0) + in_positions
-    return bom
-
-# ==========================================
-# 4. ИЗЧИСЛЯВАНЕ НА ВЕРТИКАЛИЗАТОРИ (PUSH-PULL PROPS)
-# ==========================================
-PROP_EDGE_MAX_CM = 90.0      # до ъгъла/ръба на стената - не повече от 90 cm
-PROP_SPACING_MAX_CM = 180.0  # между два съседни вертикализатора - не повече от 180 cm
-PROP_CODE = "Вертикализатор PP"  # един вид за всички височини
-LOW_ELEMENT_CM = 60.0        # под 60 cm - вертикализатори като в Solar farm Tipperary (H=35)
-STRAIGHT_WALL_2_1_CM = (60.0, 175.0)  # права стена 60-175 cm - 2 + 1 (потребителят, 10.11.2026)
-STRAIGHT_WALL_2_1_MAX_H_CM = 300.0    # над 300 cm височина - 2 + 2
-
-
-def _props_on_sides(length_cm: float, height_cm: float, straight_wall: bool = False) -> Tuple[int, int]:
-    """
-    Стена (всяко рамо на L/U): (брой на външната страна, брой срещу тях).
-    До 120 cm - по един от двете дълги страни, един срещу друг; над 120 cm - по два на дългата
-    страна, повече при нужда, така че до ръба да са <= 90 cm и между съседни <= 180 cm.
-    Права стена 60-175 cm (straight_wall): 2 на външната страна и 1 в средата срещу тях, а при височина
-    над 300 cm - 2 + 2; рамената на L-, П- и Т-стена - без промяна.
-    Нисък елемент (под 60 cm, Solar farm Tipperary): срещу - само колкото трябват по 90 / 180 cm,
-    на външната страна - поне 2 (110-170 cm - 2 + 1, 190-220 cm - 2 + 2).
-    """
-    if length_cm <= 0:
-        return 0, 0
-    if straight_wall and STRAIGHT_WALL_2_1_CM[0] <= length_cm <= STRAIGHT_WALL_2_1_CM[1]:
-        return (2, 2) if height_cm > STRAIGHT_WALL_2_1_MAX_H_CM else (2, 1)
-    needed = max(1, 1 + int(math.ceil((length_cm - 2 * PROP_EDGE_MAX_CM) / PROP_SPACING_MAX_CM)))
-    if height_cm < LOW_ELEMENT_CM:
-        return max(2, needed), needed
-    if length_cm <= 120.0:
-        return 1, 1
-    return max(2, needed), max(2, needed)
-
-
-def _prop_positions(length_cm: float, count: int) -> List[float]:
-    if count <= 0:
-        return []
-    if count == 1:
-        return [round(length_cm / 2.0, 1)]
-    edge = min(PROP_EDGE_MAX_CM, length_cm / (2.0 * count))
-    step = (length_cm - 2 * edge) / (count - 1)
-    return [round(edge + i * step, 1) for i in range(count)]
-
-
-def calculate_push_pull_props(layout: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Вертикализатори по Алгоритъма:
-      - колона: по два на колона, на две съседни страни
-      - стена / рамо на L и U: по _props_on_sides на външната страна и срещу тях
-    """
-    h = layout["height_cm"]
-    prop_code = PROP_CODE
-    faces = {f["name"]: f for f in layout["faces"]}
-    details = []
-
-    if layout["type"] == "column":
-        total = 2
-        details.append({"side": "Страни A и B (съседни)", "count": 2,
-                        "positions_cm": [round(faces["A"]["length_cm"] / 2, 1), round(faces["B"]["length_cm"] / 2, 1)]})
-    else:
-        total = 0
-        for name in ("A", "B", "C"):
-            if name not in faces:
-                continue
-            length = faces[name]["length_cm"]
-            outer, opposite = _props_on_sides(length, h, layout["type"] == "wall")
-            total += outer + opposite
-            details.append({"side": f"Страна {name} (двустранно)", "count": outer + opposite,
-                            "positions_cm": _prop_positions(length, outer),
-                            "opposite_positions_cm": _prop_positions(length, opposite)})
-
-    return {
-        "bom": {prop_code: total} if total > 0 else {},
-        "total_count": total,
-        "prop_type": prop_code,
-        "spacing_details": details
-    }
-
-
-# ==========================================
-# 5. ИЗЧИСЛЯВАНЕ НА РЪКОХВАТКИ (HANDLES)
-# ==========================================
-# Отвори за ръкохватки по ръб с дадена дължина (Спесификация размери, тегло и аксесоари.xlsx):
-# TK 150/60 -> 10 по височина, 4 по ширина; TK 120/x -> 8; ширина 35/30 -> 2; 25/20/15 -> 1; 10 -> 0.
-EDGE_HOLES = {150: 10, 120: 8, 60: 4, 40: 2, 35: 2, 30: 2, 25: 1, 20: 1, 15: 1, 10: 0, 5: 0}
-EX_HOLES_PER_SIDE = 16  # EXTERNAL CORNER EX240: 16 отвора по височина на всяко рамо
-EX_PIECE_HEIGHT_CM = 240
-
-SMALL_PANEL_CODES = {"TK 40/25", "TK 30/25", "TK 20/20", "TK 20/15", "TK 15/15"}
-
-HANDLE_BY_KINDS = {
-    frozenset(["MAIN"]): "Ръкохватка H8",           # основен - основен
-    frozenset(["MAIN", "SMALL"]): "Ръкохватка H6",  # основен - малък
-    frozenset(["SMALL"]): "Ръкохватка H5",          # малък - малък
+STANDARD_HEIGHT_MAP = {
+    240: [120, 120],
+    270: [150, 120],
+    300: [150, 150],
+    330: [150, 120, 60],
+    360: [150, 150, 60]
 }
 
+# Остатък след панелите 60 -> малки панели. 65/70/75 се получават, когато
+# остатъкът е 5/10/15 и една 60-ка се разменя (напр. 190 = 60+60+35+35 вместо 60+60+60+TC10).
+STANDING_REMAINDERS = {
+    0: [],
+    5: [5],
+    10: [10],
+    15: [15],
+    20: [20],
+    25: [25],
+    30: [30],
+    35: [35],
+    40: [20, 20],
+    45: [25, 20],
+    50: [30, 20],
+    55: [30, 25],
+    65: [35, 30],
+    70: [35, 35],
+    75: [35, 20, 20]
+}
 
-def _holes_for_length(length_cm: float) -> int:
-    """Отвори по ръб: точна стойност от таблицата или най-близката по-малка дължина."""
-    keys = [k for k in EDGE_HOLES if k <= length_cm]
-    return EDGE_HOLES[max(keys)] if keys else 0
+# Остатък в ред легнали 60 след 150 и 120. Панел TK 60/35 няма, компенсатор в ред 60 няма (TC 60/x няма):
+# 35 = 20 + 15 (TK 60/20 + TK 60/15); 10 и 15 са панели TK 60/10, TK 60/15 (потребителят, 09.11.2026).
+LYING_REMAINDERS = {
+    35: [20, 15],
+    60: [30, 30],
+    65: [25, 20, 20],
+    70: [30, 20, 20],
+    75: [25, 25, 25],
+    80: [30, 30, 20],
+    85: [30, 30, 25],
+    90: [30, 30, 30],
+    95: [25, 25, 25, 20],
+    100: [30, 30, 20, 20],
+    105: [30, 25, 25, 25],
+    110: [30, 30, 30, 20],
+    115: [30, 30, 30, 25],
+    125: [30, 30, 30, 20, 15],
+}
 
-
-def _overlap_holes(overlap_cm: float) -> int:
+def format_panel_code(width_cm, height_cm):
     """
-    Отвори по общия ръб на два разминати панела (хоризонтална фуга): по таблицата, но
-    застъпване 10 см има 1 отвор (Solar farm Tipperary: ред 20 под ред 15, 20 срещу 15 и 150 срещу 20).
+    Генерира каталожното наименование според официалната спецификация ТЕКО.
+    Полегнал ред (височина 60): ширини 150/120 са полегнали големи панели,
+    останалите са TK 60/x (и 10 / 15 - панели TK 60/10, TK 60/15; компенсатори TC 60/x няма).
+    Ред 20-35 см (полегнали панели): TK по-голям/по-малък размер, напр. 150/20, 20/15.
+    Ред 5/10/15 см - компенсатор отгоре: TC 150/x.
     """
-    if 10 <= overlap_cm < 15:
-        return 1
-    return _holes_for_length(overlap_cm)
+    if is_compensator_row(height_cm):
+        return f"TC 150/{int(height_cm)}"
+    if height_cm < 60:
+        return f"TK {max(width_cm, height_cm)}/{min(width_cm, height_cm)}"
+    if height_cm == 60:
+        if width_cm == 150:
+            return "TK 150/60 (полегнал)"
+        if width_cm == 120:
+            return "TK 120/60 (полегнал)"
+        return f"TK 60/{width_cm}"
 
+    if width_cm <= 15 and height_cm in [120, 150]:
+        return f"TC {height_cm}/{width_cm}"
 
-def _panel_kind(width_cm: float, height_cm: float) -> str:
-    code = format_panel_code(int(width_cm), height_cm)  # без int(): редът панели 15 не е TC
-    if code.startswith("TC"):
-        return "METAL"
-    if code in SMALL_PANEL_CODES:
-        return "SMALL"
-    return "MAIN"
+    return f"TK {height_cm}/{width_cm}"
 
+COMPENSATOR_PIECE_CM = 150  # компенсаторът отгоре се смята на парчета по 150 см
 
-def _vertical_edge_holes(width_cm: float, height_cm: float) -> int:
-    """Отвори по вертикалния ръб на панел в ред с височина height_cm (и при компенсаторите TC)."""
-    return _holes_for_length(height_cm)
+# Остатък над редовете 150/120/60 (под 60 см), отдолу нагоре:
+# 5/10/15 - компенсатор TC отгоре; 20-35 - ред легнали панели; 40-55 - два реда.
+TOP_REMAINDERS = {
+    0: [], 5: [5], 10: [10], 15: [15],
+    20: [20], 25: [25], 30: [30], 35: [35],
+    40: [20, 20], 45: [25, 20], 50: [30, 20], 55: [30, 25],
+}
 
+# Дължини на панелите в ред с височина 20-35 см (легнали големи и малки панели от спецификацията)
+STRIP_PIECES = {
+    20: [150, 120, 60, 20, 15],   # TK 150/20, 120/20, 60/20, 20/20, 20/15
+    25: [150, 120, 60, 40, 30],   # TK 150/25, 120/25, 60/25, 40/25, 30/25
+    30: [150, 120, 60, 25],       # TK 150/30, 120/30, 60/30, 30/25
+    35: [150, 120],               # TK 150/35, 120/35 (TK 60/35 няма)
+}
 
-def _horizontal_edge_holes(width_cm: float, height_cm: float) -> int:
-    """Отвори по хоризонталния ръб; металните компенсатори TC нямат отвори по ширина."""
-    if _panel_kind(width_cm, height_cm) == "METAL":
-        return 0
-    return _holes_for_length(width_cm)
+# Ред панели с височина 15 см (TK 60/15, 20/15, 15/15) - не компенсатор (Solar farm Tipperary):
+# 35 = ред 20 + ред 15, когато един ред легнали 35 не покрива страните точно.
+PANEL_ROW_15_PIECES = [60, 20, 15]
 
+class PanelRow(int):
+    """Височина на ред панели 15 см (за разлика от компенсатора TC 15)."""
 
-def _handle_code(kind_a: str, kind_b: str):
-    """Тип ръкохватка за допира; метал с метал не се свързва (None)."""
-    if kind_a == "METAL" and kind_b == "METAL":
-        return None
-    if "METAL" in (kind_a, kind_b):
-        return "Ръкохватка H4"
-    return HANDLE_BY_KINDS[frozenset([kind_a, kind_b])]
+PANEL_ROW_15 = PanelRow(15)
 
+def is_compensator_row(height_cm):
+    """Ред с височина 5/10/15 см - компенсатор TC отгоре (винаги най-горният ред)."""
+    return 0 < height_cm <= 15 and not isinstance(height_cm, PanelRow)
 
-def calculate_handles(layout: Dict[str, Any]) -> Dict[str, Any]:
+def compensator_pieces(length_cm):
+    """Брой компенсатори по 150 см за дължина (закръглено нагоре: 1000 см -> 7 бр.)."""
+    return int(math.ceil(round(length_cm, 6) / COMPENSATOR_PIECE_CM))
+
+def _height_bases(height_cm):
     """
-    Ръкохватки само там, където елемент опира в елемент (не към земята, въздуха или отворен край):
-      - вертикални фуги между съседни панели в ред: отворите по височината на реда
-      - хоризонтални фуги между редовете: отворите по общия ръб
-      - компенсатор TC отгоре (H4): отворите по горния ръб на всеки панел под него
-      - панел до ъгъл EX (H4): до 16 отвора на рамо на цял EX240, на отрязаното парче - пропорционално
-      - панел до ъгъл IN (H4): IN150/IN120 по редове, отворите по височината на реда
-    layout е резултатът от teko_calculator.layout_element.
+    Точните комбинации от редове 150 / 120 / 60 до височината, с остатък под 60 см -
+    от най-високата към по-ниските. За всяка сума - с по-малко редове, после повече 150.
+    Подредени отдолу нагоре: 150, 120, 60.
     """
-    levels = layout["height_levels"]
-    ex_full, ex_cut = ex_corner_cover(layout["height_cm"])
-    # отвори на рамо по височината на ъгъла: 16 на цял EX240, на отрязаното - пропорционално
-    ex_holes = EX_HOLES_PER_SIDE * ex_full + int(EX_HOLES_PER_SIDE * ex_cut // EX_PIECE_HEIGHT_CM)
-    bom: Dict[str, int] = {}
+    best = {}
+    for n150 in range(height_cm // 150 + 1):
+        for n120 in range((height_cm - 150 * n150) // 120 + 1):
+            for n60 in range((height_cm - 150 * n150 - 120 * n120) // 60 + 1):
+                levels = [150] * n150 + [120] * n120 + [60] * n60
+                total = sum(levels)
+                key = (-len(levels), n150)
+                if height_cm - total < 60 and (total not in best or key > best[total][0]):
+                    best[total] = (key, levels)
+    return [best[total][1] for total in sorted(best, reverse=True)]
 
-    def add(code, qty):
-        if code and qty > 0:
-            bom[code] = bom.get(code, 0) + qty
+def _remainder_options(rem, low=False):
+    """
+    Начини за остатъка отгоре, по ред на предпочитане. Първо TOP_REMAINDERS; при 40-55 см -
+    и другите два реда легнали, после два реда + компенсатор (по-големият TC първи),
+    напр. 55 = 30 + 25, 35 + 20, после 20 + 20 + TC 15 (55.pdf).
+    low: нисък елемент (под 60 см, без редове 150 / 120 / 60) - само там 35 може да е ред 20 +
+    ред панели 15 (Solar); при по-високите 5 / 10 / 15 см отгоре е компенсатор TC.
+    """
+    options = [TOP_REMAINDERS[rem]]
+    if rem == 35 and low:
+        options.append([20, PANEL_ROW_15])   # Solar farm Tipperary: 35 = ред 20 + ред панели 15
+    if rem >= 40:
+        strips = sorted(STRIP_PIECES, reverse=True)
+        pairs = lambda r: [[a, b] for a in strips for b in strips if a >= b and a + b == r]
+        options += [p for p in pairs(rem) if p not in options]
+        for tc in (15, 10, 5):
+            options += [p + [tc] for p in pairs(rem - tc)]
+    return options
 
-    vert_joints = 0
-    horiz_joints = 0
+def height_candidates(height_cm):
+    """
+    Възможните разпределения по височина (отдолу нагоре), по ред на предпочитане:
+    най-високата основа от 150 / 120 / 60 с остатъка отгоре, после по-ниските основи.
+    layout_element взима първото, при което редовете легнали панели покриват страните точно.
+    """
+    height_cm = _round_up_to_5(height_cm)
+    if height_cm in STANDARD_HEIGHT_MAP:
+        return [list(STANDARD_HEIGHT_MAP[height_cm])]
+    return [base + rest for base in _height_bases(height_cm)
+            for rest in _remainder_options(height_cm - sum(base), low=not base)]
 
+def solve_height_cm(height_cm):
+    """
+    Пресмята височинното разпределение на панелите (отдолу нагоре), без да гледа дължините.
+    За стандартни височини връща фиксираната комбинация. Иначе - най-високата точна
+    комбинация от 150 / 120 / 60, а остатъкът (под 60 см) отгоре: 20-55 см - един или два реда
+    легнали панели, 5/10/15 см - компенсатор TC (най-отгоре, никога два един до друг).
+    Височината се закръгля нагоре до 5 см. Окончателното е в layout_element (сменя основата,
+    когато ред легнали не покрива страна точно).
+    """
+    return height_candidates(height_cm)[0]
+
+def _round_up_to_5(width_cm):
+    """Височина, некратна на 5 см, се закръгля нагоре (262 -> 265)."""
+    return int(math.ceil(round(width_cm, 6) / 5.0) * 5)
+
+def _round_down_to_5(width_cm):
+    """Дължина, некратна на 5 см, се закръгля надолу (262,5 -> 260); остатъкът е дървена дъска."""
+    return int(math.floor(round(width_cm, 6) / 5.0) * 5)
+
+def board_cm(width_cm):
+    """Дървената дъска (вложка) по дължина: остатъкът под 5 см (262,5 -> 2,5). Само се рисува."""
+    return round(width_cm - _round_down_to_5(width_cm), 6) if width_cm > 0 else 0
+
+def panel_height_cm(layout):
+    """Височината на панелите (сумата на редовете) - на чертежите и в офертата: 262 -> 265."""
+    return sum(layout["height_levels"])
+
+def _solve_width_standing(width_cm):
+    """Изправен ред (H=150/120): максимум панели 60, остатъкът с малки панели."""
+    count_60, rem = divmod(width_cm, 60)
+    if rem in (5, 10, 15) and count_60 > 0:
+        count_60 -= 1
+        rem += 60
+    return [60] * count_60 + STANDING_REMAINDERS[rem]
+
+def _solve_width_lying(width_cm):
+    """
+    Полегнал ред (H=60): първо полегнали 150 и 120, после малки модули (LYING_REMAINDERS).
+    Остатък 5 (60/5 няма): 150 + 5 -> 120 + 20 + 15, 120 + 5 -> 30 + 30 + 30 + 20 + 15;
+    само 5 см не се покрива точно (панелът 10 излиза) - layout_element сменя основата.
+    """
+    count_150, rem = divmod(width_cm, 150)
+    count_120, rem = divmod(rem, 120)
+    if rem == 5 and count_150:
+        count_150, count_120, rem = count_150 - 1, count_120 + 1, 35
+    elif rem == 5 and count_120:
+        count_120, rem = count_120 - 1, 125
+    elif rem == 5:
+        return [10]
+    small = LYING_REMAINDERS.get(rem) or STANDING_REMAINDERS[rem]
+    return [150] * count_150 + [120] * count_120 + small
+
+def _solve_width_strip(width_cm, pieces):
+    """
+    Ред легнали панели с височина 20-35 см: точно покритие с възможно най-малко панели,
+    големите отляво, малките допълват отдясно (200 = 120 + 60 + 20, 205 = 150 + 20 + 20 + 15).
+    Когато не може точно - най-малкото надхвърляне (последният панел излиза).
+    """
+    limit = width_cm + max(pieces)
+    best = {0: []}   # дължина -> най-малко панели, по-големите първи
+    for total in range(5, limit + 1, 5):
+        options = [sorted(best[total - p] + [p], reverse=True)
+                   for p in pieces if total - p in best]
+        if options:
+            best[total] = min(options, key=lambda r: (len(r), [-x for x in r]))
+    reach = min(t for t in best if t >= width_cm)
+    return best[reach]
+
+def solve_width_cm(width_cm, height_level_cm=150):
+    """
+    Подреден списък с ширините на панелите за един ред с дадена височина.
+    Сумата е равна на ширината (закръглена надолу до 5 см, остатъкът е дъска); надхвърля я само
+    ред легнали панели 20-35 см, когато няма точно покритие.
+    """
+    w = _round_down_to_5(width_cm) if width_cm > 0 else 0
+    if w <= 0:
+        return []
+    if is_compensator_row(height_level_cm):
+        return [w]
+    if isinstance(height_level_cm, PanelRow):
+        return _solve_width_strip(w, PANEL_ROW_15_PIECES)
+    if height_level_cm in STRIP_PIECES:
+        return _solve_width_strip(w, STRIP_PIECES[height_level_cm])
+    if height_level_cm == 60:
+        return _solve_width_lying(w)
+    return _solve_width_standing(w)
+
+def _face(name, segments, levels, start=None, end=None, flip=(), boards=True):
+    """
+    Страна от кофража. segments са дължини, всяка се реди самостоятелно с solve_width_cm,
+    така че еднаквите сегменти на срещуположните страни излизат огледални.
+    flip: индекси на сегментите, редени в обратен ред (панелите 60 откъм края на сегмента).
+    boards: остатъкът под 5 см на всеки сегмент е дървена дъска (само на чертежа);
+            челата на затворените краища са без дъска (дебелината надолу до 5 см).
+    """
+    return {
+        "name": name,
+        "length_cm": sum(max(0, s) for s in segments),
+        "start": start,
+        "end": end,
+        "rows": _face_rows(segments, levels, flip),
+        "segments": list(segments),
+        "flip": tuple(flip),
+        "boards": [board_cm(s) if boards else 0 for s in segments],
+        "stretch": not boards,
+    }
+
+def face_row_pieces(face, height_level_cm, row):
+    """
+    Редът на страната за чертежа: [(ширина на чертежа, дъска?, размер на панела за надписа)] -
+    панелите и дървената дъска на всеки сегмент с остатък под 5 см, преди последния (малкия) панел
+    на сегмента - на всеки ред поотделно (в ред легнали дъската може да е на друго място).
+    Дъската не влиза в сметката. Челото (без дъска) се рисува по цялата дебелина: 27,5 -> панел 25.
+    """
+    boards = face.get("boards") or [0] * len(face["segments"])
+    extra = sum(board_cm(s) for s in face["segments"]) if face.get("stretch") else 0
+    if is_compensator_row(height_level_cm):
+        return [(row[0] + sum(boards) + extra, False, row[0])]
+    pieces = []
+    for i, seg in enumerate(face["segments"]):
+        widths = [(w, False, w) for w in solve_width_cm(seg, height_level_cm)]
+        if boards[i]:
+            widths.insert(max(0, len(widths) - 1), (boards[i], True, boards[i]))
+        pieces += widths[::-1] if i in face["flip"] else widths
+    if extra and pieces:
+        w, is_board, label = pieces[-1]
+        pieces[-1] = (w + extra, is_board, label)
+    return pieces
+
+def _face_rows(segments, levels, flip=()):
+    rows = []
+    for h in levels:
+        if is_compensator_row(h):
+            # компенсаторът е една лента по цялата страна
+            rows.append([sum(_round_down_to_5(seg) for seg in segments if seg > 0)])
+            continue
+        row = []
+        for i, seg in enumerate(segments):
+            widths = solve_width_cm(seg, h)
+            row += widths[::-1] if i in flip else widths
+        rows.append(row)
+    return rows
+
+def _strip_misses(faces, levels):
+    """Брой сегменти, които някой ред легнали 20-60 см не покрива точно (последният панел излиза)."""
+    strips = [h for h in levels if h in STRIP_PIECES or isinstance(h, PanelRow) or h == 60]
+    return sum(1 for face in faces for seg in face["segments"] if seg > 0
+               and any(sum(solve_width_cm(seg, h)) != _round_down_to_5(seg) for h in strips))
+
+def _cm_or_default(value, default):
+    """Размер от таблицата; празен (None, NaN, 0) = default (напр. общата дебелина на елемента)."""
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return default
+    return value if value == value and value > 0 else default
+
+def arm_thicknesses(layout):
+    """Дебелините на рамената (рамо 1, 2, 3) на L-, П- и Т-стена; при другите - празен списък."""
+    d = layout["dims"]
+    return [d[k] for k in ("t1", "t2", "t3") if k in d]
+
+def thickness_label(layout, unit=" см"):
+    """„дебелина 25 см“; при различни стени - „стена A дебелина 30 см, стена B дебелина 25 см“."""
+    arms = arm_thicknesses(layout) or [layout["thickness_cm"]]
+    if len(set(arms)) == 1:
+        return f"дебелина {arms[0]:g}{unit}"
+    return ", ".join(f"стена {'ABC'[i]} дебелина {t:g}{unit}" for i, t in enumerate(arms))
+
+def t_wall_middle_cm(l1_cm, stem_thickness_cm):
+    """Ребро в средата на полката: от левия край до лявото лице на реброто, надолу до 5 см."""
+    return math.floor((float(l1_cm) - stem_thickness_cm) / 2 / 5.0) * 5
+
+def t_wall_offset_label(layout, unit=" см"):
+    """„ребро на 100 см от левия край“, когато реброто на Т-стена не е в средата; иначе празно."""
+    d = layout["dims"]
+    if layout["type"] != "t_wall" or d["l3"] == t_wall_middle_cm(d["l1"], d["t2"]):
+        return ""
+    return f"ребро на {d['l3']:g}{unit} от левия край"
+
+def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=25,
+                   l1_cm=0, l2_cm=0, l3_cm=0, closed_ends=0,
+                   closed_end_1=None, closed_end_2=None, closed_end_3=False,
+                   thickness1_cm=None, thickness2_cm=None, thickness3_cm=None):
+    """
+    Разположение на панелите по страни и редове за един елемент.
+
+    elem_type: "column" (width x length), "wall" (length, thickness),
+               "l_wall" (l1 = рамо A, l2 = рамо B, thickness),
+               "u_wall" (l1 = рамо A, l2 = гръб B, l3 = рамо C, thickness),
+               "t_wall" (l1 = страна A (полката), l2 = страна B / B1 (реброто, от предното лице
+                         на полката до края му), l3 = от левия край на полката (край 2) до лявото
+                         лице на реброто - празно / 0 = реброто е в средата, thickness).
+    closed_end_1 / closed_end_2: затворени челни края (стени). Край 1 е краят на рамо A
+                 (при права стена - десният), край 2 - краят на последното рамо B / C
+                 (при права стена - левият). При T-стена: край 1 - десният край на полката,
+                 край 2 - левият, closed_end_3 - краят на реброто.
+    closed_ends: 0/1/2 - кратък запис, когато не е зададено кой край: 1 = край 1, 2 = двата.
+    thickness1_cm / thickness2_cm / thickness3_cm: дебелина на рамо 1 / 2 / 3 (при T-стена - полката
+                 и реброто); празна = thickness_cm. До външния ъгъл EX на всяко рамо: дебелината на
+                 перпендикулярното рамо + 10; челото на затворен край е колкото дебелината на своето рамо.
+
+    Връща речник с height_levels, faces (всяка с rows = ширини по редове отдолу нагоре)
+    и corners (брой позиции EX / IN).
+    """
+    levels = solve_height_cm(height_cm)
+    t = float(thickness_cm or 0)
+    t1, t2, t3 = (_cm_or_default(v, t) for v in (thickness1_cm, thickness2_cm, thickness3_cm))
+    if closed_end_1 is None and closed_end_2 is None:
+        n = max(0, min(2, int(closed_ends or 0)))
+        closed_end_1, closed_end_2 = n >= 1, n >= 2
+    closed = [bool(closed_end_1), bool(closed_end_2)]
+    faces = []
+    ex, inn = 0, 0
+
+    if elem_type == "column":
+        a, b = float(width_cm), float(length_cm)
+        faces = [
+            _face("A", [a], levels, "EX", "EX"),
+            _face("A1", [a], levels, "EX", "EX"),
+            _face("B", [b], levels, "EX", "EX"),
+            _face("B1", [b], levels, "EX", "EX"),
+        ]
+        ex = 4
+        dims = {"a": a, "b": b}
+        closed = [False, False]
+
+    elif elem_type == "wall":
+        length = float(length_cm)
+        end_r = "EX" if closed[0] else None
+        end_l = "EX" if closed[1] else None
+        faces = [
+            _face("A", [length], levels, end_l, end_r),
+            _face("A1", [length], levels, end_l, end_r),
+        ]
+        if closed[0]:
+            faces.append(_face("Край 1", [t], levels, "EX", "EX", boards=False))
+        if closed[1]:
+            faces.append(_face("Край 2", [t], levels, "EX", "EX", boards=False))
+        ex = 2 * sum(closed)
+        dims = {"length": length, "t": t}
+
+    elif elem_type == "l_wall":
+        l1, l2 = float(l1_cm), float(l2_cm)
+        end_a = "EX" if closed[0] else None
+        end_b = "EX" if closed[1] else None
+        k_a, k_b = t2 + IN_CORNER_CM, t1 + IN_CORNER_CM  # до EX: перпендикулярното рамо + 10
+        faces = [
+            _face("A", [k_a, l1 - k_a], levels, "EX", end_a),
+            _face("A1", [l1 - k_a], levels, "IN", end_a),
+            _face("B", [k_b, l2 - k_b], levels, "EX", end_b),
+            _face("B1", [l2 - k_b], levels, "IN", end_b),
+        ]
+        if closed[0]:
+            faces.append(_face("Край A", [t1], levels, "EX", "EX", boards=False))
+        if closed[1]:
+            faces.append(_face("Край B", [t2], levels, "EX", "EX", boards=False))
+        ex = 1 + 2 * sum(closed)
+        inn = 1
+        dims = {"l1": l1, "l2": l2, "t": t, "t1": t1, "t2": t2}
+
+    elif elem_type == "u_wall":
+        l1, l2, l3 = float(l1_cm), float(l2_cm), float(l3_cm)
+        end_a = "EX" if closed[0] else None
+        end_c = "EX" if closed[1] else None
+        # рамо 1 = A, рамо 2 = гърбът B, рамо 3 = C
+        k_b, k_a, k_c = t2 + IN_CORNER_CM, t1 + IN_CORNER_CM, t3 + IN_CORNER_CM
+        back = l2 - k_a - k_c
+        faces = [
+            _face("A", [k_b, l1 - k_b], levels, "EX", end_a),
+            _face("A1", [l1 - k_b], levels, "IN", end_a),
+            _face("B", [k_a, back, k_c], levels, "EX", "EX"),
+            _face("B1", [back], levels, "IN", "IN"),
+            _face("C", [k_b, l3 - k_b], levels, "EX", end_c),
+            _face("C1", [l3 - k_b], levels, "IN", end_c),
+        ]
+        if closed[0]:
+            faces.append(_face("Край A", [t1], levels, "EX", "EX", boards=False))
+        if closed[1]:
+            faces.append(_face("Край C", [t3], levels, "EX", "EX", boards=False))
+        ex = 2 + 2 * sum(closed)
+        inn = 2
+        dims = {"l1": l1, "l2": l2, "l3": l3, "t": t, "t1": t1, "t2": t2, "t3": t3}
+
+    elif elem_type == "t_wall":
+        # Полка A (задно лице, цяло) и A1 (предно лице, разделено от реброто на ляво и дясно,
+        # винаги с IN при реброто); ребро B / B1 от IN до края на реброто (край 3).
+        # Срещу „IN + ребро + IN“ на A стои сегмент t + 20, така че A е огледална на A1.
+        # EX - само на затворените краища, по 2 на край.
+        # Мястото на реброто p (от левия край на полката до лявото лице на реброто) е l3;
+        # празно / 0 - реброто е в средата. Реброто до самия край остава Т-стена (не L-стена).
+        # Рамо 1 = полката (дебелина t1), рамо 2 = реброто (дебелина ts).
+        l1, l2 = float(l1_cm), float(l2_cm)
+        ts = t2
+        p = _cm_or_default(l3_cm, t_wall_middle_cm(l1, ts))
+        left, right, stem = p - IN_CORNER_CM, l1 - p - ts - IN_CORNER_CM, l2 - IN_CORNER_CM
+        closed.append(bool(closed_end_3))
+        end_1 = "EX" if closed[0] else None
+        end_2 = "EX" if closed[1] else None
+        end_3 = "EX" if closed[2] else None
+        faces = [
+            _face("A", [left, ts + 2 * IN_CORNER_CM, right], levels, end_2, end_1, flip=(0,)),
+            _face("A1 ляво", [left], levels, end_2, "IN", flip=(0,)),
+            _face("A1 дясно", [right], levels, "IN", end_1),
+            _face("B", [stem], levels, end_3, "IN", flip=(0,)),
+            _face("B1", [stem], levels, end_3, "IN", flip=(0,)),
+        ]
+        if closed[0]:
+            faces.append(_face("Край 1", [t1], levels, "EX", "EX", boards=False))
+        if closed[1]:
+            faces.append(_face("Край 2", [t1], levels, "EX", "EX", boards=False))
+        if closed[2]:
+            faces.append(_face("Край 3", [ts], levels, "EX", "EX", boards=False))
+        ex = 2 * sum(closed)
+        inn = 2
+        dims = {"l1": l1, "l2": l2, "l3": p, "t": t, "t1": t1, "t2": ts}
+
+    else:
+        raise ValueError(f"Непознат тип елемент: {elem_type}")
+
+    # Ред легнали, който не покрива страна точно -> следващата по-ниска основа (55.pdf: 205 см).
+    # Избира се разпределението с най-малко непокрити сегменти (челата 25 см често не се покриват).
+    candidates = height_candidates(height_cm)
+    best = min(candidates, key=lambda c: _strip_misses(faces, c))
+    if best != levels:
+        levels = best
+        for face in faces:
+            face["rows"] = _face_rows(face["segments"], levels, face["flip"])
+
+    return {
+        "type": elem_type,
+        "height_cm": float(height_cm),
+        "height_levels": levels,
+        "thickness_cm": t,
+        "closed_ends": sum(closed),
+        "closed": closed,
+        "dims": dims,
+        "faces": faces,
+        "corners": {"EX": ex, "IN": inn},
+    }
+
+def count_panels(layout, count=1):
+    """Брой панели по каталожен код за разположението (умножено по броя елементи)."""
+    totals = Counter()
     for face in layout["faces"]:
-        rows = face["rows"]
-
-        # 1. Вертикални фуги в реда
-        for h, row in zip(levels, rows):
-            for w_left, w_right in zip(row, row[1:]):
-                qty = min(_vertical_edge_holes(w_left, h), _vertical_edge_holes(w_right, h))
-                add(_handle_code(_panel_kind(w_left, h), _panel_kind(w_right, h)), qty)
-                vert_joints += 1
-
-        # 2. Хоризонтални фуги между редовете (по припокриването на панелите)
-        for r in range(len(rows) - 1):
-            h_low, h_up = levels[r], levels[r + 1]
-            low_x = 0
-            for w_low in rows[r]:
-                up_x = 0
-                for w_up in rows[r + 1]:
-                    overlap = min(low_x + w_low, up_x + w_up) - max(low_x, up_x)
-                    if overlap > 0 and is_compensator_row(h_up):
-                        # компенсатор отгоре (H4): отворите по горния ръб на панела под него
-                        if _panel_kind(w_low, h_low) != "METAL":
-                            add("Ръкохватка H4", min(_horizontal_edge_holes(w_low, h_low), _holes_for_length(overlap)))
-                    elif overlap > 0:
-                        qty = min(_horizontal_edge_holes(w_low, h_low), _horizontal_edge_holes(w_up, h_up))
-                        if not (low_x == up_x and w_low == w_up):
-                            qty = min(qty, _overlap_holes(overlap))
-                        add(_handle_code(_panel_kind(w_low, h_low), _panel_kind(w_up, h_up)), qty)
-                        horiz_joints += 1
-                    up_x += w_up
-                low_x += w_low
-
-        # 3. Ъгли в краищата на страната
-        for edge, idx in (("start", 0), ("end", -1)):
-            corner = face[edge]
-            if not corner:
+        for h, row in zip(layout["height_levels"], face["rows"]):
+            if is_compensator_row(h):
+                totals[format_panel_code(0, h)] += sum(compensator_pieces(w) for w in row) * count
                 continue
-            row_holes = [_vertical_edge_holes(row[idx], h) for h, row in zip(levels, rows)
-                         if row and _panel_kind(row[idx], h) != "METAL"]
-            if corner == "EX":
-                # по всички отвори на рамото на EX240, и при нисък елемент (Solar farm Tipperary:
-                # H=35 см, 4 EX - 128 H4)
-                add("Ръкохватка H4", ex_holes)
-            else:
-                add("Ръкохватка H4", sum(row_holes))
-
-    return {
-        "bom": bom,
-        "vert_joints_count": vert_joints,
-        "horiz_joints_count": horiz_joints,
-        "total_handles": sum(bom.values())
-    }
-
-
-# ==========================================
-# 6. ГЛАВНА ФУНКЦИЯ: CALCULATE_ACCESSORIES
-# ==========================================
-def calculate_accessories(wall_type: str, dim_a_cm: float, dim_b_cm: float, height_cm: float,
-                          width_breakdown_a: List[float] = None, 
-                          height_breakdown: List[float] = None,
-                          first_row_panel_type: str = "150x60_standing",
-                          layout: Dict[str, Any] = None) -> Dict[str, Any]:
-    """
-    Обединяваща функция за аксесоарите, шпилките, гайките и ъглите.
-    layout (teko_calculator.layout_element) е нужен за ригелите, вертикализаторите и ръкохватките.
-    """
-    a = float(dim_a_cm or 0)
-    b = float(dim_b_cm or a)
-    h = float(height_cm or 0)
-
-    if not width_breakdown_a:
-        width_breakdown_a = [a]
-    if not height_breakdown:
-        height_breakdown = [h]
-
-    empty = {"bom": {}}
-    if layout:
-        first_row_panel_type = "120x60_standing" if _first_row_height(layout) == 120 else "150x60_standing"
-    walers_res = calculate_walers(layout) if layout else empty
-    ties_res = calculate_tie_rods(wall_type, a, b, h, width_breakdown_a=width_breakdown_a,
-                                  first_row_panel_type=first_row_panel_type, layout=layout)
-    props_res = calculate_push_pull_props(layout) if layout else empty
-    clamps_res = calculate_handles(layout) if layout else empty
-    corners_res = calculate_corners(layout)
-
-    combined_bom = {}
-    for sub_res in [walers_res["bom"], ties_res["bom"], props_res["bom"], clamps_res["bom"], corners_res]:
-        for code, qty in sub_res.items():
-            combined_bom[code] = combined_bom.get(code, 0) + qty
-
-    return {
-        "bom_summary": combined_bom,
-        "walers": walers_res,
-        "tie_rods": ties_res,
-        "push_pull_props": props_res,
-        "clamps_and_handles": clamps_res,
-        "corners": corners_res
-    }
+            for w in row:
+                totals[format_panel_code(w, h)] += count
+    return dict(totals)
