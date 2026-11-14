@@ -1,482 +1,741 @@
-# teko_calculator.py
 """
-Единствената логика за редене на панели TEKO (височина, ширина, разположение по страни).
-Ползва се от app.py и drawing_generator.py.
-Правилата следват "Алгоритъм за редене на кофража":
-  - първо панели 60, после по-малки; страните A и A1 са огледални (60 срещу 60 и т.н.)
-  - при L/U стени до външния ъгъл EX идва панел "дебелина + 10" (10 = ширина на IN),
-    след което страната се реди като права стена
+excel_export.py
+Количествена сметка (КСС) и чертежи в Excel за редактиране - по образеца reference/expected/12345676.xlsx:
+  - лист „Кол. сметка“: всички артикули в реда на офертата, количествата са формули към листовете на елементите;
+    колоните от „1. Оферта.xlsx“ - цена и наличност за попълване на ръка, размери, площ, тегло, общо, отстъпка;
+  - лист „Елемент N“: изглед отгоре и изглед отпред на всяка страна от слети клетки (1 клетка = 5 см),
+    всеки панел и ъгъл с дебела външна граница; вдясно от чертежите - пълната КСС за елемента
+    (за 1 бр. и общо = за 1 бр. x брой);
+  - лист „Елементи Теко България“: всички панели и ъгли като готови блокове за копиране при редакция.
+Разположението идва от teko_calculator.layout_element, геометрията в план - от drawing_generator.
 """
+import io
 import math
-from collections import Counter
 
-IN_CORNER_CM = 10
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 
-STANDARD_HEIGHT_MAP = {
-    240: [120, 120],
-    270: [150, 120],
-    300: [150, 150],
-    330: [150, 120, 60],
-    360: [150, 150, 60]
-}
+from drawing_generator import PANEL_T, _face_strips, _plan_geometry
+from teko_calculator import (format_panel_code, is_compensator_row, thickness_label, t_wall_offset_label,
+                             face_row_pieces, panel_height_cm)
+from weights_db import WEIGHTS_DB
 
-# Остатък след панелите 60 -> малки панели. 65/70/75 се получават, когато
-# остатъкът е 5/10/15 и една 60-ка се разменя (напр. 190 = 60+60+35+35 вместо 60+60+60+TC10).
-STANDING_REMAINDERS = {
-    0: [],
-    5: [5],
-    10: [10],
-    15: [15],
-    20: [20],
-    25: [25],
-    30: [30],
-    35: [35],
-    40: [20, 20],
-    45: [25, 20],
-    50: [30, 20],
-    55: [30, 25],
-    65: [35, 30],
-    70: [35, 35],
-    75: [35, 20, 20]
-}
+CELL_CM = 5          # една клетка = 5 см
+FIRST_COL = 3        # чертежите започват от колона C
+COL_WIDTH = 2.6      # почти квадратни клетки
+ROW_HEIGHT = 15
 
-# Остатък в ред легнали 60 след 150 и 120. Панел TK 60/35 няма, компенсатор в ред 60 няма (TC 60/x няма):
-# 35 = 20 + 15 (TK 60/20 + TK 60/15); 10 и 15 са панели TK 60/10, TK 60/15 (потребителят, 09.11.2026).
-LYING_REMAINDERS = {
-    35: [20, 15],
-    60: [30, 30],
-    65: [25, 20, 20],
-    70: [30, 20, 20],
-    75: [25, 25, 25],
-    80: [30, 30, 20],
-    85: [30, 30, 25],
-    90: [30, 30, 30],
-    95: [25, 25, 25, 20],
-    100: [30, 30, 20, 20],
-    105: [30, 25, 25, 25],
-    110: [30, 30, 30, 20],
-    115: [30, 30, 30, 25],
-    125: [30, 30, 30, 20, 15],
-}
+FILL_PANEL = "E6B9B8"
+FILL_COMPENSATOR = "C8D1DC"
+FILL_EX = "92D050"
+FILL_IN = "00B050"
+FILL_CONCRETE = "FAFAFA"
+FILL_TITLE = "D9D9D9"
+FILL_HEADER = "F2F2F2"
+SIDE_COLOR = "1F4E79"
 
-def format_panel_code(width_cm, height_cm):
+_black = Side(style="thin")
+BORDER_KSS = Border(left=_black, right=_black, top=_black, bottom=_black)
+_thick = Side(style="thick", color="000000")
+HIDE_ZERO = "0;-0;;@"   # нулите в КСС не се показват
+FILL_COUNT = "FFF2CC"
+FILL_BOARD = "FFD966"   # дървена дъска (под 5 см) - отделна колона, само на чертежа, не в КСС
+
+# Редът на артикулите в КСС (като в офертата) и кодовете от сметката, които влизат във всеки ред
+KSS_ITEMS = [
+    ("Панел TEKO  TK 150/60", ["TK 150/60", "TK 150/60 (полегнал)"]),
+    ("Панел TEKO  TK 150/35", ["TK 150/35"]),
+    ("Панел TEKO  TK 150/30", ["TK 150/30"]),
+    ("Панел TEKO  TK 150/25", ["TK 150/25"]),
+    ("Панел TEKO  TK 150/20", ["TK 150/20"]),
+    ("Панел TEKO  TK 120/60", ["TK 120/60", "TK 120/60 (полегнал)"]),
+    ("Панел TEKO  TK 120/35", ["TK 120/35"]),
+    ("Панел TEKO  TK 120/30", ["TK 120/30"]),
+    ("Панел TEKO  TK 120/25", ["TK 120/25"]),
+    ("Панел TEKO  TK 120/20", ["TK 120/20"]),
+    ("Панел TEKO  TK 60/30", ["TK 60/30"]),
+    ("Панел TEKO  TK 60/25", ["TK 60/25"]),
+    ("Панел TEKO  TK 60/20", ["TK 60/20"]),
+    ("Панел TEKO  TK 60/15", ["TK 60/15"]),
+    ("Панел TEKO  TK 60/10", ["TK 60/10"]),
+    ("Ръкохватка H8", ["Ръкохватка H8"]),
+    ("TEKO КОМПЕНСАТОР  TC150/15", ["TC 150/15"]),
+    ("TEKO КОМПЕНСАТОР  TC150/10", ["TC 150/10"]),
+    ("TEKO КОМПЕНСАТОР  TC150/5", ["TC 150/5"]),
+    ("TEKO КОМПЕНСАТОР  TC120/15", ["TC 120/15"]),
+    ("TEKO КОМПЕНСАТОР  TC120/10", ["TC 120/10"]),
+    ("TEKO КОМПЕНСАТОР  TC120/5", ["TC 120/5"]),
+    ("ВЪТРЕШЕН ЪГЪЛ  IN150", ["Вътрешен ъгъл IN150"]),
+    ("ВЪТРЕШЕН ЪГЪЛ  IN120", ["Вътрешен ъгъл IN120"]),
+    ("ВЪНШЕН ЪГЪЛ  EX240", ["Външен ъгъл EX240"]),
+    ("ВЪНШЕН  СКОСЕН ЪГЪЛ EС240", []),
+    ("Ръкохватка  H4", ["Ръкохватка H4"]),
+    ("Подравняващ ригел   AW 100 поцинковани", ["Ригел AW 100"]),
+    ("Подравняващ ригел   AW 200 поцинковани", ["Ригел AW 200"]),
+    ("Подравняващ ригел   AW 300 поцинковани", ["Ригел AW 300"]),
+    ("Вертикализатор PP", ["Вертикализатор PP"]),
+    ("Панел TEKO  TK 40/25", ["TK 40/25"]),
+    ("Панел TEKO  TK 30/25", ["TK 30/25"]),
+    ("Панел TEKO  TK 20/20", ["TK 20/20"]),
+    ("Панел TEKO  TK 20/15", ["TK 20/15"]),
+    ("Панел TEKO  TK 15/15", ["TK 15/15"]),
+    ("Ръкохватка  H6", ["Ръкохватка H6"]),
+    ("Ръкохватка  H5", ["Ръкохватка H5"]),
+    ("Шпилка TR 12", ["Шпилка TR 12"]),
+    ("Гайка N12", ["Гайка N12"]),
+]
+_KSS_NAME_BY_CODE = {code: name for name, codes in KSS_ITEMS for code in codes}
+
+
+def _kss_dimensions():
+    """Колона „Dimensions“ и покривна площ на 1 бр. [m2] по редовете на КСС (както в „1. Оферта.xlsx“)."""
+    dims = {}
+    for name, codes in KSS_ITEMS:
+        if codes and codes[0].startswith("TK "):
+            h, w = (int(x) for x in codes[0].split()[1].split("/"))
+            dims[name] = (f"{h}/{w}/7,8", round(h * w / 10000, 4))
+    dims.update({
+        "TEKO КОМПЕНСАТОР  TC150/15": ("150/7/15/7", 0.225), "TEKO КОМПЕНСАТОР  TC150/10": ("150/7/10/7", 0.15),
+        "TEKO КОМПЕНСАТОР  TC150/5": ("150/6/5/6", 0.075), "TEKO КОМПЕНСАТОР  TC120/15": ("120/7/15/7", 0.18),
+        "TEKO КОМПЕНСАТОР  TC120/10": ("120/7/10/7", 0.12), "TEKO КОМПЕНСАТОР  TC120/5": ("120/6/5/6", 0.06),
+        "ВЪТРЕШЕН ЪГЪЛ  IN150": ("150/10/10", 0.3), "ВЪТРЕШЕН ЪГЪЛ  IN120": ("120/10/10", 0.24),
+        "ВЪНШЕН ЪГЪЛ  EX240": ("240/7/7", None), "ВЪНШЕН  СКОСЕН ЪГЪЛ EС240": ("240/7/7/3,5", None),
+        "Ръкохватка H8": ("8", None), "Ръкохватка  H6": ("6,5", None), "Ръкохватка  H5": ("5", None),
+        "Ръкохватка  H4": ("4,3", None),
+        "Подравняващ ригел   AW 100 поцинковани": ("100", None),
+        "Подравняващ ригел   AW 200 поцинковани": ("200", None),
+        "Подравняващ ригел   AW 300 поцинковани": ("300", None),
+        "Вертикализатор PP": ("210 - 350", None), "Шпилка TR 12": ("1,2/100", None), "Гайка N12": ("10", None),
+    })
+    return dims
+
+
+KSS_DIMENSIONS = _kss_dimensions()
+KSS_WEIGHTS = {name: WEIGHTS_DB.get(codes[0]) for name, codes in KSS_ITEMS if codes}
+
+# Колоните на „Кол. сметка“ след „Кол.“ (като в „1. Оферта.xlsx“); M и O - мерните единици под „ОБЩО“
+KSS_OFFER_HEADERS = {"E": "Ед. Цена", "F": "Стойност", "G": "Ед. Цена с отстъпка", "H": "Стойност с отстъпка",
+                     "I": "Dimensions,  [cm]", "J": "Покривна площ,  [m2]", "K": "Тегло, [кг]",
+                     "L": "Тегло общо, [кг]", "N": "Кол,  [m2]", "P": "Наличност в склада", "Q": "Остават"}
+KSS_OFFER_WIDTHS = {"E": 9.3, "F": 14.6, "G": 9.7, "H": 13.7, "I": 12.3, "J": 8.1, "K": 7.3, "L": 9.4,
+                    "M": 2.1, "N": 9.1, "O": 2.0, "P": 9.1, "Q": 9.1}
+MONEY = "#,##0.00;-#,##0.00;;@"
+
+TYPE_WORDS = {"column": "колона", "wall": "права стена", "l_wall": "L-стена",
+              "u_wall": "П-стена", "t_wall": "T-стена"}
+
+
+def kss_rows(bom):
     """
-    Генерира каталожното наименование според официалната спецификация ТЕКО.
-    Полегнал ред (височина 60): ширини 150/120 са полегнали големи панели,
-    останалите са TK 60/x (и 10 / 15 - панели TK 60/10, TK 60/15; компенсатори TC 60/x няма).
-    Ред 20-35 см (полегнали панели): TK по-голям/по-малък размер, напр. 150/20, 20/15.
-    Ред 5/10/15 см - компенсатор отгоре: TC 150/x.
+    Сметката {код: брой} по редовете на КСС: [(наименование, брой)] в реда на офертата.
+    Кодове извън списъка (ако се появят) отиват най-отдолу със собственото си име.
     """
-    if is_compensator_row(height_cm):
-        return f"TC 150/{int(height_cm)}"
-    if height_cm < 60:
-        return f"TK {max(width_cm, height_cm)}/{min(width_cm, height_cm)}"
-    if height_cm == 60:
-        if width_cm == 150:
-            return "TK 150/60 (полегнал)"
-        if width_cm == 120:
-            return "TK 120/60 (полегнал)"
-        return f"TK 60/{width_cm}"
+    totals = {}
+    for code, qty in bom.items():
+        name = _KSS_NAME_BY_CODE.get(code, code)
+        totals[name] = totals.get(name, 0) + qty
+    order = [name for name, _codes in KSS_ITEMS]
+    extra = sorted(n for n in totals if n not in order)
+    return [(n, totals[n]) for n in order + extra if totals.get(n)]
 
-    if width_cm <= 15 and height_cm in [120, 150]:
-        return f"TC {height_cm}/{width_cm}"
 
-    return f"TK {height_cm}/{width_cm}"
+def _panel_label(width_cm, height_cm):
+    """Надпис на панел в изгледа отпред: 150/60, 60/30, TC 150/15 (без „TK“)."""
+    code = format_panel_code(int(width_cm), height_cm)  # без int(): редът панели 15 не е TC
+    return code.replace(" (полегнал)", "").replace("TK ", "")
 
-COMPENSATOR_PIECE_CM = 150  # компенсаторът отгоре се смята на парчета по 150 см
 
-# Остатък над редовете 150/120/60 (под 60 см), отдолу нагоре:
-# 5/10/15 - компенсатор TC отгоре; 20-35 - ред легнали панели; 40-55 - два реда.
-TOP_REMAINDERS = {
-    0: [], 5: [5], 10: [10], 15: [15],
-    20: [20], 25: [25], 30: [30], 35: [35],
-    40: [20, 20], 45: [25, 20], 50: [30, 20], 55: [30, 25],
-}
+def _cells(cm):
+    return max(1, int(round(cm / CELL_CM)))
 
-# Дължини на панелите в ред с височина 20-35 см (легнали големи и малки панели от спецификацията)
-STRIP_PIECES = {
-    20: [150, 120, 60, 20, 15],   # TK 150/20, 120/20, 60/20, 20/20, 20/15
-    25: [150, 120, 60, 40, 30],   # TK 150/25, 120/25, 60/25, 40/25, 30/25
-    30: [150, 120, 60, 25],       # TK 150/30, 120/30, 60/30, 30/25
-    35: [150, 120],               # TK 150/35, 120/35 (TK 60/35 няма)
-}
 
-# Ред панели с височина 15 см (TK 60/15, 20/15, 15/15) - не компенсатор (Solar farm Tipperary):
-# 35 = ред 20 + ред 15, когато един ред легнали 35 не покрива страните точно.
-PANEL_ROW_15_PIECES = [60, 20, 15]
+def _half_up(x):
+    """Закръгляне до цяло, половината нагоре (round() в Python закръгля 48,5 към 48)."""
+    return int(math.floor(x + 0.5 + 1e-9))
 
-class PanelRow(int):
-    """Височина на ред панели 15 см (за разлика от компенсатора TC 15)."""
 
-PANEL_ROW_15 = PanelRow(15)
-
-def is_compensator_row(height_cm):
-    """Ред с височина 5/10/15 см - компенсатор TC отгоре (винаги най-горният ред)."""
-    return 0 < height_cm <= 15 and not isinstance(height_cm, PanelRow)
-
-def compensator_pieces(length_cm):
-    """Брой компенсатори по 150 см за дължина (закръглено нагоре: 1000 см -> 7 бр.)."""
-    return int(math.ceil(round(length_cm, 6) / COMPENSATOR_PIECE_CM))
-
-def _height_bases(height_cm):
+class _Sheet:
     """
-    Точните комбинации от редове 150 / 120 / 60 до височината, с остатък под 60 см -
-    от най-високата към по-ниските. За всяка сума - с по-малко редове, после повече 150.
-    Подредени отдолу нагоре: 150, 120, 60.
+    Рисуване с блокове от слети клетки; застъпващи се блокове не се сливат (Excel не ги приема).
+    Блокът (панел, ъгъл) е с дебела външна граница, вътре - без линии.
+    Чертежите се рисуват в базова мрежа (1 клетка = 5 см). Дървената дъска е в отделна вмъкната колона
+    (или ред при вертикална страна в изгледа отгоре) - cols_in / rows_in са базовите номера, пред които
+    има вмъкната колона / ред; панел, който минава през чужда вмъкната колона, се разширява през нея.
+    Без тези колони / редове (изтрити в Excel) чертежът е точно както без дъските.
     """
-    best = {}
-    for n150 in range(height_cm // 150 + 1):
-        for n120 in range((height_cm - 150 * n150) // 120 + 1):
-            for n60 in range((height_cm - 150 * n150 - 120 * n120) // 60 + 1):
-                levels = [150] * n150 + [120] * n120 + [60] * n60
-                total = sum(levels)
-                key = (-len(levels), n150)
-                if height_cm - total < 60 and (total not in best or key > best[total][0]):
-                    best[total] = (key, levels)
-    return [best[total][1] for total in sorted(best, reverse=True)]
 
-def _remainder_options(rem, low=False):
+    def __init__(self, ws, cols_in=(), rows_in=()):
+        self.ws = ws
+        self.used = set()
+        self.max_row = 1
+        self.max_col = 1
+        self.cols_in = sorted(set(cols_in))
+        self.rows_in = sorted(set(rows_in))
+        self.want_cols, self.want_rows = set(), set()   # дъските, намерени при рисуването
+        ws.sheet_format.defaultColWidth = COL_WIDTH
+        ws.sheet_format.defaultRowHeight = ROW_HEIGHT
+        ws.sheet_view.showGridLines = True
+
+    def C(self, c):
+        return c + sum(1 for k in self.cols_in if k <= c)
+
+    def R(self, r):
+        return r + sum(1 for k in self.rows_in if k <= r)
+
+    def block(self, row, col, n_rows, n_cols, text=None, fill=None, size=13, rotation=0,
+              bold=True, border=True, wrap=False, color=None):
+        """Блок в базовата мрежа (минава и през вмъкнатите колони / редове вътре в него)."""
+        r0, c0 = self.R(row), self.C(col)
+        self.raw_block(r0, c0, self.R(row + n_rows - 1) - r0 + 1, self.C(col + n_cols - 1) - c0 + 1,
+                       text, fill, size, rotation, bold, border, wrap, color)
+
+    def board_col(self, row, k, n_rows):
+        """Дъската във вмъкнатата колона пред базовата колона k (редовете - базови)."""
+        self.want_cols.add(k)
+        if k in self.cols_in:
+            r0 = self.R(row)
+            c = k + sum(1 for j in self.cols_in if j < k)
+            self.raw_block(r0, c, self.R(row + n_rows - 1) - r0 + 1, 1, None, FILL_BOARD)
+
+    def board_row(self, k, col, n_cols):
+        """Дъската във вмъкнатия ред пред базовия ред k (колоните - базови)."""
+        self.want_rows.add(k)
+        if k in self.rows_in:
+            c0 = self.C(col)
+            r = k + sum(1 for j in self.rows_in if j < k)
+            self.raw_block(r, c0, 1, self.C(col + n_cols - 1) - c0 + 1, None, FILL_BOARD)
+
+    def fill_inserted(self, color):
+        """Бетонът продължава през вмъкнатите колони / редове (там, където е от двете страни)."""
+        def filled(r, c):
+            f = self.ws.cell(r, c).fill
+            return f is not None and f.fill_type == "solid" and str(f.fgColor.rgb).endswith(color)
+        cols = [k + i for i, k in enumerate(self.cols_in)]
+        rows = [k + i for i, k in enumerate(self.rows_in)]
+        for c in cols:
+            for r in range(1, self.max_row + 1):
+                if (r, c) not in self.used and filled(r, c - 1) and filled(r, c + 1):
+                    self.ws.cell(r, c).fill = PatternFill("solid", fgColor=color)
+        for r in rows:
+            for c in range(1, self.max_col + 1):
+                if (r, c) not in self.used and filled(r - 1, c) and filled(r + 1, c):
+                    self.ws.cell(r, c).fill = PatternFill("solid", fgColor=color)
+
+    def raw_block(self, row, col, n_rows, n_cols, text=None, fill=None, size=13, rotation=0,
+                  bold=True, border=True, wrap=False, color=None):
+        cells = [(r, c) for r in range(row, row + n_rows) for c in range(col, col + n_cols)]
+        free = [rc for rc in cells if rc not in self.used]
+        if not free:
+            return
+        self.used.update(free)
+        fill_obj = PatternFill("solid", fgColor=fill) if fill else None
+        last_row, last_col = row + n_rows - 1, col + n_cols - 1
+        for r, c in free:
+            cell = self.ws.cell(r, c)
+            if fill_obj:
+                cell.fill = fill_obj
+            if border:
+                cell.border = Border(left=_thick if c == col else None, right=_thick if c == last_col else None,
+                                     top=_thick if r == row else None, bottom=_thick if r == last_row else None)
+        if len(free) == len(cells) and len(cells) > 1:
+            self.ws.merge_cells(start_row=row, start_column=col, end_row=last_row, end_column=last_col)
+        r0, c0 = free[0]
+        cell = self.ws.cell(r0, c0)
+        if text is not None:
+            cell.value = text
+            cell.font = Font(bold=bold, size=size, color=color)
+            cell.alignment = Alignment(horizontal="center", vertical="center",
+                                       text_rotation=rotation, wrap_text=wrap)
+        self.max_row = max(self.max_row, last_row)
+        self.max_col = max(self.max_col, last_col)
+
+    def cell(self, row, col, n_cols, value, bold=False, align="center", fill=None, number_format=None):
+        """Клетка от таблица (слята по ширина) с тънка рамка; връща адреса ѝ."""
+        self.ws.merge_cells(start_row=row, start_column=col, end_row=row, end_column=col + n_cols - 1)
+        for c in range(col, col + n_cols):
+            self.ws.cell(row, c).border = BORDER_KSS
+            if fill:
+                self.ws.cell(row, c).fill = PatternFill("solid", fgColor=fill)
+            self.used.add((row, c))
+        cell = self.ws.cell(row, col)
+        cell.value = value
+        cell.font = Font(size=10, bold=bold)
+        cell.alignment = Alignment(horizontal=align, vertical="center", wrap_text=True)
+        if number_format:
+            cell.number_format = number_format
+        self.max_row = max(self.max_row, row)
+        self.max_col = max(self.max_col, col + n_cols - 1)
+        return f"{get_column_letter(col)}{row}"
+
+    def fill(self, row, col, color):
+        row, col = self.R(row), self.C(col)
+        if (row, col) in self.used:
+            return
+        self.ws.cell(row, col).fill = PatternFill("solid", fgColor=color)
+
+    def text(self, row, col, value, size=8, bold=False, color="555555", raw=False):
+        if not raw:
+            row, col = self.R(row), self.C(col)
+        cell = self.ws.cell(row, col)
+        cell.value = value
+        cell.font = Font(size=size, bold=bold, color=color)
+        self.max_row = max(self.max_row, row)
+        self.max_col = max(self.max_col, col)
+
+
+def _corner_block(sheet, row, col, n_rows, kind):
+    sheet.block(row, col, n_rows, 2, kind, FILL_EX if kind == "EX" else FILL_IN, size=7, wrap=True)
+
+
+# ==========================================
+# ИЗГЛЕД ОТГОРЕ
+# ==========================================
+def _point_in_poly(x, y, poly):
+    inside = False
+    j = len(poly) - 1
+    for i in range(len(poly)):
+        xi, yi = poly[i]
+        xj, yj = poly[j]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
+def _collapse(boards):
+    """Координата без дъските: всичко след дъска се премества с ширината ѝ (дъската е в своя колона)."""
+    boards = sorted(set((round(p, 3), w) for p, w in boards))
+    return lambda v: v - sum(w for p, w in boards if p < v - 1e-6)
+
+
+def _top_view(sheet, layout, top_row):
     """
-    Начини за остатъка отгоре, по ред на предпочитане. Първо TOP_REMAINDERS; при 40-55 см -
-    и другите два реда легнали, после два реда + компенсатор (по-големият TC първи),
-    напр. 55 = 30 + 25, 35 + 20, после 20 + 20 + TC 15 (55.pdf).
-    low: нисък елемент (под 60 см, без редове 150 / 120 / 60) - само там 35 може да е ред 20 +
-    ред панели 15 (Solar); при по-високите 5 / 10 / 15 см отгоре е компенсатор TC.
+    Изглед отгоре от долния ред панели на всяка страна; връща (последния използван ред,
+    {страна: базова колона на началото ѝ} - изгледът отпред на хоризонтална страна е точно под нея).
     """
-    options = [TOP_REMAINDERS[rem]]
-    if rem == 35 and low:
-        options.append([20, PANEL_ROW_15])   # Solar farm Tipperary: 35 = ред 20 + ред панели 15
-    if rem >= 40:
-        strips = sorted(STRIP_PIECES, reverse=True)
-        pairs = lambda r: [[a, b] for a in strips for b in strips if a >= b and a + b == r]
-        options += [p for p in pairs(rem) if p not in options]
-        for tc in (15, 10, 5):
-            options += [p + [tc] for p in pairs(rem - tc)]
-    return options
+    T = PANEL_T
+    poly, place, corners = _plan_geometry(layout)
+    strips = _face_strips(layout, place, poly)
 
-def height_candidates(height_cm):
-    """
-    Възможните разпределения по височина (отдолу нагоре), по ред на предпочитане:
-    най-високата основа от 150 / 120 / 60 с остатъка отгоре, после по-ниските основи.
-    layout_element взима първото, при което редовете легнали панели покриват страните точно.
-    """
-    height_cm = _round_up_to_5(height_cm)
-    if height_cm in STANDARD_HEIGHT_MAP:
-        return [list(STANDARD_HEIGHT_MAP[height_cm])]
-    return [base + rest for base in _height_bases(height_cm)
-            for rest in _remainder_options(height_cm - sum(base), low=not base)]
-
-def solve_height_cm(height_cm):
-    """
-    Пресмята височинното разпределение на панелите (отдолу нагоре), без да гледа дължините.
-    За стандартни височини връща фиксираната комбинация. Иначе - най-високата точна
-    комбинация от 150 / 120 / 60, а остатъкът (под 60 см) отгоре: 20-55 см - един или два реда
-    легнали панели, 5/10/15 см - компенсатор TC (най-отгоре, никога два един до друг).
-    Височината се закръгля нагоре до 5 см. Окончателното е в layout_element (сменя основата,
-    когато ред легнали не покрива страна точно).
-    """
-    return height_candidates(height_cm)[0]
-
-def _round_up_to_5(width_cm):
-    """Размер, некратен на 5 см, се закръгля нагоре (допълва се с компенсатор TC 5)."""
-    return int(math.ceil(round(width_cm, 6) / 5.0) * 5)
-
-def _solve_width_standing(width_cm):
-    """Изправен ред (H=150/120): максимум панели 60, остатъкът с малки панели."""
-    count_60, rem = divmod(width_cm, 60)
-    if rem in (5, 10, 15) and count_60 > 0:
-        count_60 -= 1
-        rem += 60
-    return [60] * count_60 + STANDING_REMAINDERS[rem]
-
-def _solve_width_lying(width_cm):
-    """
-    Полегнал ред (H=60): първо полегнали 150 и 120, после малки модули (LYING_REMAINDERS).
-    Остатък 5 (60/5 няма): 150 + 5 -> 120 + 20 + 15, 120 + 5 -> 30 + 30 + 30 + 20 + 15;
-    само 5 см не се покрива точно (панелът 10 излиза) - layout_element сменя основата.
-    """
-    count_150, rem = divmod(width_cm, 150)
-    count_120, rem = divmod(rem, 120)
-    if rem == 5 and count_150:
-        count_150, count_120, rem = count_150 - 1, count_120 + 1, 35
-    elif rem == 5 and count_120:
-        count_120, rem = count_120 - 1, 125
-    elif rem == 5:
-        return [10]
-    small = LYING_REMAINDERS.get(rem) or STANDING_REMAINDERS[rem]
-    return [150] * count_150 + [120] * count_120 + small
-
-def _solve_width_strip(width_cm, pieces):
-    """
-    Ред легнали панели с височина 20-35 см: точно покритие с възможно най-малко панели,
-    големите отляво, малките допълват отдясно (200 = 120 + 60 + 20, 205 = 150 + 20 + 20 + 15).
-    Когато не може точно - най-малкото надхвърляне (последният панел излиза).
-    """
-    limit = width_cm + max(pieces)
-    best = {0: []}   # дължина -> най-малко панели, по-големите първи
-    for total in range(5, limit + 1, 5):
-        options = [sorted(best[total - p] + [p], reverse=True)
-                   for p in pieces if total - p in best]
-        if options:
-            best[total] = min(options, key=lambda r: (len(r), [-x for x in r]))
-    reach = min(t for t in best if t >= width_cm)
-    return best[reach]
-
-def solve_width_cm(width_cm, height_level_cm=150):
-    """
-    Подреден списък с ширините на панелите за един ред с дадена височина.
-    Сумата е равна на ширината (закръглена нагоре до 5 см); надхвърля я само ред легнали
-    панели 20-35 см, когато няма точно покритие.
-    """
-    if width_cm <= 0:
-        return []
-    w = _round_up_to_5(width_cm)
-    if is_compensator_row(height_level_cm):
-        return [w]
-    if isinstance(height_level_cm, PanelRow):
-        return _solve_width_strip(w, PANEL_ROW_15_PIECES)
-    if height_level_cm in STRIP_PIECES:
-        return _solve_width_strip(w, STRIP_PIECES[height_level_cm])
-    if height_level_cm == 60:
-        return _solve_width_lying(w)
-    return _solve_width_standing(w)
-
-def _face(name, segments, levels, start=None, end=None, flip=()):
-    """
-    Страна от кофража. segments са дължини, всяка се реди самостоятелно с solve_width_cm,
-    така че еднаквите сегменти на срещуположните страни излизат огледални.
-    flip: индекси на сегментите, редени в обратен ред (панелите 60 откъм края на сегмента).
-    """
-    return {
-        "name": name,
-        "length_cm": sum(max(0, s) for s in segments),
-        "start": start,
-        "end": end,
-        "rows": _face_rows(segments, levels, flip),
-        "segments": list(segments),
-        "flip": tuple(flip),
-    }
-
-def _face_rows(segments, levels, flip=()):
-    rows = []
-    for h in levels:
-        if is_compensator_row(h):
-            # компенсаторът е една лента по цялата страна
-            rows.append([sum(_round_up_to_5(seg) for seg in segments if seg > 0)])
-            continue
-        row = []
-        for i, seg in enumerate(segments):
-            widths = solve_width_cm(seg, h)
-            row += widths[::-1] if i in flip else widths
-        rows.append(row)
-    return rows
-
-def _strip_misses(faces, levels):
-    """Брой сегменти, които някой ред легнали 20-60 см не покрива точно (последният панел излиза)."""
-    strips = [h for h in levels if h in STRIP_PIECES or isinstance(h, PanelRow) or h == 60]
-    return sum(1 for face in faces for seg in face["segments"] if seg > 0
-               and any(sum(solve_width_cm(seg, h)) != _round_up_to_5(seg) for h in strips))
-
-def _cm_or_default(value, default):
-    """Размер от таблицата; празен (None, NaN, 0) = default (напр. общата дебелина на елемента)."""
-    try:
-        value = float(value)
-    except (TypeError, ValueError):
-        return default
-    return value if value == value and value > 0 else default
-
-def arm_thicknesses(layout):
-    """Дебелините на рамената (рамо 1, 2, 3) на L-, П- и Т-стена; при другите - празен списък."""
-    d = layout["dims"]
-    return [d[k] for k in ("t1", "t2", "t3") if k in d]
-
-def thickness_label(layout, unit=" см"):
-    """„дебелина 25 см“; при различни стени - „стена A дебелина 30 см, стена B дебелина 25 см“."""
-    arms = arm_thicknesses(layout) or [layout["thickness_cm"]]
-    if len(set(arms)) == 1:
-        return f"дебелина {arms[0]:g}{unit}"
-    return ", ".join(f"стена {'ABC'[i]} дебелина {t:g}{unit}" for i, t in enumerate(arms))
-
-def t_wall_middle_cm(l1_cm, stem_thickness_cm):
-    """Ребро в средата на полката: от левия край до лявото лице на реброто, надолу до 5 см."""
-    return math.floor((float(l1_cm) - stem_thickness_cm) / 2 / 5.0) * 5
-
-def t_wall_offset_label(layout, unit=" см"):
-    """„ребро на 100 см от левия край“, когато реброто на Т-стена не е в средата; иначе празно."""
-    d = layout["dims"]
-    if layout["type"] != "t_wall" or d["l3"] == t_wall_middle_cm(d["l1"], d["t2"]):
-        return ""
-    return f"ребро на {d['l3']:g}{unit} от левия край"
-
-def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=25,
-                   l1_cm=0, l2_cm=0, l3_cm=0, closed_ends=0,
-                   closed_end_1=None, closed_end_2=None, closed_end_3=False,
-                   thickness1_cm=None, thickness2_cm=None, thickness3_cm=None):
-    """
-    Разположение на панелите по страни и редове за един елемент.
-
-    elem_type: "column" (width x length), "wall" (length, thickness),
-               "l_wall" (l1 = рамо A, l2 = рамо B, thickness),
-               "u_wall" (l1 = рамо A, l2 = гръб B, l3 = рамо C, thickness),
-               "t_wall" (l1 = страна A (полката), l2 = страна B / B1 (реброто, от предното лице
-                         на полката до края му), l3 = от левия край на полката (край 2) до лявото
-                         лице на реброто - празно / 0 = реброто е в средата, thickness).
-    closed_end_1 / closed_end_2: затворени челни края (стени). Край 1 е краят на рамо A
-                 (при права стена - десният), край 2 - краят на последното рамо B / C
-                 (при права стена - левият). При T-стена: край 1 - десният край на полката,
-                 край 2 - левият, closed_end_3 - краят на реброто.
-    closed_ends: 0/1/2 - кратък запис, когато не е зададено кой край: 1 = край 1, 2 = двата.
-    thickness1_cm / thickness2_cm / thickness3_cm: дебелина на рамо 1 / 2 / 3 (при T-стена - полката
-                 и реброто); празна = thickness_cm. До външния ъгъл EX на всяко рамо: дебелината на
-                 перпендикулярното рамо + 10; челото на затворен край е колкото дебелината на своето рамо.
-
-    Връща речник с height_levels, faces (всяка с rows = ширини по редове отдолу нагоре)
-    и corners (брой позиции EX / IN).
-    """
-    levels = solve_height_cm(height_cm)
-    t = float(thickness_cm or 0)
-    t1, t2, t3 = (_cm_or_default(v, t) for v in (thickness1_cm, thickness2_cm, thickness3_cm))
-    if closed_end_1 is None and closed_end_2 is None:
-        n = max(0, min(2, int(closed_ends or 0)))
-        closed_end_1, closed_end_2 = n >= 1, n >= 2
-    closed = [bool(closed_end_1), bool(closed_end_2)]
-    faces = []
-    ex, inn = 0, 0
-
-    if elem_type == "column":
-        a, b = float(width_cm), float(length_cm)
-        faces = [
-            _face("A", [a], levels, "EX", "EX"),
-            _face("A1", [a], levels, "EX", "EX"),
-            _face("B", [b], levels, "EX", "EX"),
-            _face("B1", [b], levels, "EX", "EX"),
-        ]
-        ex = 4
-        dims = {"a": a, "b": b}
-        closed = [False, False]
-
-    elif elem_type == "wall":
-        length = float(length_cm)
-        end_r = "EX" if closed[0] else None
-        end_l = "EX" if closed[1] else None
-        faces = [
-            _face("A", [length], levels, end_l, end_r),
-            _face("A1", [length], levels, end_l, end_r),
-        ]
-        if closed[0]:
-            faces.append(_face("Край 1", [t], levels, "EX", "EX"))
-        if closed[1]:
-            faces.append(_face("Край 2", [t], levels, "EX", "EX"))
-        ex = 2 * sum(closed)
-        dims = {"length": length, "t": t}
-
-    elif elem_type == "l_wall":
-        l1, l2 = float(l1_cm), float(l2_cm)
-        end_a = "EX" if closed[0] else None
-        end_b = "EX" if closed[1] else None
-        k_a, k_b = t2 + IN_CORNER_CM, t1 + IN_CORNER_CM  # до EX: перпендикулярното рамо + 10
-        faces = [
-            _face("A", [k_a, l1 - k_a], levels, "EX", end_a),
-            _face("A1", [l1 - k_a], levels, "IN", end_a),
-            _face("B", [k_b, l2 - k_b], levels, "EX", end_b),
-            _face("B1", [l2 - k_b], levels, "IN", end_b),
-        ]
-        if closed[0]:
-            faces.append(_face("Край A", [t1], levels, "EX", "EX"))
-        if closed[1]:
-            faces.append(_face("Край B", [t2], levels, "EX", "EX"))
-        ex = 1 + 2 * sum(closed)
-        inn = 1
-        dims = {"l1": l1, "l2": l2, "t": t, "t1": t1, "t2": t2}
-
-    elif elem_type == "u_wall":
-        l1, l2, l3 = float(l1_cm), float(l2_cm), float(l3_cm)
-        end_a = "EX" if closed[0] else None
-        end_c = "EX" if closed[1] else None
-        # рамо 1 = A, рамо 2 = гърбът B, рамо 3 = C
-        k_b, k_a, k_c = t2 + IN_CORNER_CM, t1 + IN_CORNER_CM, t3 + IN_CORNER_CM
-        back = l2 - k_a - k_c
-        faces = [
-            _face("A", [k_b, l1 - k_b], levels, "EX", end_a),
-            _face("A1", [l1 - k_b], levels, "IN", end_a),
-            _face("B", [k_a, back, k_c], levels, "EX", "EX"),
-            _face("B1", [back], levels, "IN", "IN"),
-            _face("C", [k_b, l3 - k_b], levels, "EX", end_c),
-            _face("C1", [l3 - k_b], levels, "IN", end_c),
-        ]
-        if closed[0]:
-            faces.append(_face("Край A", [t1], levels, "EX", "EX"))
-        if closed[1]:
-            faces.append(_face("Край C", [t3], levels, "EX", "EX"))
-        ex = 2 + 2 * sum(closed)
-        inn = 2
-        dims = {"l1": l1, "l2": l2, "l3": l3, "t": t, "t1": t1, "t2": t2, "t3": t3}
-
-    elif elem_type == "t_wall":
-        # Полка A (задно лице, цяло) и A1 (предно лице, разделено от реброто на ляво и дясно,
-        # винаги с IN при реброто); ребро B / B1 от IN до края на реброто (край 3).
-        # Срещу „IN + ребро + IN“ на A стои сегмент t + 20, така че A е огледална на A1.
-        # EX - само на затворените краища, по 2 на край.
-        # Мястото на реброто p (от левия край на полката до лявото лице на реброто) е l3;
-        # празно / 0 - реброто е в средата. Реброто до самия край остава Т-стена (не L-стена).
-        # Рамо 1 = полката (дебелина t1), рамо 2 = реброто (дебелина ts).
-        l1, l2 = float(l1_cm), float(l2_cm)
-        ts = t2
-        p = _cm_or_default(l3_cm, t_wall_middle_cm(l1, ts))
-        left, right, stem = p - IN_CORNER_CM, l1 - p - ts - IN_CORNER_CM, l2 - IN_CORNER_CM
-        closed.append(bool(closed_end_3))
-        end_1 = "EX" if closed[0] else None
-        end_2 = "EX" if closed[1] else None
-        end_3 = "EX" if closed[2] else None
-        faces = [
-            _face("A", [left, ts + 2 * IN_CORNER_CM, right], levels, end_2, end_1, flip=(0,)),
-            _face("A1 ляво", [left], levels, end_2, "IN", flip=(0,)),
-            _face("A1 дясно", [right], levels, "IN", end_1),
-            _face("B", [stem], levels, end_3, "IN", flip=(0,)),
-            _face("B1", [stem], levels, end_3, "IN", flip=(0,)),
-        ]
-        if closed[0]:
-            faces.append(_face("Край 1", [t1], levels, "EX", "EX"))
-        if closed[1]:
-            faces.append(_face("Край 2", [t1], levels, "EX", "EX"))
-        if closed[2]:
-            faces.append(_face("Край 3", [ts], levels, "EX", "EX"))
-        ex = 2 * sum(closed)
-        inn = 2
-        dims = {"l1": l1, "l2": l2, "l3": p, "t": t, "t1": t1, "t2": ts}
-
-    else:
-        raise ValueError(f"Непознат тип елемент: {elem_type}")
-
-    # Ред легнали, който не покрива страна точно -> следващата по-ниска основа (55.pdf: 205 см).
-    # Избира се разпределението с най-малко непокрити сегменти (челата 25 см често не се покриват).
-    candidates = height_candidates(height_cm)
-    best = min(candidates, key=lambda c: _strip_misses(faces, c))
-    if best != levels:
-        levels = best
-        for face in faces:
-            face["rows"] = _face_rows(face["segments"], levels, face["flip"])
-
-    return {
-        "type": elem_type,
-        "height_cm": float(height_cm),
-        "height_levels": levels,
-        "thickness_cm": t,
-        "closed_ends": sum(closed),
-        "closed": closed,
-        "dims": dims,
-        "faces": faces,
-        "corners": {"EX": ex, "IN": inn},
-    }
-
-def count_panels(layout, count=1):
-    """Брой панели по каталожен код за разположението (умножено по броя елементи)."""
-    totals = Counter()
+    rects = []   # (x, y, w, h, текст, цвят, завъртане, размер на шрифта)
+    boards = []  # (x, y, w, h, ос, посока навън, надпис или None) - дървените дъски
     for face in layout["faces"]:
-        for h, row in zip(layout["height_levels"], face["rows"]):
-            if is_compensator_row(h):
-                totals[format_panel_code(0, h)] += sum(compensator_pieces(w) for w in row) * count
-                continue
-            for w in row:
-                totals[format_panel_code(w, h)] += count
-    return dict(totals)
+        x0, y0, axis, *rev = place[face["name"]]
+        pieces = face_row_pieces(face, layout["height_levels"][0], face["rows"][0])
+        s = 0
+        for w, is_board, panel_w in (pieces[::-1] if rev and rev[0] else pieces):
+            # надписът на дъската - само на външните страни (A1, B1 ... са срещу тях)
+            note = f"ДЪСКА {w:g} см".replace(".", ",") if face["name"][1:2] != "1" else None
+            if is_board:
+                normal = strips[face["name"]][5]
+                boards.append((x0 + s, y0, w, T, axis, normal, note) if axis == 'x'
+                              else (x0, y0 + s, T, w, axis, normal, note))
+            elif axis == 'x':
+                rects.append((x0 + s, y0, w, T, str(int(panel_w)), FILL_PANEL, 0, 13))
+            else:
+                rects.append((x0, y0 + s, T, w, str(int(panel_w)), FILL_PANEL, 90, 13))
+            s += w
+    for kind, x, y in corners:
+        rects.append((x, y, T, T, kind, FILL_EX if kind == "EX" else FILL_IN, 0, 7))
+
+    # без дъските по x (хоризонтални страни) и по y (вертикални) - те са във вмъкнати колони / редове
+    tx = _collapse([(b[0], b[2]) for b in boards if b[4] == 'x'])
+    ty = _collapse([(b[1], b[3]) for b in boards if b[4] == 'y'])
+
+    # Букви на страните - една клетка навън от панела, в средата на страната
+    letters = []
+    for name, (axis, a0, a1, c_lo, c_hi, normal) in strips.items():
+        if name.startswith("Край"):
+            continue
+        cross = (c_hi + CELL_CM) if normal > 0 else (c_lo - 2 * CELL_CM)
+        along = (a0 + a1) / 2 - CELL_CM / 2
+        x, y = (along, cross) if axis == 'x' else (cross, along)
+        letters.append((x, y, name.split()[0]))
+
+    xs = [tx(r[0]) for r in rects] + [tx(r[0] + r[2]) for r in rects] + [tx(p[0]) for p in poly] + \
+         [v for x, _, _ in letters for v in (tx(x), tx(x) + CELL_CM)]
+    ys = [ty(r[1]) for r in rects] + [ty(r[1] + r[3]) for r in rects] + [ty(p[1]) for p in poly] + \
+         [v for _, y, _ in letters for v in (ty(y), ty(y) + CELL_CM)]
+    # място за надписите на дъските (около 2,5 знака на клетка)
+    for x, y, w, h, axis, normal, note in boards:
+        if note:
+            text_cm = len(note) / 2.5 * CELL_CM
+            if axis == 'x':
+                xs += [tx(x) + text_cm]
+                ys += [ty(y + h) + 3 * CELL_CM if normal > 0 else ty(y) - 3 * CELL_CM]
+            else:
+                xs += [tx(x + w) + 2 * CELL_CM + text_cm if normal > 0 else tx(x) - 2 * CELL_CM - text_cm]
+    x_min, y_max = min(xs), max(ys)
+
+    def col_of(x):
+        return FIRST_COL + _half_up((tx(x) - x_min) / CELL_CM)
+
+    def row_of(y_top):
+        return top_row + _half_up((y_max - ty(y_top)) / CELL_CM)
+
+    for x, y, w, h, text, color, rot, size in rects:
+        sheet.block(row_of(y + h), col_of(x), max(1, row_of(y) - row_of(y + h)), max(1, col_of(x + w) - col_of(x)),
+                    text, color, size=size, rotation=rot, wrap=(size == 7))
+    for x, y, w, h, axis, normal, note in boards:
+        if axis == 'x':
+            r0 = row_of(y + h)
+            k = col_of(x)
+            sheet.board_col(r0, k, max(1, row_of(y) - r0))
+            if note and k in sheet.cols_in:
+                nr = sheet.R(r0 - 2) if normal > 0 else sheet.R(row_of(y) + 1)
+                sheet.text(nr, k + sum(1 for j in sheet.cols_in if j < k), note, size=9, bold=True,
+                           color="000000", raw=True)
+        else:
+            c0 = col_of(x)
+            k = row_of(y)    # пред реда на панела под дъската
+            sheet.board_row(k, c0, max(1, col_of(x + w) - c0))
+            if note and k in sheet.rows_in:
+                r = k + sum(1 for j in sheet.rows_in if j < k)
+                text_cells = int(math.ceil(len(note) / 2.5))
+                nc = sheet.C(col_of(x + w) + 2) if normal > 0 else sheet.C(c0 - 2 - text_cells)
+                sheet.text(r, nc, note, size=9, bold=True, color="000000", raw=True)
+
+    # бетон: клетките със среда вътре в контура (без дъските)
+    cpoly = [(tx(px), ty(py)) for px, py in poly]
+    pxs, pys = [p[0] for p in poly], [p[1] for p in poly]
+    for r in range(row_of(max(pys)), row_of(min(pys))):
+        for c in range(col_of(min(pxs)), col_of(max(pxs))):
+            cx = x_min + (c - FIRST_COL + 0.5) * CELL_CM
+            cy = y_max - (r - top_row + 0.5) * CELL_CM
+            if _point_in_poly(cx, cy, cpoly):
+                sheet.fill(r, c, FILL_CONCRETE)
+
+    for x, y, label in letters:
+        r, c = row_of(y + CELL_CM), col_of(x)
+        sheet.block(r, c, 1, 1, label, None, size=9, border=False, color=SIDE_COLOR)
+
+    starts = {name: col_of(v[0]) for name, v in place.items() if v[2] == 'x' and not (len(v) > 3 and v[3])}
+    return max(top_row + _half_up((y_max - min(ys)) / CELL_CM) - 1, top_row), starts
+
+
+# ==========================================
+# ИЗГЛЕД ОТПРЕД
+# ==========================================
+def _face_groups(layout):
+    """Страните за изгледите отпред: външните, после вътрешните, после челните; еднаквите - заедно."""
+    def kind(name):
+        if name.startswith("Край"):
+            return 2
+        return 1 if name.split()[0].endswith("1") else 0
+
+    groups = []
+    for face in sorted(layout["faces"], key=lambda f: kind(f["name"])):
+        for g in groups:
+            ref = g[0]
+            if (ref["rows"], ref["start"], ref["end"]) == (face["rows"], face["start"], face["end"]):
+                g.append(face)
+                break
+        else:
+            groups.append([face])
+    # еднаквите страни се показват на мястото на първата от тях
+    return sorted(groups, key=lambda g: kind(g[0]["name"]))
+
+
+def _front_view(sheet, layout, face, top_row, start_col=None):
+    """
+    Изглед отпред на една страна: редовете отгоре надолу, ъглите в краищата по цялата височина.
+    Дъската - във вмъкната колона; start_col - началото на страната в изгледа отгоре (точно под нея).
+    """
+    levels = layout["height_levels"]
+    total_rows = sum(_cells(h) for h in levels)
+    corner = 2 if face["start"] else 0
+    col = start_col if start_col and start_col - corner >= FIRST_COL else FIRST_COL + corner
+    if face["start"]:
+        _corner_block(sheet, top_row, col - 2, total_rows, face["start"])
+    rows = [face_row_pieces(face, h, widths) for h, widths in zip(levels, face["rows"])]
+    spots, x_end = [], 0
+    for pieces in rows:
+        s = 0
+        for w, is_board, _panel_w in pieces:
+            if is_board:
+                spots.append((s, w))
+            s += w
+        x_end = max(x_end, s)
+    tx = _collapse(spots)
+
+    def col_of(x):
+        return col + _half_up(tx(x) / CELL_CM)
+
+    row = top_row
+    for h, pieces in reversed(list(zip(levels, rows))):
+        s = 0
+        for w, is_board, panel_w in pieces:
+            c, n = col_of(s), col_of(s + w) - col_of(s)
+            if is_board:
+                sheet.board_col(row, c, _cells(h))
+            elif is_compensator_row(h):
+                sheet.block(row, c, _cells(h), max(1, n), f"TC {int(h)} см", FILL_COMPENSATOR, size=9)
+            else:
+                sheet.block(row, c, _cells(h), max(1, n), _panel_label(panel_w, h), FILL_PANEL, size=14,
+                            rotation=90 if h > panel_w else 0)
+            s += w
+        row += _cells(h)
+    if face["end"]:
+        _corner_block(sheet, top_row, col_of(x_end), total_rows, face["end"])
+    return top_row + total_rows - 1
+
+
+# ==========================================
+# ЛИСТ НА ЕЛЕМЕНТ
+# ==========================================
+def _element_title(index, element):
+    layout = element["layout"]
+    d = layout["dims"]
+    typ = layout["type"]
+    parts = [str(element.get("name") or "").strip(), TYPE_WORDS.get(typ, typ)]
+    if typ == "column":
+        parts.append(f"{d['a']:g}x{d['b']:g}")
+    elif typ == "wall":
+        parts.append(f"дължина {d['length']:g}")
+    elif typ == "u_wall":
+        parts += [f"A {d['l1']:g}", f"B {d['l2']:g}", f"C {d['l3']:g}"]
+    else:
+        parts += [f"A {d['l1']:g}", f"B {d['l2']:g}", t_wall_offset_label(layout, "")]
+    parts.append(f"височина {panel_height_cm(layout):g}")   # височината на панелите (262 -> 265)
+    if typ != "column":
+        parts.append(thickness_label(layout, ""))
+    parts.append(f"бр. {element.get('count', 1)}")
+    return f"Елемент {index}  —  " + " · ".join(p for p in parts if p)
+
+
+def _draw_views(sheet, layout):
+    """Изглед отгоре, под него изгледите отпред на всяка група еднакви страни."""
+    sheet.text(4, FIRST_COL, "Изглед отгоре")
+    last, starts = _top_view(sheet, layout, 5)
+    for group in _face_groups(layout):
+        label_row = last + 3
+        names = " / ".join(f["name"] for f in group)
+        sheet.text(label_row, FIRST_COL, f"Изглед — {names}")
+        last = _front_view(sheet, layout, group[0], label_row + 1, starts.get(group[0]["name"]))
+
+
+def _element_sheet(wb, index, element):
+    """Лист „Елемент N“; връща {наименование в КСС: адрес на клетката „Кол. общо“}."""
+    ws = wb.create_sheet(f"Елемент {index}")
+    layout = element["layout"]
+    count = max(1, int(element.get("count", 1)))
+
+    # Първо на празен лист - къде са дъските (колоните / редовете за тях), после на истинския
+    probe = _Sheet(Workbook().active)
+    _draw_views(probe, layout)
+    sheet = _Sheet(ws, probe.want_cols, probe.want_rows)
+    _draw_views(sheet, layout)
+    sheet.fill_inserted(FILL_CONCRETE)
+
+    # КСС за елемента вдясно от чертежите: всички артикули като в „Кол. сметка“
+    name_col = sheet.max_col + 3
+    unit_col = name_col + 16
+    one_col = unit_col + 3
+    all_col = one_col + 4
+    sheet.cell(4, name_col, all_col - name_col, "Брой елементи:", bold=True, align="right")
+    sheet.cell(4, all_col, 4, count, bold=True, fill=FILL_COUNT)
+    count_ref = f"${get_column_letter(all_col)}$4"
+    ws.row_dimensions[5].height = 30
+    for col, n, title in ((name_col, 16, "Елемент"), (unit_col, 3, "Мярка"),
+                          (one_col, 4, "Кол. за 1 бр."), (all_col, 4, "Кол. общо")):
+        sheet.cell(5, col, n, title, bold=True, fill=FILL_HEADER)
+
+    totals = dict(kss_rows(element["bom"]))
+    order = [name for name, _codes in KSS_ITEMS]
+    refs = {}
+    for i, name in enumerate(order + sorted(n for n in totals if n not in order)):
+        r = 6 + i
+        one = totals.get(name, 0) / count
+        sheet.cell(r, name_col, 16, name, align="left")
+        sheet.cell(r, unit_col, 3, "бр")
+        one_ref = sheet.cell(r, one_col, 4, (int(one) if one == int(one) else one) or None, number_format=HIDE_ZERO)
+        refs[name] = sheet.cell(r, all_col, 4, f'=IF({one_ref}="","",{one_ref}*{count_ref})', bold=True,
+                                number_format=HIDE_ZERO)
+
+    ws.merge_cells(start_row=2, start_column=FIRST_COL, end_row=2, end_column=max(sheet.max_col, FIRST_COL + 20))
+    title = ws.cell(2, FIRST_COL)
+    title.value = _element_title(index, element)
+    title.font = Font(bold=True, size=11)
+    title.alignment = Alignment(vertical="center")
+    title.fill = PatternFill("solid", fgColor=FILL_TITLE)
+    ws.row_dimensions[2].height = 18
+    return refs
+
+
+# ==========================================
+# КОЛИЧЕСТВЕНА СМЕТКА
+# ==========================================
+def _kss_sheet(ws, names, quantity):
+    """Лист КСС като „Кол. сметка“ в образеца: наименование, мярка, количество (формула или число)."""
+    ws.column_dimensions["A"].width = 19
+    ws.column_dimensions["B"].width = 41.43
+    ws.column_dimensions["C"].width = 7.43
+    ws.column_dimensions["D"].width = 9.86
+    ws.row_dimensions[4].height = 23.25
+    ws.row_dimensions[5].height = 45
+    ws.row_dimensions[6].height = 15.75
+    for col, value in (("B", "Елемент"), ("C", "Мярка"), ("D", "Кол.")):
+        ws[f"{col}5"] = value
+    ws["D6"] = "[бр]"
+    for r in (5, 6):
+        for col in "BCD":
+            cell = ws[f"{col}{r}"]
+            cell.font = Font(size=12)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = BORDER_KSS
+
+    for i, name in enumerate(names):
+        r = 7 + i
+        ws.row_dimensions[r].height = 18
+        ws[f"B{r}"] = name
+        ws[f"C{r}"] = "бр"
+        qty = quantity(name)
+        if qty:
+            ws[f"D{r}"] = qty
+            ws[f"D{r}"].number_format = HIDE_ZERO
+        for col in "BCD":
+            cell = ws[f"{col}{r}"]
+            cell.font = Font(size=11)
+            cell.border = BORDER_KSS
+            if col != "B":
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            else:
+                cell.alignment = Alignment(vertical="center")
+    _kss_offer_columns(ws, 7, 6 + len(names))
+
+
+def _kss_offer_columns(ws, first, last):
+    """
+    Колоните от „1. Оферта.xlsx“ вдясно от „Кол.“ и редовете ОБЩО / ОТСТЪПКА под таблицата.
+    Цената, наличността и отстъпката % се попълват на ръка (жълти клетки) - в програмата няма цени и наличност.
+    """
+    for col, width in KSS_OFFER_WIDTHS.items():
+        ws.column_dimensions[col].width = width
+    for col, title in KSS_OFFER_HEADERS.items():
+        cell = ws[f"{col}5"]
+        cell.value = title
+        cell.font = Font(size=10)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = BORDER_KSS
+        ws[f"{col}6"].border = BORDER_KSS
+
+    total = last + 2
+    discount = f"$F${total + 1}"   # ОТСТЪПКА %
+    for r in range(first, last + 1):
+        name = ws[f"B{r}"].value
+        dims, area = KSS_DIMENSIONS.get(name, (None, None))
+        weight = KSS_WEIGHTS.get(name)
+        values = {
+            "F": f'=IF(E{r}="","",N(D{r})*E{r})',
+            "G": f'=IF(E{r}="","",ROUND(E{r}*(100-{discount})/100,2))',
+            "H": f'=IF(E{r}="","",N(D{r})*G{r})',
+            "I": dims, "J": area, "K": weight,
+            "L": f'=IF(K{r}="","",N(D{r})*K{r})' if weight else None,
+            "N": f'=IF(J{r}="","",N(D{r})*J{r})' if area else None,
+            "Q": f'=IF(P{r}="","",P{r}-N(D{r}))',
+        }
+        for col in "EFGHIJKLNPQ":
+            cell = ws[f"{col}{r}"]
+            if values.get(col) is not None:
+                cell.value = values[col]
+            cell.font = Font(size=11)
+            cell.border = BORDER_KSS
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            if col in "FHLNQ":
+                cell.number_format = MONEY
+            if col in "EP":
+                cell.fill = PatternFill("solid", fgColor=FILL_COUNT)
+
+    rows = [("ОБЩО", {"F": f"=SUM(F{first}:F{last})", "H": f"=SUM(H{first}:H{last})",
+                      "L": f"=SUM(L{first}:L{last})", "M": "kg", "N": f"=SUM(N{first}:N{last})", "O": "m2"}),
+            ("ОТСТЪПКА %", {"F": 0}),
+            ("ОТСТЪПКА СТОЙНОСТ", {"F": f"=ROUND(F{total}*{discount}/100,2)", "L": f"=N{total}*0.1", "M": "м3",
+                                   "N": "Приблизителен обем 10м2 - 1 м3"}),
+            ("ОБЩО БЕЗ ДДС", {"F": f"=ROUND(F{total}-F{total + 2},2)", "H": f"=H{total}-H{total + 2}"})]
+    for i, (label, cells) in enumerate(rows):
+        r = total + i
+        ws[f"B{r}"] = label
+        ws[f"B{r}"].font = Font(size=11, bold=True)
+        for col, value in cells.items():
+            cell = ws[f"{col}{r}"]
+            cell.value = value
+            cell.font = Font(size=11, bold=col in "FHLN")
+            if str(value).startswith("="):
+                cell.number_format = "#,##0.00"
+    ws[f"F{total + 1}"].fill = PatternFill("solid", fgColor=FILL_COUNT)
+
+    # печат: хоризонтално, една страница по ширина
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.print_area = f"A1:Q{total + 3}"
+
+
+# ==========================================
+# ПАЛИТРА С ЕЛЕМЕНТИ
+# ==========================================
+PALETTE_STANDING = [(150, w) for w in (60, 35, 30, 25, 20, 15, 10, 5)] + \
+                   [(120, w) for w in (60, 35, 30, 25, 20, 15, 10, 5)] + \
+                   [(60, w) for w in (35, 30, 25, 20, 15, 10, 5)] + \
+                   [(40, 25), (30, 25), (20, 20), (20, 15), (15, 15)]
+
+
+def _palette_sheet(wb):
+    """Всички панели и ъгли: отгоре - изглед отгоре, отдолу - изглед отпред; после легналите."""
+    ws = wb.create_sheet("Елементи Теко България")
+    sheet = _Sheet(ws)
+    sheet.text(4, FIRST_COL, "Елементи (1 клетка = 5 см) - копирайте блок и го поставете в чертежа",
+               size=11, bold=True, color="000000")
+    sheet.text(6, FIRST_COL, "Изправени панели", size=9, bold=True)
+
+    col = FIRST_COL
+    for h, w in PALETTE_STANDING:
+        sheet.block(7, col, 2, _cells(w), str(w), FILL_PANEL, size=9)
+        sheet.block(12, col, _cells(h), _cells(w), _panel_label(w, h), FILL_PANEL, size=11,
+                    rotation=90 if h > w else 0)
+        col += _cells(w) + 2
+    for label, kind, height in (("IN 150", "IN", 150), ("IN 120", "IN", 120), ("EX 240", "EX", 240)):
+        sheet.block(7, col, 2, 2, kind, FILL_EX if kind == "EX" else FILL_IN, size=7, wrap=True)
+        sheet.block(12, col, _cells(height), 2, label, FILL_EX if kind == "EX" else FILL_IN, size=9, rotation=90)
+        col += 4
+
+    row = 12 + _cells(240) + 4
+    sheet.text(row - 1, FIRST_COL, "Легнали панели (изглед отгоре вляво, изглед отпред вдясно)", size=9, bold=True)
+    for h, w in [p for p in PALETTE_STANDING if p[0] in (150, 120)]:
+        sheet.block(row, FIRST_COL, _cells(w), 2, str(w), FILL_PANEL, size=9, rotation=90)
+        sheet.block(row, FIRST_COL + 4, _cells(w), _cells(h), _panel_label(w, h), FILL_PANEL, size=11)
+        row += _cells(w) + 2
+
+
+# ==========================================
+# ГЛАВНА ФУНКЦИЯ
+# ==========================================
+def generate_excel(elements):
+    """
+    elements: [{"name", "count", "layout", "bom"}] - bom е сметката на елемента, умножена по броя.
+    Връща BytesIO с .xlsx.
+    """
+    wb = Workbook()
+    kss = wb.active
+    kss.title = "Кол. сметка"
+    element_refs = []
+    extra = []
+    known = {name for name, _codes in KSS_ITEMS}
+    for i, element in enumerate(elements, 1):
+        refs = _element_sheet(wb, i, element)
+        element_refs.append((f"Елемент {i}", refs))
+        extra += [n for n in refs if n not in known and n not in extra]
+    def formula(name):
+        sources = [f"'{sheet}'!{refs[name]}" for sheet, refs in element_refs if name in refs]
+        return f"=SUM({','.join(sources)})" if sources else None
+
+    _kss_sheet(kss, [name for name, _codes in KSS_ITEMS] + extra, formula)
+    _palette_sheet(wb)
+    wb.calculation.fullCalcOnLoad = True
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
