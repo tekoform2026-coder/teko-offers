@@ -1,4 +1,5 @@
 import io
+import math
 import hmac
 import fitz  # PyMuPDF
 import pandas as pd
@@ -16,6 +17,7 @@ from excel_export import generate_excel
 import projects_store
 from accessories_calculator import calculate_accessories
 from teko_calculator import (solve_height_cm, layout_element, count_panels, is_compensator_row, thickness_label,
+                             panel_height_cm,
                              t_wall_offset_label)
 from weights_db import get_item_weight
 
@@ -77,26 +79,30 @@ def check_element_dimensions(row):
     if h_cm % 5 != 0:
         warnings.append(f"• **{name}**: Височина {h_cm} cm не е кратна на 5 cm (закръгля се нагоре до 5 cm).")
 
+    def board_warning(label, col, default):
+        """
+        Дължина, некратна на 5 cm: панелите - надолу до 5 cm, остатъкът под 5 cm - дървена дъска
+        (само на чертежа). Кратните на 5 (и 5 / 10 / 15 cm в реда - компенсатор TC) - без предупреждение.
+        """
+        value = _row_float(row, col, default)
+        panels = math.floor(round(value, 6) / 5.0) * 5
+        board = round(value - panels, 6)
+        if board > 0:
+            warnings.append(f"• **{name}**: {label} {value:g} cm не е кратна на 5 cm - панели до {panels:g} cm "
+                            f"+ дървена дъска {board:g} cm (само на чертежа, не влиза в сметката и площта).")
+
     if elem_type == "column":
-        w_cm = round(_row_float(row, "thickness_cm", 25))
-        l_cm = round(_row_float(row, "l1_cm", 50))
-        if w_cm % 5 != 0 or l_cm % 5 != 0:
-            warnings.append(f"• **{name}**: Размерите ({l_cm}x{w_cm} cm) не са кратни на 5 cm. Запълва се с компенсатор TC 5.")
+        board_warning("Стена A", "l1_cm", 50)
+        board_warning("Дебелина стена A", "thickness_cm", 25)
     elif elem_type == "wall":
-        l_cm = round(_row_float(row, "l1_cm", 500))
-        if l_cm % 5 != 0:
-            warnings.append(f"• **{name}**: Дължината {l_cm} cm не е кратна на 5 cm. Запълва се с компенсатор TC 5.")
+        board_warning("Дължината", "l1_cm", 500)
     elif elem_type == "l_wall":
-        l1_cm = round(_row_float(row, "l1_cm", 200))
-        l2_cm = round(_row_float(row, "l2_cm", 200))
-        if l1_cm % 5 != 0 or l2_cm % 5 != 0:
-            warnings.append(f"• **{name}**: Стените A / B ({l1_cm} cm / {l2_cm} cm) съдържат стойности некратни на 5 cm.")
+        board_warning("Стена A", "l1_cm", 200)
+        board_warning("Стена B", "l2_cm", 200)
     elif elem_type == "u_wall":
-        l1_cm = round(_row_float(row, "l1_cm", 200))
-        l2_cm = round(_row_float(row, "l2_cm", 200))
-        l3_cm = round(_row_float(row, "l3_cm", 200))
-        if l1_cm % 5 != 0 or l2_cm % 5 != 0 or l3_cm % 5 != 0:
-            warnings.append(f"• **{name}**: Стените A / B / C ({l1_cm}/{l2_cm}/{l3_cm} cm) съдържат стойности некратни на 5 cm.")
+        board_warning("Стена A", "l1_cm", 200)
+        board_warning("Стена B", "l2_cm", 200)
+        board_warning("Стена C", "l3_cm", 200)
     elif elem_type == "t_wall":
         l1_cm = round(_row_float(row, "l1_cm", 200))
         l2_cm = round(_row_float(row, "l2_cm", 200))
@@ -104,8 +110,8 @@ def check_element_dimensions(row):
         t_cm = round(_row_float(row, "thickness2_cm", None) or _row_float(row, "thickness_cm", 25))
         # Стена C: от левия край на полката до лявото лице на реброто; празно = реброто е в средата
         l3_cm = round(_row_float(row, "l3_cm", 0))
-        if l1_cm % 5 != 0 or l2_cm % 5 != 0:
-            warnings.append(f"• **{name}**: Стените A / B ({l1_cm} cm / {l2_cm} cm) съдържат стойности некратни на 5 cm.")
+        board_warning("Стена A", "l1_cm", 200)
+        board_warning("Стена B", "l2_cm", 200)
         if l3_cm % 5 != 0:
             warnings.append(f"• **{name}**: Мястото на реброто (Стена C = {l3_cm} cm) не е кратно на 5 cm.")
         # от всяка страна на реброто трябва да остане място за IN (10 cm) и поне 5 cm панел
@@ -155,6 +161,8 @@ WALL_THICKNESS_COLUMNS = {"column": 1, "wall": 1, "l_wall": 2, "t_wall": 2, "u_w
 
 # Колоните на таблицата по реда на показване; дължината на права стена и колона е в „Стена A“,
 # другият размер на колоната - в „Дебелина стена A“; thickness_cm остава в данните (архив, Gemini), скрита
+# Тип елемент: в таблицата се виждат имената, в данните (архив, Gemini) остават кодовете
+TYPE_LABELS = {"column": "Колона", "wall": "Права стена", "l_wall": "L-стена", "u_wall": "П-стена", "t_wall": "T-стена"}
 TABLE_COLUMNS = ["type", "name", "count", "l1_cm", "thickness1_cm", "l2_cm", "thickness2_cm", "l3_cm",
                  "thickness3_cm", "height_cm", "closed_end_1", "closed_end_2", "closed_end_3"]
 DATA_COLUMNS = TABLE_COLUMNS + ["thickness_cm"]
@@ -299,7 +307,7 @@ def get_element_accessories(elem_type, row):
         acc = calculate_accessories("T-образна стена", dims["l1"], stem, h_cm, widths_a, h_levels, layout=layout)
     else:
         dims = layout["dims"]
-        acc = calculate_accessories("U-образна стена", dims["l1"] + dims["l2"] + dims["l3"], dims["t"], h_cm, widths_a, h_levels, layout=layout)
+        acc = calculate_accessories("П-образна стена", dims["l1"] + dims["l2"] + dims["l3"], dims["t"], h_cm, widths_a, h_levels, layout=layout)
 
     res = {}
     for code, qty in acc["bom_summary"].items():
@@ -307,10 +315,20 @@ def get_element_accessories(elem_type, row):
     return res
 
 def element_dims_and_area(elem_type, row):
-    """Надпис с размерите (в см) и кофражната площ (m²) на реда, умножена по броя елементи."""
+    """
+    Надпис с размерите (в см) и кофражната площ (m²) на реда, умножена по броя елементи.
+    Площта е по панелите: ширина x височина на всеки панел и компенсатор TC от разположението
+    (с челата); без ъглите EX / IN и без дървената дъска.
+    """
     cnt = int(_row_float(row, "count", 1))
     h = _row_float(row, "height_cm", 300)
     t = _row_float(row, "thickness_cm", 25)
+    if elem_type not in ("column", "wall", "l_wall", "u_wall", "t_wall"):
+        return "", 0.0
+    panels = row_to_layout(elem_type, row)
+    hp = panel_height_cm(panels)  # H в надписа - височината на панелите (262 -> 265)
+    panel_area = sum(sum(widths) * h_val for face in panels["faces"]
+                     for h_val, widths in zip(panels["height_levels"], face["rows"])) / 10000.0
     if elem_type in ("l_wall", "u_wall", "t_wall"):
         # с „Дебелина стена A / B / C“: една дебелина (B=30 см) или по стени (стена A дебелина 30 см, ...)
         layout = row_to_layout(elem_type, row)
@@ -319,27 +337,27 @@ def element_dims_and_area(elem_type, row):
     if elem_type == "column":
         w, l = t, _row_float(row, "l1_cm", 50)
         perimeter = 2 * (w + l)
-        dim_str = f"{l:g}x{w:g} см, H={h:g} см"   # A x B, както на чертежа
+        dim_str = f"{l:g}x{w:g} см, H={hp:g} см"   # A x B, както на чертежа
     elif elem_type == "wall":
         l = _row_float(row, "l1_cm", 500)
         perimeter = 2 * l
-        dim_str = f"L={l:g} см, B={t:g} см, H={h:g} см"
+        dim_str = f"L={l:g} см, B={t:g} см, H={hp:g} см"
     elif elem_type == "l_wall":
         l1, l2 = _row_float(row, "l1_cm", 200), _row_float(row, "l2_cm", 200)
         perimeter = 2 * (l1 + l2)
-        dim_str = f"L={l1:g}+{l2:g} см, {b_str}, H={h:g} см"
+        dim_str = f"L={l1:g}+{l2:g} см, {b_str}, H={hp:g} см"
     elif elem_type == "u_wall":
         l1, l2, l3 = _row_float(row, "l1_cm", 200), _row_float(row, "l2_cm", 200), _row_float(row, "l3_cm", 200)
         perimeter = 2 * (l1 + l2 + l3)
-        dim_str = f"L={l1:g}+{l2:g}+{l3:g} см, {b_str}, H={h:g} см"
+        dim_str = f"L={l1:g}+{l2:g}+{l3:g} см, {b_str}, H={hp:g} см"
     elif elem_type == "t_wall":
         l1, l2 = _row_float(row, "l1_cm", 200), _row_float(row, "l2_cm", 200)
         perimeter = 2 * (l1 + l2)
         offset = t_wall_offset_label(layout)
-        dim_str = f"T: A={l1:g} см, B={l2:g} см, {offset + ', ' if offset else ''}{thickness_label(layout)}, H={h:g} см"
+        dim_str = f"T: A={l1:g} см, B={l2:g} см, {offset + ', ' if offset else ''}{thickness_label(layout)}, H={hp:g} см"
     else:
         return "", 0.0
-    return dim_str, perimeter * h / 10000.0 * cnt
+    return dim_str, panel_area * cnt
 
 DISPLAY_TYPES = {
     "column": "Колона",
@@ -432,11 +450,11 @@ def format_element_label(elem_type, name):
     elif elem_type == "wall":
         return name_str if name_str.lower().startswith("стена") else f"Стена {name_str}".strip()
     elif elem_type == "l_wall":
-        return name_str if (name_str.lower().startswith("l-стена") or name_str.lower().startswith("стена")) else f"L-Стена {name_str}".strip()
+        return name_str if (name_str.lower().startswith("l-стена") or name_str.lower().startswith("стена")) else f"L-стена {name_str}".strip()
     elif elem_type == "u_wall":
-        return name_str if (name_str.lower().startswith("u-ядро") or name_str.lower().startswith("ядро")) else f"U-Ядро {name_str}".strip()
+        return name_str if (name_str.lower().startswith("п-стена") or name_str.lower().startswith("стена")) else f"П-стена {name_str}".strip()
     elif elem_type == "t_wall":
-        return name_str if (name_str.lower().startswith("t-стена") or name_str.lower().startswith("стена")) else f"T-Стена {name_str}".strip()
+        return name_str if (name_str.lower().startswith("t-стена") or name_str.lower().startswith("стена")) else f"T-стена {name_str}".strip()
     return name_str
 
 EXTRA_PAGE_MAX_PX = 3500  # страниците след първата - най-много толкова пиксела по дългата страна
@@ -915,15 +933,15 @@ with tab1:
         st.subheader("⌨️ Ръчно въвеждане и управление в таблицата")
         st.markdown(
             "📝 **Инструкция за попълване в таблицата по-долу:**\n"
-            "- Изберете **тип елемент** (`wall` - стена, `column` - колона, `l_wall` - L-стена, `u_wall` - П/U-стена).\n"
+            "- Изберете **тип елемент**: Колона, Права стена, L-стена, П-стена или T-стена.\n"
             "- Всички размери (стени, дебелини, височина) са в **сантиметри**.\n"
-            "- За **права стена (`wall`)**: попълнете **Стена A** (дължината) и **Дебелина стена A**.\n"
-            "- За **колона (`column`)**: попълнете **Стена A** и **Дебелина стена A** - колона 50x30: стена A 50 (страна A на чертежа), дебелина 30 (страна B).\n"
-            "- За **L-стена (`l_wall`)**: попълнете **Стена A**, **Стена B** и **Дебелина стена A**.\n"
-            "- За **П/U-стена (`u_wall`)**: попълнете **Стена A**, **Стена B**, **Стена C** и **Дебелина стена A**.\n"
-            "- За **T-стена (`t_wall`)**: **Стена A** (цялата полка), **Стена B** (реброто, от полката до края му) и **Дебелина стена A**. **Стена C** - мястото на реброто: от левия край на полката до лявото лице на реброто; празно = реброто е в средата на полката. Реброто може да е и до самия край - остава Т-стена. Край 1 е десният край на полката, край 2 - левият, **Затворен край 3** - краят на реброто (само за T-стена).\n"
+            "- За **права стена**: попълнете **Стена A** (дължината) и **Дебелина стена A**.\n"
+            "- За **колона**: попълнете **Стена A** и **Дебелина стена A** - колона 50x30: стена A 50 (страна A на чертежа), дебелина 30 (страна B).\n"
+            "- За **L-стена**: попълнете **Стена A**, **Стена B** и **Дебелина стена A**.\n"
+            "- За **П-стена**: попълнете **Стена A**, **Стена B**, **Стена C** и **Дебелина стена A**.\n"
+            "- За **T-стена**: **Стена A** (цялата полка), **Стена B** (реброто, от полката до края му) и **Дебелина стена A**. **Стена C** - мястото на реброто: от левия край на полката до лявото лице на реброто; празно = реброто е в средата на полката. Реброто може да е и до самия край - остава Т-стена. Край 1 е десният край на полката, край 2 - левият, **Затворен край 3** - краят на реброто (само за T-стена).\n"
             "- **Дебелина стена A** е дебелината на целия елемент. **Дебелина стена B / C** (L-, П- и T-стена) се попълва само когато стената е с различна дебелина; празното поле = като стена A (равна на A се изчиства). При T-стена стена A е полката, стена B - реброто.\n"
-            "- **Затворен край 1 / Затворен край 2** (отметки) за стени, L- и П/U-стени: челните краища, затворени с панел колкото дебелината. Край 1 е краят на стена A (при права стена - десният), край 2 - краят на последната стена (при права стена - левият). **Всички краища са затворени по подразбиране** - за отворен край махнете отметката.\n"
+            "- **Затворен край 1 / Затворен край 2** (отметки) за стени, L- и П-стени: челните краища, затворени с панел колкото дебелината. Край 1 е краят на стена A (при права стена - десният), край 2 - краят на последната стена (при права стена - левият). **Всички краища са затворени по подразбиране** - за отворен край махнете отметката.\n"
             "- Непотребните полета за съответния тип могат да се оставят празни — системата автоматично игнорира празни клетки без грешки!"
         )
 
@@ -973,7 +991,8 @@ with tab1:
             st.session_state["edited_df"],
             num_rows="dynamic",
             column_config={
-                "type": st.column_config.SelectboxColumn("Тип елемент", options=["column", "wall", "l_wall", "u_wall", "t_wall"], required=True, default="wall", width="auto"),
+                "type": st.column_config.SelectboxColumn("Тип елемент", options=list(TYPE_LABELS), required=True, default="wall", width="auto",
+                                                         format_func=lambda code: TYPE_LABELS.get(code, code)),
                 "name": st.column_config.TextColumn("Наименование / Маркировка", width="auto"),
                 "count": st.column_config.NumberColumn("Брой", min_value=1, step=1, default=1, width="auto"),
                 "l1_cm": st.column_config.NumberColumn("Стена A (см)", format="%g", width="auto",
@@ -995,6 +1014,7 @@ with tab1:
                 "closed_end_3": st.column_config.CheckboxColumn("Затворен край 3 (само T-стена)", default=True, width="auto")
             },
             column_order=TABLE_COLUMNS,
+            hide_index=True,
             use_container_width=True,
             key="elements_form_editor"
         )
@@ -1004,7 +1024,12 @@ with tab1:
             st.session_state["edited_df"] = thickness_to_walls(edited_grid, migrate=False)
             save_current_project()
             st.session_state.pop("excel_bytes", None)  # старият Excel вече не отговаря на таблицата
-            st.success("✅ Данните са запазени и преизчислени успешно! Можете да проверите резултатите в следващите табове.")
+            # Таблицата (num_rows="dynamic") се разпознава по данните си: без презареждане следващата промяна
+            # се прави в старата таблица и при следващия запис се губи (връщат се предишните стойности).
+            st.session_state["table_saved"] = True
+            st.rerun()
+    if st.session_state.pop("table_saved", False):
+        st.success("✅ Данните са запазени и преизчислени успешно! Можете да проверите резултатите в следващите табове.")
 
     st.subheader("👁 Преглед на елементите")
     st.caption("Прегледът показва записаните данни - обновява се след „Запази и Изчисли“. "
