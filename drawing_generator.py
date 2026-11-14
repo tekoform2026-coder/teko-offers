@@ -19,7 +19,8 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.utils import ImageReader
 
 from accessories_calculator import waler_levels_cm, NARROW_LIMIT_CM
-from teko_calculator import IN_CORNER_CM, is_compensator_row, thickness_label, t_wall_offset_label
+from teko_calculator import (IN_CORNER_CM, is_compensator_row, thickness_label, t_wall_offset_label, face_row_pieces,
+                             panel_height_cm)
 
 # Висока резолюция за чисти линии и четливи надписи
 DPI_RESOLUTION = 300
@@ -239,6 +240,8 @@ def _dims_label(layout):
 # Стил по еталонните PDF (Turkey.pdf, Жилищна сграда Шумен1.pdf)
 TOP_PANEL = '#E5BEC0'
 TOP_PANEL_BORDER = '#3A2E36'
+COLOR_BOARD = '#F7DC34'         # Дървена дъска (вложка) под 5 см - жълто, само на чертежа
+COLOR_BOARD_BORDER = '#9A7D0A'
 TOP_EX = '#A0D784'
 TOP_EX_BORDER = '#4F6B45'
 TOP_IN = '#4A8F42'
@@ -518,6 +521,57 @@ def _side_labels(layout, strips, walers, props, pt_per_cm):
     return labels
 
 
+TOP_BOARD_FS = 7          # надписът „ДЪСКА 2,5 см“ (pt)
+
+
+def _board_labels(layout, place, strips, walers, props, side_labels, pt_per_cm):
+    """
+    Надписите на дъските в изгледа отгоре: [(текст, x, y, x на дъската, y на дъската)].
+    Само на външните страни (A, B, C ...) - A1, B1 ... са срещу тях; челата са без дъска.
+    Надписът е навън от страната, на първото място без вертикализатор, ригел, буква или панел.
+    """
+    T = PANEL_T
+    blocked = [(x, y, x + w, y + h) for x, y, w, h in walers]
+    blocked += [(min(a[0], b[0]) - 3, min(a[1], b[1]) - 3, max(a[0], b[0]) + 3, max(a[1], b[1]) + 3)
+                for a, b in props]
+    blocked += [(lx - 6, ly - 6, lx + 6, ly + 6) for _l, lx, ly in side_labels]
+    blocked += [(min(a0, a1) if ax == 'x' else c0, c0 if ax == 'x' else min(a0, a1),
+                 max(a0, a1) if ax == 'x' else c1, c1 if ax == 'x' else max(a0, a1))
+                for ax, a0, a1, c0, c1, _n in strips.values()]
+
+    def free(box):
+        return not any(box[0] < b[2] and b[0] < box[2] and box[1] < b[3] and b[1] < box[3] for b in blocked)
+
+    labels = []
+    for face in layout["faces"]:
+        if face["name"][1:2] == "1":
+            continue
+        x0, y0, axis, *rev = place[face["name"]]
+        normal = strips[face["name"]][5]
+        pieces = face_row_pieces(face, layout["height_levels"][0], face["rows"][0])
+        s = 0
+        for w, is_board, _panel_w in (pieces[::-1] if rev and rev[0] else pieces):
+            if is_board:
+                text = f"ДЪСКА {w:g} см".replace(".", ",")
+                half_w = TOP_BOARD_FS * _text_width_per_pt(text) / pt_per_cm / 2 + 1
+                half_h = TOP_BOARD_FS * 0.7 / pt_per_cm + 1
+                bx, by = (x0 + s + w / 2, y0 + T / 2) if axis == 'x' else (x0 + T / 2, y0 + s + w / 2)
+                tip = (bx, by + normal * T / 2) if axis == 'x' else (bx + normal * T / 2, by)
+                spots = []
+                for out in (20, 32, 45, 60):
+                    for shift in (-35, 35, -70, 70, 0):
+                        if axis == 'x':
+                            spots.append((bx + shift, by + normal * (T / 2 + out)))
+                        else:
+                            spots.append((bx + normal * (T / 2 + out + half_w), by + shift))
+                tx, ty = next((p for p in spots
+                               if free((p[0] - half_w, p[1] - half_h, p[0] + half_w, p[1] + half_h))), spots[0])
+                blocked.append((tx - half_w, ty - half_h, tx + half_w, ty + half_h))
+                labels.append((text, tx, ty, *tip))
+            s += w
+    return labels
+
+
 def generate_top_view_buf(layout, name="Елемент"):
     T = PANEL_T
     poly, place, corners = _plan_geometry(layout)
@@ -528,7 +582,7 @@ def generate_top_view_buf(layout, name="Елемент"):
     ys = [p[1] for p in poly] + [y for _, _, y in corners] + [y + T for _, _, y in corners]
     for face in layout["faces"]:
         x0, y0, axis, *_ = place[face["name"]]
-        length = sum(face["rows"][0])
+        length = sum(p[0] for p in face_row_pieces(face, layout["height_levels"][0], face["rows"][0]))
         xs += [x0, x0 + (length if axis == 'x' else T)]
         ys += [y0, y0 + (T if axis == 'x' else length)]
     for x, y, w, h in walers:
@@ -545,6 +599,12 @@ def generate_top_view_buf(layout, name="Елемент"):
     for _label, lx, ly in side_labels:
         xs += [lx - 5, lx + 5]
         ys += [ly - 5, ly + 5]
+    board_labels = _board_labels(layout, place, _face_strips(layout, place, poly), walers, props,
+                                 side_labels, label_pt_per_cm)
+    for text, tx, ty, _bx, _by in board_labels:
+        half_w = TOP_BOARD_FS * _text_width_per_pt(text) / label_pt_per_cm / 2
+        xs += [tx - half_w, tx + half_w]
+        ys += [ty - 5, ty + 5]
     if layout["type"] == "column":
         a_dim = _column_a_dim(layout, _face_strips(layout, place, poly), walers, props, label_pt_per_cm)
         xs += [a_dim[1] - a_dim[3], a_dim[1] + a_dim[3]]
@@ -578,9 +638,17 @@ def generate_top_view_buf(layout, name="Елемент"):
         normal = strips[face["name"]][5]
         s = 0
         outside = 0
-        widths = face["rows"][0][::-1] if rev and rev[0] else face["rows"][0]
-        for i, w in enumerate(widths):
-            label = f"{int(w)}"
+        pieces = face_row_pieces(face, layout["height_levels"][0], face["rows"][0])
+        widths = pieces[::-1] if rev and rev[0] else pieces
+        for i, (w, is_board, panel_w) in enumerate(widths):
+            if is_board:
+                # дървената дъска (под 5 см) - жълто; надписът е по-долу (_board_labels)
+                rect = ((x0 + s, y0), w, T) if axis == 'x' else ((x0, y0 + s), T, w)
+                ax.add_patch(patches.Rectangle(*rect, facecolor=COLOR_BOARD, edgecolor=COLOR_BOARD_BORDER,
+                                               linewidth=0.6, zorder=2))
+                s += w
+                continue
+            label = f"{int(panel_w)}"
             fs = min(TOP_LABEL_FS, w * pt_per_cm * 0.65 / _text_width_per_pt(label))
             cross = T / 2
             if fs < TOP_LABEL_FS_MIN:
@@ -627,6 +695,12 @@ def generate_top_view_buf(layout, name="Елемент"):
         for t in (0.25, 0.5, 0.75):
             ax.plot(px0 + t * (px1 - px0), py0 + t * (py1 - py0), 'o', markersize=1.2,
                     color=TOP_EX_BORDER, zorder=6.1)
+
+    # Надписите на дъските, със стрелка към дъската
+    for text, tx, ty, bx, by in board_labels:
+        ax.annotate(text, xy=(bx, by), xytext=(tx, ty), ha='center', va='center', fontsize=TOP_BOARD_FS,
+                    fontweight='bold', color=TOP_TEXT, zorder=7,
+                    arrowprops=dict(arrowstyle='->', linewidth=0.7, color=TOP_TEXT))
 
     # Букви на страните извън кофража
     for label, lx, ly in side_labels:
@@ -680,15 +754,15 @@ def _front_faces(layout):
 
 
 def _front_view_buf(layout, faces, title=True):
-    h_cm = layout["height_cm"]
     h_levels = layout["height_levels"]
-    waler_levels = waler_levels_cm(h_cm, h_levels[0] if h_levels else 150)
+    waler_levels = waler_levels_cm(layout["height_cm"], h_levels[0] if h_levels else 150)
+    h_cm = panel_height_cm(layout)  # на чертежа - височината на панелите (262 -> 265)
 
     n_rows = int(math.ceil(len(faces) / 2.0))
     fig, axes = plt.subplots(n_rows, 2, figsize=(FRONT_FIG_W_IN, 2.9 * n_rows), dpi=DPI_RESOLUTION, squeeze=False)
 
     def draw_side_front(ax, face):
-        side_len = sum(face["rows"][0])
+        side_len = sum(p[0] for p in face_row_pieces(face, h_levels[0], face["rows"][0]))
 
         for edge, x in [("start", -10), ("end", side_len)]:
             kind = face[edge]
@@ -719,8 +793,14 @@ def _front_view_buf(layout, faces, title=True):
                         fontsize=4.5, color='#111111', fontweight='bold', zorder=5)
                 curr_y += h_val
                 continue
-            for w_val in row:
-                rect = patches.Rectangle((curr_x, curr_y), w_val, h_val,
+            for draw_w, is_board, w_val in face_row_pieces(face, h_val, row):
+                if is_board:
+                    # дървената дъска - жълта лента, без надпис (надписът е в изгледа отгоре)
+                    ax.add_patch(patches.Rectangle((curr_x, curr_y), draw_w, h_val, linewidth=0.6,
+                                                   edgecolor=COLOR_BOARD_BORDER, facecolor=COLOR_BOARD, zorder=1.5))
+                    curr_x += draw_w
+                    continue
+                rect = patches.Rectangle((curr_x, curr_y), draw_w, h_val,
                                          linewidth=0.8, edgecolor=COLOR_PANEL_BORDER, facecolor=COLOR_PANEL, zorder=1)
                 ax.add_patch(rect)
                 if h_val < 60:
@@ -730,11 +810,11 @@ def _front_view_buf(layout, faces, title=True):
                 else:
                     text_str = f"{int(h_val)}/{int(w_val)}" if h_val != 60 else f"{int(w_val)}/60"
                     rotation = 90
-                ax.text(curr_x + w_val / 2, label_y, text_str,
+                ax.text(curr_x + draw_w / 2, label_y, text_str,
                         ha='center', va='center', fontsize=5 if h_val >= 60 else 4, color='#111111',
                         fontweight='bold', rotation=rotation, zorder=5,
                         bbox=dict(boxstyle='round,pad=0.15', facecolor='white', alpha=0.9, edgecolor='none'))
-                curr_x += w_val
+                curr_x += draw_w
             curr_y += h_val
 
         dim_line_x = -24
@@ -743,7 +823,7 @@ def _front_view_buf(layout, faces, title=True):
         ax.text(dim_line_x - 4, 0, "0", ha='right', va='center', fontsize=5, fontweight='bold', color='#333333')
 
         ax.plot([dim_line_x - 2, dim_line_x + 2], [h_cm, h_cm], color='#333333', linewidth=0.8)
-        ax.text(dim_line_x - 4, h_cm, f"{int(h_cm)}", ha='right', va='center', fontsize=5, fontweight='bold', color='#333333')
+        ax.text(dim_line_x - 4, h_cm, f"{h_cm:g}", ha='right', va='center', fontsize=5, fontweight='bold', color='#333333')
 
         for w_y in waler_positions:
             if 0 < w_y < h_cm:
@@ -754,7 +834,7 @@ def _front_view_buf(layout, faces, title=True):
         ax.set_ylim(-10, top_y)
         ax.set_aspect('equal', adjustable='box')
         ax.axis('off')
-        ax.set_title(f"Страна {face['name']} ({int(side_len)}x{int(h_cm)} cm)", fontsize=8, fontweight='bold')
+        ax.set_title(f"Страна {face['name']} ({round(side_len, 2):g}x{h_cm:g} cm)".replace(".", ","), fontsize=8, fontweight='bold')
 
     flat_axes = axes.flatten()
     for ax, face in zip(flat_axes, faces):
@@ -821,11 +901,13 @@ def generate_3d_axonometry_buf(layout, name="Елемент"):
         for h_val, row in zip(layout["height_levels"], face["rows"]):
             s = 0
             col = COLOR_3D_COMPENSATOR if is_compensator_row(h_val) else COLOR_3D_PANEL
-            for w_val in (row[::-1] if rev and rev[0] else row):
+            pieces = face_row_pieces(face, h_val, row)
+            for w_val, is_board, _panel_w in (pieces[::-1] if rev and rev[0] else pieces):
+                c = COLOR_BOARD if is_board else col
                 if axis == 'x':
-                    boxes.append((x0 + s, y0, curr_z, w_val, T, h_val, col, COLOR_3D_EDGE))
+                    boxes.append((x0 + s, y0, curr_z, w_val, T, h_val, c, COLOR_3D_EDGE))
                 else:
-                    boxes.append((x0, y0 + s, curr_z, T, w_val, h_val, col, COLOR_3D_EDGE))
+                    boxes.append((x0, y0 + s, curr_z, T, w_val, h_val, c, COLOR_3D_EDGE))
                 s += w_val
             curr_z += h_val
     for kind, x, y in corners:
@@ -1093,7 +1175,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         e_count = int(elem.get('count') or 1)
 
         story.append(Paragraph(f"<b>Чертеж и Спецификация: {e_name}</b>", title_style))
-        story.append(Paragraph(f"Тип: {w_type} | Размери: {_dims_label(layout)} | Височина: {int(layout['height_cm'])} cm | "
+        story.append(Paragraph(f"Тип: {w_type} | Размери: {_dims_label(layout)} | Височина: {panel_height_cm(layout):g} cm | "
                                f"Затворени краища: {_closed_label(layout)} | Брой: {e_count}", subtitle_style))
         story.append(Spacer(1, 4))
 
