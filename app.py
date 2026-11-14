@@ -361,10 +361,10 @@ def element_dims_and_area(elem_type, row):
 
 DISPLAY_TYPES = {
     "column": "Колона",
-    "wall": "Права Стена / Шайба",
-    "l_wall": "L-образна Стена / Шайба",
-    "u_wall": "П-образна Стена / Шайба",
-    "t_wall": "T-образна Стена / Шайба",
+    "wall": "Права Стена",
+    "l_wall": "L-образна Стена",
+    "u_wall": "П-образна Стена",
+    "t_wall": "T-образна Стена",
 }
 
 def build_drawing_elements(df):
@@ -840,8 +840,24 @@ if current is None:
     render_projects_page()
     st.stop()
 
-col_proj, col_back = st.columns([5, 1], vertical_alignment="center")
+def rename_current_project(pid):
+    """Записва новото име, клиент и дата от „✏️ Промени“."""
+    projects_store.rename_project(st.session_state["projects"], pid,
+                                  st.session_state.get(f"rename_name_{pid}", ""),
+                                  st.session_state.get(f"rename_client_{pid}", ""),
+                                  st.session_state.get(f"rename_date_{pid}"))
+    for key in (f"rename_name_{pid}", f"rename_client_{pid}", f"rename_date_{pid}"):
+        st.session_state.pop(key, None)
+
+col_proj, col_edit, col_back = st.columns([4, 1, 1], vertical_alignment="center")
 col_proj.subheader(f"📁 {current['name']}" + (f" · {current['client']}" if current["client"] else ""))
+with col_edit.popover("✏️ Промени", use_container_width=True,
+                      help="Промяна на името на проекта, клиента (възложителя) и датата."):
+    pid = current["id"]
+    st.text_input("Име на проекта:", value=current["name"], key=f"rename_name_{pid}")
+    st.text_input("Клиент (възложител):", value=current["client"], key=f"rename_client_{pid}")
+    st.date_input("Дата:", value=current["date"], key=f"rename_date_{pid}")
+    st.button("Запази", type="primary", on_click=rename_current_project, args=(pid,), use_container_width=True)
 col_back.button("← Проекти", on_click=close_project, use_container_width=True,
                 help="Записва таблицата и се връща към списъка с проекти.")
 
@@ -989,7 +1005,7 @@ with tab1:
     with st.form("manual_elements_form"):
         edited_grid = st.data_editor(
             st.session_state["edited_df"],
-            num_rows="dynamic",
+            num_rows="delete",  # нов ред - само с „➕ Добави елемент“, без „+“ под всяка колона
             column_config={
                 "type": st.column_config.SelectboxColumn("Тип елемент", options=list(TYPE_LABELS), required=True, default="wall", width="auto",
                                                          format_func=lambda code: TYPE_LABELS.get(code, code)),
@@ -1019,8 +1035,24 @@ with tab1:
             key="elements_form_editor"
         )
         
+        col_new_type, col_add = st.columns([2, 1], vertical_alignment="bottom")
+        new_type = col_new_type.selectbox("Какъв елемент да се добави?", options=list(TYPE_LABELS), index=None,
+                                          format_func=lambda code: TYPE_LABELS.get(code, code),
+                                          placeholder="Изберете тип елемент", key="new_element_type")
+        add_btn = col_add.form_submit_button("➕ Добави елемент", use_container_width=True,
+                                             help="Записва таблицата и добавя нов ред от избрания тип "
+                                                  "(1 бр., затворени краища).")
         submit_btn = st.form_submit_button("💾 Запази и Изчисли", type="primary", use_container_width=True)
-        if submit_btn:
+        if add_btn and new_type is None:
+            st.warning("Изберете тип елемент и натиснете отново „➕ Добави елемент“.")
+        elif add_btn or submit_btn:
+            if add_btn:
+                # новият ред - с всички колони на таблицата, иначе празните (дължини, височина ...) изчезват
+                new_row = pd.DataFrame([{"type": new_type, "name": "", "count": 1, "closed_end_1": True, "closed_end_2": True,
+                                         "closed_end_3": True}], columns=edited_grid.columns)
+                edited_grid = pd.concat([edited_grid, new_row], ignore_index=True)
+                st.session_state.pop("elements_form_editor", None)  # таблицата се показва наново с новия ред
+                st.session_state.pop("new_element_type", None)  # изборът се изчиства за следващия елемент
             st.session_state["edited_df"] = thickness_to_walls(edited_grid, migrate=False)
             save_current_project()
             st.session_state.pop("excel_bytes", None)  # старият Excel вече не отговаря на таблицата
