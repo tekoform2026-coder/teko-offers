@@ -10,13 +10,15 @@ excel_export.py
 Разположението идва от teko_calculator.layout_element, геометрията в план - от drawing_generator.
 """
 import io
+import math
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from drawing_generator import PANEL_T, _face_strips, _plan_geometry
-from teko_calculator import format_panel_code, is_compensator_row, thickness_label, t_wall_offset_label
+from teko_calculator import (format_panel_code, is_compensator_row, thickness_label, t_wall_offset_label,
+                             face_row_pieces, panel_height_cm)
 from weights_db import WEIGHTS_DB
 
 CELL_CM = 5          # една клетка = 5 см
@@ -38,6 +40,7 @@ BORDER_KSS = Border(left=_black, right=_black, top=_black, bottom=_black)
 _thick = Side(style="thick", color="000000")
 HIDE_ZERO = "0;-0;;@"   # нулите в КСС не се показват
 FILL_COUNT = "FFF2CC"
+FILL_BOARD = "FFD966"   # дървена дъска (под 5 см) - отделна колона, само на чертежа, не в КСС
 
 # Редът на артикулите в КСС (като в офертата) и кодовете от сметката, които влизат във всеки ред
 KSS_ITEMS = [
@@ -147,23 +150,80 @@ def _cells(cm):
     return max(1, int(round(cm / CELL_CM)))
 
 
+def _half_up(x):
+    """Закръгляне до цяло, половината нагоре (round() в Python закръгля 48,5 към 48)."""
+    return int(math.floor(x + 0.5 + 1e-9))
+
+
 class _Sheet:
     """
     Рисуване с блокове от слети клетки; застъпващи се блокове не се сливат (Excel не ги приема).
     Блокът (панел, ъгъл) е с дебела външна граница, вътре - без линии.
+    Чертежите се рисуват в базова мрежа (1 клетка = 5 см). Дървената дъска е в отделна вмъкната колона
+    (или ред при вертикална страна в изгледа отгоре) - cols_in / rows_in са базовите номера, пред които
+    има вмъкната колона / ред; панел, който минава през чужда вмъкната колона, се разширява през нея.
+    Без тези колони / редове (изтрити в Excel) чертежът е точно както без дъските.
     """
 
-    def __init__(self, ws):
+    def __init__(self, ws, cols_in=(), rows_in=()):
         self.ws = ws
         self.used = set()
         self.max_row = 1
         self.max_col = 1
+        self.cols_in = sorted(set(cols_in))
+        self.rows_in = sorted(set(rows_in))
+        self.want_cols, self.want_rows = set(), set()   # дъските, намерени при рисуването
         ws.sheet_format.defaultColWidth = COL_WIDTH
         ws.sheet_format.defaultRowHeight = ROW_HEIGHT
         ws.sheet_view.showGridLines = True
 
+    def C(self, c):
+        return c + sum(1 for k in self.cols_in if k <= c)
+
+    def R(self, r):
+        return r + sum(1 for k in self.rows_in if k <= r)
+
     def block(self, row, col, n_rows, n_cols, text=None, fill=None, size=13, rotation=0,
               bold=True, border=True, wrap=False, color=None):
+        """Блок в базовата мрежа (минава и през вмъкнатите колони / редове вътре в него)."""
+        r0, c0 = self.R(row), self.C(col)
+        self.raw_block(r0, c0, self.R(row + n_rows - 1) - r0 + 1, self.C(col + n_cols - 1) - c0 + 1,
+                       text, fill, size, rotation, bold, border, wrap, color)
+
+    def board_col(self, row, k, n_rows):
+        """Дъската във вмъкнатата колона пред базовата колона k (редовете - базови)."""
+        self.want_cols.add(k)
+        if k in self.cols_in:
+            r0 = self.R(row)
+            c = k + sum(1 for j in self.cols_in if j < k)
+            self.raw_block(r0, c, self.R(row + n_rows - 1) - r0 + 1, 1, None, FILL_BOARD)
+
+    def board_row(self, k, col, n_cols):
+        """Дъската във вмъкнатия ред пред базовия ред k (колоните - базови)."""
+        self.want_rows.add(k)
+        if k in self.rows_in:
+            c0 = self.C(col)
+            r = k + sum(1 for j in self.rows_in if j < k)
+            self.raw_block(r, c0, 1, self.C(col + n_cols - 1) - c0 + 1, None, FILL_BOARD)
+
+    def fill_inserted(self, color):
+        """Бетонът продължава през вмъкнатите колони / редове (там, където е от двете страни)."""
+        def filled(r, c):
+            f = self.ws.cell(r, c).fill
+            return f is not None and f.fill_type == "solid" and str(f.fgColor.rgb).endswith(color)
+        cols = [k + i for i, k in enumerate(self.cols_in)]
+        rows = [k + i for i, k in enumerate(self.rows_in)]
+        for c in cols:
+            for r in range(1, self.max_row + 1):
+                if (r, c) not in self.used and filled(r, c - 1) and filled(r, c + 1):
+                    self.ws.cell(r, c).fill = PatternFill("solid", fgColor=color)
+        for r in rows:
+            for c in range(1, self.max_col + 1):
+                if (r, c) not in self.used and filled(r - 1, c) and filled(r + 1, c):
+                    self.ws.cell(r, c).fill = PatternFill("solid", fgColor=color)
+
+    def raw_block(self, row, col, n_rows, n_cols, text=None, fill=None, size=13, rotation=0,
+                  bold=True, border=True, wrap=False, color=None):
         cells = [(r, c) for r in range(row, row + n_rows) for c in range(col, col + n_cols)]
         free = [rc for rc in cells if rc not in self.used]
         if not free:
@@ -209,11 +269,14 @@ class _Sheet:
         return f"{get_column_letter(col)}{row}"
 
     def fill(self, row, col, color):
+        row, col = self.R(row), self.C(col)
         if (row, col) in self.used:
             return
         self.ws.cell(row, col).fill = PatternFill("solid", fgColor=color)
 
-    def text(self, row, col, value, size=8, bold=False, color="555555"):
+    def text(self, row, col, value, size=8, bold=False, color="555555", raw=False):
+        if not raw:
+            row, col = self.R(row), self.C(col)
         cell = self.ws.cell(row, col)
         cell.value = value
         cell.font = Font(size=size, bold=bold, color=color)
@@ -240,24 +303,45 @@ def _point_in_poly(x, y, poly):
     return inside
 
 
+def _collapse(boards):
+    """Координата без дъските: всичко след дъска се премества с ширината ѝ (дъската е в своя колона)."""
+    boards = sorted(set((round(p, 3), w) for p, w in boards))
+    return lambda v: v - sum(w for p, w in boards if p < v - 1e-6)
+
+
 def _top_view(sheet, layout, top_row):
-    """Изглед отгоре от долния ред панели на всяка страна; връща последния използван ред."""
+    """
+    Изглед отгоре от долния ред панели на всяка страна; връща (последния използван ред,
+    {страна: базова колона на началото ѝ} - изгледът отпред на хоризонтална страна е точно под нея).
+    """
     T = PANEL_T
     poly, place, corners = _plan_geometry(layout)
     strips = _face_strips(layout, place, poly)
 
     rects = []   # (x, y, w, h, текст, цвят, завъртане, размер на шрифта)
+    boards = []  # (x, y, w, h, ос, посока навън, надпис или None) - дървените дъски
     for face in layout["faces"]:
-        x0, y0, axis, *_ = place[face["name"]]
+        x0, y0, axis, *rev = place[face["name"]]
+        pieces = face_row_pieces(face, layout["height_levels"][0], face["rows"][0])
         s = 0
-        for w in face["rows"][0]:
-            if axis == 'x':
-                rects.append((x0 + s, y0, w, T, str(int(w)), FILL_PANEL, 0, 13))
+        for w, is_board, panel_w in (pieces[::-1] if rev and rev[0] else pieces):
+            # надписът на дъската - само на външните страни (A1, B1 ... са срещу тях)
+            note = f"ДЪСКА {w:g} см".replace(".", ",") if face["name"][1:2] != "1" else None
+            if is_board:
+                normal = strips[face["name"]][5]
+                boards.append((x0 + s, y0, w, T, axis, normal, note) if axis == 'x'
+                              else (x0, y0 + s, T, w, axis, normal, note))
+            elif axis == 'x':
+                rects.append((x0 + s, y0, w, T, str(int(panel_w)), FILL_PANEL, 0, 13))
             else:
-                rects.append((x0, y0 + s, T, w, str(int(w)), FILL_PANEL, 90, 13))
+                rects.append((x0, y0 + s, T, w, str(int(panel_w)), FILL_PANEL, 90, 13))
             s += w
     for kind, x, y in corners:
         rects.append((x, y, T, T, kind, FILL_EX if kind == "EX" else FILL_IN, 0, 7))
+
+    # без дъските по x (хоризонтални страни) и по y (вертикални) - те са във вмъкнати колони / редове
+    tx = _collapse([(b[0], b[2]) for b in boards if b[4] == 'x'])
+    ty = _collapse([(b[1], b[3]) for b in boards if b[4] == 'y'])
 
     # Букви на страните - една клетка навън от панела, в средата на страната
     letters = []
@@ -269,36 +353,65 @@ def _top_view(sheet, layout, top_row):
         x, y = (along, cross) if axis == 'x' else (cross, along)
         letters.append((x, y, name.split()[0]))
 
-    xs = [r[0] for r in rects] + [r[0] + r[2] for r in rects] + [p[0] for p in poly] + \
-         [v for x, _, _ in letters for v in (x, x + CELL_CM)]
-    ys = [r[1] for r in rects] + [r[1] + r[3] for r in rects] + [p[1] for p in poly] + \
-         [v for _, y, _ in letters for v in (y, y + CELL_CM)]
+    xs = [tx(r[0]) for r in rects] + [tx(r[0] + r[2]) for r in rects] + [tx(p[0]) for p in poly] + \
+         [v for x, _, _ in letters for v in (tx(x), tx(x) + CELL_CM)]
+    ys = [ty(r[1]) for r in rects] + [ty(r[1] + r[3]) for r in rects] + [ty(p[1]) for p in poly] + \
+         [v for _, y, _ in letters for v in (ty(y), ty(y) + CELL_CM)]
+    # място за надписите на дъските (около 2,5 знака на клетка)
+    for x, y, w, h, axis, normal, note in boards:
+        if note:
+            text_cm = len(note) / 2.5 * CELL_CM
+            if axis == 'x':
+                xs += [tx(x) + text_cm]
+                ys += [ty(y + h) + 3 * CELL_CM if normal > 0 else ty(y) - 3 * CELL_CM]
+            else:
+                xs += [tx(x + w) + 2 * CELL_CM + text_cm if normal > 0 else tx(x) - 2 * CELL_CM - text_cm]
     x_min, y_max = min(xs), max(ys)
 
     def col_of(x):
-        return FIRST_COL + int(round((x - x_min) / CELL_CM))
+        return FIRST_COL + _half_up((tx(x) - x_min) / CELL_CM)
 
     def row_of(y_top):
-        return top_row + int(round((y_max - y_top) / CELL_CM))
+        return top_row + _half_up((y_max - ty(y_top)) / CELL_CM)
 
     for x, y, w, h, text, color, rot, size in rects:
-        sheet.block(row_of(y + h), col_of(x), _cells(h), _cells(w), text, color, size=size,
-                    rotation=rot, wrap=(size == 7))
+        sheet.block(row_of(y + h), col_of(x), max(1, row_of(y) - row_of(y + h)), max(1, col_of(x + w) - col_of(x)),
+                    text, color, size=size, rotation=rot, wrap=(size == 7))
+    for x, y, w, h, axis, normal, note in boards:
+        if axis == 'x':
+            r0 = row_of(y + h)
+            k = col_of(x)
+            sheet.board_col(r0, k, max(1, row_of(y) - r0))
+            if note and k in sheet.cols_in:
+                nr = sheet.R(r0 - 2) if normal > 0 else sheet.R(row_of(y) + 1)
+                sheet.text(nr, k + sum(1 for j in sheet.cols_in if j < k), note, size=9, bold=True,
+                           color="000000", raw=True)
+        else:
+            c0 = col_of(x)
+            k = row_of(y)    # пред реда на панела под дъската
+            sheet.board_row(k, c0, max(1, col_of(x + w) - c0))
+            if note and k in sheet.rows_in:
+                r = k + sum(1 for j in sheet.rows_in if j < k)
+                text_cells = int(math.ceil(len(note) / 2.5))
+                nc = sheet.C(col_of(x + w) + 2) if normal > 0 else sheet.C(c0 - 2 - text_cells)
+                sheet.text(r, nc, note, size=9, bold=True, color="000000", raw=True)
 
-    # бетон: клетките със среда вътре в контура
+    # бетон: клетките със среда вътре в контура (без дъските)
+    cpoly = [(tx(px), ty(py)) for px, py in poly]
     pxs, pys = [p[0] for p in poly], [p[1] for p in poly]
     for r in range(row_of(max(pys)), row_of(min(pys))):
         for c in range(col_of(min(pxs)), col_of(max(pxs))):
             cx = x_min + (c - FIRST_COL + 0.5) * CELL_CM
             cy = y_max - (r - top_row + 0.5) * CELL_CM
-            if _point_in_poly(cx, cy, poly):
+            if _point_in_poly(cx, cy, cpoly):
                 sheet.fill(r, c, FILL_CONCRETE)
 
     for x, y, label in letters:
         r, c = row_of(y + CELL_CM), col_of(x)
         sheet.block(r, c, 1, 1, label, None, size=9, border=False, color=SIDE_COLOR)
 
-    return max(row_of(min(ys)) - 1, top_row)
+    starts = {name: col_of(v[0]) for name, v in place.items() if v[2] == 'x' and not (len(v) > 3 and v[3])}
+    return max(top_row + _half_up((y_max - min(ys)) / CELL_CM) - 1, top_row), starts
 
 
 # ==========================================
@@ -324,29 +437,47 @@ def _face_groups(layout):
     return sorted(groups, key=lambda g: kind(g[0]["name"]))
 
 
-def _front_view(sheet, layout, face, top_row):
-    """Изглед отпред на една страна: редовете отгоре надолу, ъглите в краищата по цялата височина."""
+def _front_view(sheet, layout, face, top_row, start_col=None):
+    """
+    Изглед отпред на една страна: редовете отгоре надолу, ъглите в краищата по цялата височина.
+    Дъската - във вмъкната колона; start_col - началото на страната в изгледа отгоре (точно под нея).
+    """
     levels = layout["height_levels"]
     total_rows = sum(_cells(h) for h in levels)
-    col = FIRST_COL
+    corner = 2 if face["start"] else 0
+    col = start_col if start_col and start_col - corner >= FIRST_COL else FIRST_COL + corner
     if face["start"]:
-        _corner_block(sheet, top_row, col, total_rows, face["start"])
-        col += 2
+        _corner_block(sheet, top_row, col - 2, total_rows, face["start"])
+    rows = [face_row_pieces(face, h, widths) for h, widths in zip(levels, face["rows"])]
+    spots, x_end = [], 0
+    for pieces in rows:
+        s = 0
+        for w, is_board, _panel_w in pieces:
+            if is_board:
+                spots.append((s, w))
+            s += w
+        x_end = max(x_end, s)
+    tx = _collapse(spots)
+
+    def col_of(x):
+        return col + _half_up(tx(x) / CELL_CM)
+
     row = top_row
-    end_col = col
-    for h, widths in reversed(list(zip(levels, face["rows"]))):
-        c = col
-        for w in widths:
-            if is_compensator_row(h):
-                sheet.block(row, c, _cells(h), _cells(w), f"TC {int(h)} см", FILL_COMPENSATOR, size=9)
+    for h, pieces in reversed(list(zip(levels, rows))):
+        s = 0
+        for w, is_board, panel_w in pieces:
+            c, n = col_of(s), col_of(s + w) - col_of(s)
+            if is_board:
+                sheet.board_col(row, c, _cells(h))
+            elif is_compensator_row(h):
+                sheet.block(row, c, _cells(h), max(1, n), f"TC {int(h)} см", FILL_COMPENSATOR, size=9)
             else:
-                sheet.block(row, c, _cells(h), _cells(w), _panel_label(w, h), FILL_PANEL, size=14,
-                            rotation=90 if h > w else 0)
-            c += _cells(w)
-        end_col = max(end_col, c)
+                sheet.block(row, c, _cells(h), max(1, n), _panel_label(panel_w, h), FILL_PANEL, size=14,
+                            rotation=90 if h > panel_w else 0)
+            s += w
         row += _cells(h)
     if face["end"]:
-        _corner_block(sheet, top_row, end_col, total_rows, face["end"])
+        _corner_block(sheet, top_row, col_of(x_end), total_rows, face["end"])
     return top_row + total_rows - 1
 
 
@@ -366,28 +497,36 @@ def _element_title(index, element):
         parts += [f"A {d['l1']:g}", f"B {d['l2']:g}", f"C {d['l3']:g}"]
     else:
         parts += [f"A {d['l1']:g}", f"B {d['l2']:g}", t_wall_offset_label(layout, "")]
-    parts.append(f"височина {layout['height_cm']:g}")
+    parts.append(f"височина {panel_height_cm(layout):g}")   # височината на панелите (262 -> 265)
     if typ != "column":
         parts.append(thickness_label(layout, ""))
     parts.append(f"бр. {element.get('count', 1)}")
     return f"Елемент {index}  —  " + " · ".join(p for p in parts if p)
 
 
-def _element_sheet(wb, index, element):
-    """Лист „Елемент N“; връща {наименование в КСС: адрес на клетката „Кол. общо“}."""
-    ws = wb.create_sheet(f"Елемент {index}")
-    sheet = _Sheet(ws)
-    layout = element["layout"]
-    count = max(1, int(element.get("count", 1)))
-
-    # Изглед отгоре, под него изгледите отпред
+def _draw_views(sheet, layout):
+    """Изглед отгоре, под него изгледите отпред на всяка група еднакви страни."""
     sheet.text(4, FIRST_COL, "Изглед отгоре")
-    last = _top_view(sheet, layout, 5)
+    last, starts = _top_view(sheet, layout, 5)
     for group in _face_groups(layout):
         label_row = last + 3
         names = " / ".join(f["name"] for f in group)
         sheet.text(label_row, FIRST_COL, f"Изглед — {names}")
-        last = _front_view(sheet, layout, group[0], label_row + 1)
+        last = _front_view(sheet, layout, group[0], label_row + 1, starts.get(group[0]["name"]))
+
+
+def _element_sheet(wb, index, element):
+    """Лист „Елемент N“; връща {наименование в КСС: адрес на клетката „Кол. общо“}."""
+    ws = wb.create_sheet(f"Елемент {index}")
+    layout = element["layout"]
+    count = max(1, int(element.get("count", 1)))
+
+    # Първо на празен лист - къде са дъските (колоните / редовете за тях), после на истинския
+    probe = _Sheet(Workbook().active)
+    _draw_views(probe, layout)
+    sheet = _Sheet(ws, probe.want_cols, probe.want_rows)
+    _draw_views(sheet, layout)
+    sheet.fill_inserted(FILL_CONCRETE)
 
     # КСС за елемента вдясно от чертежите: всички артикули като в „Кол. сметка“
     name_col = sheet.max_col + 3
