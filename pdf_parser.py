@@ -31,7 +31,7 @@ def _wall_element(length_cm, thickness_cm, height_cm, count):
     acc = calculate_accessories("wall", length_cm, thickness_cm, height_cm, layout["faces"][0]["rows"][0],
                                 layout["height_levels"], layout=layout)
     return {
-        "type": "Права Стена / Шайба",
+        "type": "Права Стена",
         "dimensions": f"L={length_cm:g} см, B={thickness_cm:g} см, H={height_cm:g} см",
         "count": count,
         "area_m2": round(2 * length_cm * height_cm / 10000.0 * count, 2),   # площта - както в офертата
