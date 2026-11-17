@@ -31,14 +31,29 @@ st.set_page_config(
     layout="wide"
 )
 
-# === СИСТЕМА ЗА ЗАЩИТА С ПАРОЛА (ВРЕМЕННО ИЗКЛЮЧЕНА) ===
+# === СИСТЕМА ЗА ЗАЩИТА С ПАРОЛА ===
 def check_password():
-    """Временно пропуска проверката и пуска директно в системата."""
-    return True
+    """Вход с парола от secrets (password); без парола в secrets (локално, на компютъра) - без вход."""
+    try:
+        secret_pass = str(st.secrets.get("password", ""))
+    except FileNotFoundError:
+        secret_pass = ""
+    if not secret_pass or st.session_state.get("password_correct"):
+        return True
+    st.title(t("🔒 Вход в системата TEKO"))
+    with st.form("login"):
+        user_pass = st.text_input(t("🔑 Въведете парола за достъп:"), type="password")
+        if st.form_submit_button(t("Вход")):
+            # като байтове - с текст compare_digest приема само латиница (парола на кирилица дава грешка)
+            if hmac.compare_digest(user_pass.encode("utf-8"), secret_pass.encode("utf-8")):
+                st.session_state["password_correct"] = True
+                st.rerun()
+            st.error(t("❌ Грешна парола! Опитайте отново."))
+    return False
 
 if not check_password():
     st.stop()
-# =======================================================
+# ==================================
 
 def set_cell_background(cell, hex_color):
     """Задава цвят на фона на клетка от таблица."""
