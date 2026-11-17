@@ -739,3 +739,66 @@ def generate_excel(elements):
     wb.save(buf)
     buf.seek(0)
     return buf
+
+
+# ==========================================
+# СКЛАДОВА НАЛИЧНОСТ (таб 5)
+# ==========================================
+STOCK_SHEET_TITLE = "Складова наличност"
+STOCK_HEADERS = ["Елемент", "Мярка", "Остава"]
+
+
+def stock_to_excel(stock_df):
+    """Наличността в Excel като „1. Наличности.xlsx“: заглавията на ред 3 в колони B-D. Връща BytesIO."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = STOCK_SHEET_TITLE
+    for col, (header, width) in enumerate(zip(STOCK_HEADERS, (34, 10, 12)), start=2):
+        cell = ws.cell(row=3, column=col, value=header)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor=FILL_HEADER)
+        cell.border = BORDER_KSS
+        ws.column_dimensions[get_column_letter(col)].width = width
+    for r, rec in enumerate(stock_df.to_dict("records"), start=4):
+        for col, header in enumerate(STOCK_HEADERS, start=2):
+            value = rec.get(header)
+            if value is None or (isinstance(value, float) and math.isnan(value)):
+                value = None
+            ws.cell(row=r, column=col, value=value).border = BORDER_KSS
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+def stock_from_excel(file):
+    """
+    Наличността от Excel, подреден като „1. Наличности.xlsx“: първият лист, редът със заглавие „Елемент“
+    (на всеки ред и колона), под него колоните „Елемент“, „Мярка“, „Остава“ (липсващата - празна).
+    Двойните интервали в имената се махат, редовете без име се пропускат.
+    """
+    from openpyxl import load_workbook
+    ws = load_workbook(file, data_only=True, read_only=True).worksheets[0]
+    rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    for i, row in enumerate(rows):
+        names = [str(v).strip() if v is not None else "" for v in row]
+        if "Елемент" in names:
+            columns = {h: names.index(h) for h in STOCK_HEADERS if h in names}
+            break
+    else:
+        raise ValueError("Няма колона „Елемент“ в първия лист.")
+    records = []
+    for row in rows[i + 1:]:
+        def value(header):
+            j = columns.get(header)
+            return row[j] if j is not None and j < len(row) else None
+        name = " ".join(str(value("Елемент") or "").split())
+        if not name:
+            continue
+        unit = value("Мярка")
+        records.append({"Елемент": name, "Мярка": " ".join(str(unit).split()) if unit is not None else None,
+                        "Остава": value("Остава")})
+    import pandas as pd
+    stock_df = pd.DataFrame(records, columns=STOCK_HEADERS)
+    stock_df["Остава"] = pd.to_numeric(stock_df["Остава"], errors="coerce")
+    return stock_df
