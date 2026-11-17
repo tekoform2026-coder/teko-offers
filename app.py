@@ -21,9 +21,12 @@ from teko_calculator import (solve_height_cm, layout_element, count_panels, is_c
                              panel_height_cm,
                              t_wall_offset_label)
 from weights_db import get_item_weight
+from i18n import t, t_item, init_language, language_switch, MANUAL_HELP_BG
+from doc_lang import DOC_LANGUAGES, document_language, dt
 
+init_language()
 st.set_page_config(
-    page_title="TEKO - Вертикален Кофраж и Оферти",
+    page_title=t("TEKO - Вертикален Кофраж и Оферти"),
     page_icon="🏗",
     layout="wide"
 )
@@ -53,11 +56,11 @@ def format_height_breakdown_text(height_cm, layout=None):
     parts = []
     for idx, h_val in enumerate(h_levels, 1):
         if is_compensator_row(h_val):
-            parts.append(f"Ред {idx}: Компенсатор TC ({h_val} cm)")
+            parts.append(t("Ред {i}: Компенсатор TC ({h} cm)", i=idx, h=h_val))
         elif h_val <= 60:
-            parts.append(f"Ред {idx}: Полегнал ({h_val} cm)")
+            parts.append(t("Ред {i}: Полегнал ({h} cm)", i=idx, h=h_val))
         else:
-            parts.append(f"Ред {idx}: Изправен ({h_val} cm)")
+            parts.append(t("Ред {i}: Изправен ({h} cm)", i=idx, h=h_val))
     return " | ".join(parts)
 
 # === СТЪПКА 4: Проверка за нестандартни размери ===
@@ -71,14 +74,15 @@ def check_element_dimensions(row):
     name = format_element_label(elem_type, str(row.get("name", "Елемент")))
 
     # Задължителните размери за типа; празен или 0 (напр. непопълнен от Gemini) - сметката не е вярна
-    missing = [label for col, label in REQUIRED_DIMENSIONS.get(elem_type, [])
+    missing = [t(label) for col, label in REQUIRED_DIMENSIONS.get(elem_type, [])
                if not _row_float(row, col, 0) > 0]
     if missing:
-        warnings.append(f"• **{name}**: липсва размер ({', '.join(missing)}) - празен или 0. "
-                        f"Попълнете го в таблицата, иначе сметката и чертежът не са верни.")
+        warnings.append(t("• **{name}**: липсва размер ({missing}) - празен или 0. Попълнете го в таблицата, иначе "
+                          "сметката и чертежът не са верни.", name=name, missing=", ".join(missing)))
 
     if h_cm % 5 != 0:
-        warnings.append(f"• **{name}**: Височина {h_cm} cm не е кратна на 5 cm (закръгля се нагоре до 5 cm).")
+        warnings.append(t("• **{name}**: Височина {h} cm не е кратна на 5 cm (закръгля се нагоре до 5 cm).",
+                          name=name, h=h_cm))
 
     def board_warning(label, col, default):
         """
@@ -89,8 +93,9 @@ def check_element_dimensions(row):
         panels = math.floor(round(value, 6) / 5.0) * 5
         board = round(value - panels, 6)
         if board > 0:
-            warnings.append(f"• **{name}**: {label} {value:g} cm не е кратна на 5 cm - панели до {panels:g} cm "
-                            f"+ дървена дъска {board:g} cm (само на чертежа, не влиза в сметката и площта).")
+            warnings.append(t("• **{name}**: {label} {value} cm не е кратна на 5 cm - панели до {panels} cm + "
+                              "дървена дъска {board} cm (само на чертежа, не влиза в сметката и площта).",
+                              name=name, label=t(label), value=f"{value:g}", panels=f"{panels:g}", board=f"{board:g}"))
 
     if elem_type == "column":
         board_warning("Стена A", "l1_cm", 50)
@@ -114,21 +119,23 @@ def check_element_dimensions(row):
         board_warning("Стена A", "l1_cm", 200)
         board_warning("Стена B", "l2_cm", 200)
         if l3_cm % 5 != 0:
-            warnings.append(f"• **{name}**: Мястото на реброто (Стена C = {l3_cm} cm) не е кратно на 5 cm.")
+            warnings.append(t("• **{name}**: Мястото на реброто (Стена C = {l3} cm) не е кратно на 5 cm.",
+                              name=name, l3=l3_cm))
         # от всяка страна на реброто трябва да остане място за IN (10 cm) и поне 5 cm панел
         if l3_cm and (l3_cm - 10 < 5 or l1_cm - l3_cm - t_cm - 10 < 5):
-            warnings.append(f"• **{name}**: Реброто на {l3_cm} cm от левия край не оставя място за ъгъл IN (10 cm) "
-                            f"и поне 5 cm панел от двете страни на полката ({l1_cm} cm) - проверете Стена C.")
+            warnings.append(t("• **{name}**: Реброто на {l3} cm от левия край не оставя място за ъгъл IN (10 cm) и "
+                              "поне 5 cm панел от двете страни на полката ({l1} cm) - проверете Стена C.",
+                              name=name, l3=l3_cm, l1=l1_cm))
         if (not l3_cm and (l1_cm - t_cm) / 2 <= 10) or l2_cm <= 10:
-            warnings.append(f"• **{name}**: Страна A ({l1_cm} cm) или B ({l2_cm} cm) е твърде къса за T-стена "
-                            f"с дебелина {t_cm} cm - проверете Стена A и Стена B.")
+            warnings.append(t("• **{name}**: Страна A ({l1} cm) или B ({l2} cm) е твърде къса за T-стена с дебелина "
+                              "{t} cm - проверете Стена A и Стена B.", name=name, l1=l1_cm, l2=l2_cm, t=t_cm))
 
     # Размерите са в см - стойност под 10 най-вероятно е въведена в метри (напр. 2.5 вместо 250)
     small = [f"{col} = {row.get(col):g}" for col in LENGTH_COLUMNS
              if pd.notna(pd.to_numeric(row.get(col), errors="coerce")) and 0 < float(row.get(col)) < 10]
     if small:
-        warnings.append(f"• **{name}**: {', '.join(small)} - размерите са в **сантиметри**; "
-                        f"въведени ли са в метри? (напр. 2.5 м = 250 см)")
+        warnings.append(t("• **{name}**: {small} - размерите са в **сантиметри**; въведени ли са в метри? "
+                          "(напр. 2.5 м = 250 см)", name=name, small=", ".join(small)))
 
     return warnings
 
@@ -458,11 +465,12 @@ def show_stock_warnings(df_calc):
     """Предупреждения при недостиг в склада (табове 1, 2 и 5)."""
     short, missing = stock_shortages(df_calc)
     if short:
-        lines = [f"- **{k}**: нужни {q:g} бр., на склад {a:g} бр. (не стигат {q - a:g} бр.)" for k, q, a in short]
-        st.warning("⚠️ Не стигат в склада (таб „Складова наличност“):\n" + "\n".join(lines))
+        lines = [t("- **{k}**: нужни {q} бр., на склад {a} бр. (не стигат {d} бр.)",
+                   k=k, q=f"{q:g}", a=f"{a:g}", d=f"{q - a:g}") for k, q, a in short]
+        st.warning(t("⚠️ Не стигат в склада (таб „Складова наличност“):") + "\n" + "\n".join(lines))
     if missing:
-        lines = [f"- **{k}**: нужни {q:g} бр." for k, q in missing]
-        st.warning("⚠️ Няма ги в складовата наличност:\n" + "\n".join(lines))
+        lines = [t("- **{k}**: нужни {q} бр.", k=k, q=f"{q:g}") for k, q in missing]
+        st.warning(t("⚠️ Няма ги в складовата наличност:") + "\n" + "\n".join(lines))
 
 def element_dims_and_area(elem_type, row):
     """
@@ -483,7 +491,7 @@ def element_dims_and_area(elem_type, row):
         # с „Дебелина стена A / B / C“: една дебелина (B=30 см) или по стени (стена A дебелина 30 см, ...)
         layout = row_to_layout(elem_type, row)
         t = layout["dims"]["t1"]
-        b_str = f"B={t:g} см" if thickness_label(layout).startswith("дебелина") else thickness_label(layout)
+        b_str = f"B={t:g} см" if thickness_label(layout).startswith(dt("дебелина")) else thickness_label(layout)
     if elem_type == "column":
         w, l = t, _row_float(row, "l1_cm", 50)
         perimeter = 2 * (w + l)
@@ -507,7 +515,7 @@ def element_dims_and_area(elem_type, row):
         dim_str = f"T: A={l1:g} см, B={l2:g} см, {offset + ', ' if offset else ''}{thickness_label(layout)}, H={hp:g} см"
     else:
         return "", 0.0
-    return dim_str, panel_area * cnt
+    return dim_str.replace(" см", " " + dt("см")), panel_area * cnt   # мерната единица на езика на документа
 
 DISPLAY_TYPES = {
     "column": "Колона",
@@ -531,7 +539,7 @@ def build_drawing_elements(df):
             elem_bom[acc_code] = elem_bom.get(acc_code, 0) + acc_qty
         elements.append({
             "name": format_element_label(elem_type, name),
-            "wall_type": DISPLAY_TYPES[elem_type],
+            "wall_type": dt(DISPLAY_TYPES[elem_type]),
             "count": int(_row_float(row, "count", 1)),
             "layout": layout,
             "bom": elem_bom
@@ -560,6 +568,7 @@ def preview_counts(elem_type, row):
     acc = get_element_accessories(elem_type, row)
     def group(word):
         return sum(qty for code, qty in acc.items() if word in code)
+    # думите на български - на екрана се превеждат (t)
     return [("панела", sum(get_element_teko_panels(elem_type, row).values())),
             ("ъгли", group("ъгъл")),
             ("ригели", group("Ригел")),
@@ -576,8 +585,8 @@ def render_element_preview(idx, row):
     dim_str, _ = element_dims_and_area(elem_type, row)
     cnt = int(_row_float(row, "count", 1))
     ends = CLOSED_END_COLUMNS if elem_type == "t_wall" else CLOSED_END_COLUMNS[:2]
-    closed = "" if elem_type == "column" else f", затворени краища: {sum(_closed_end(row, k) for k in ends)}"
-    title = f"{label} · {DISPLAY_TYPES[elem_type]} — {dim_str}{closed}, {cnt} бр."
+    closed = "" if elem_type == "column" else t(", затворени краища: {n}", n=sum(_closed_end(row, k) for k in ends))
+    title = f"{label} · {t(DISPLAY_TYPES[elem_type])} — {t_item(dim_str)}{closed}, {cnt} {t('бр.')}"
     with st.expander(title):
         for w in check_element_dimensions(row):
             st.warning(w)
@@ -586,25 +595,26 @@ def render_element_preview(idx, row):
             counts = preview_counts(elem_type, row)
             top_png = preview_top_png(row_items)
         except Exception as e:
-            st.error(f"Елементът не може да се начертае - проверете размерите ({e}).")
+            st.error(t("Елементът не може да се начертае - проверете размерите ({error}).", error=e))
             return
-        st.markdown(f"Количества ({cnt} бр.): " + " ".join(f":gray-badge[{qty} {word}]" for word, qty in counts))
-        st.image(top_png, caption="Изглед отгоре", width=700)
-        if st.checkbox("Покажи изгледа отпред", key=f"preview_front_{idx}"):
-            st.image(preview_front_png(row_items), caption="Изглед отпред", width=900)
+        st.markdown(t("Количества ({n} бр.): ", n=cnt)
+                    + " ".join(f":gray-badge[{qty} {t(word)}]" for word, qty in counts))
+        st.image(top_png, caption=t("Изглед отгоре"), width=700)
+        if st.checkbox(t("Покажи изгледа отпред"), key=f"preview_front_{idx}"):
+            st.image(preview_front_png(row_items), caption=t("Изглед отпред"), width=900)
 
 def format_element_label(elem_type, name):
     name_str = str(name).strip() if name else ""
     if elem_type == "column":
-        return name_str if name_str.lower().startswith("колона") else f"Колона {name_str}".strip()
+        return name_str if name_str.lower().startswith("колона") else f"{dt('Колона')} {name_str}".strip()
     elif elem_type == "wall":
-        return name_str if name_str.lower().startswith("стена") else f"Стена {name_str}".strip()
+        return name_str if name_str.lower().startswith("стена") else f"{dt('Стена')} {name_str}".strip()
     elif elem_type == "l_wall":
-        return name_str if (name_str.lower().startswith("l-стена") or name_str.lower().startswith("стена")) else f"L-стена {name_str}".strip()
+        return name_str if (name_str.lower().startswith("l-стена") or name_str.lower().startswith("стена")) else f"{dt('L-стена')} {name_str}".strip()
     elif elem_type == "u_wall":
-        return name_str if (name_str.lower().startswith("п-стена") or name_str.lower().startswith("стена")) else f"П-стена {name_str}".strip()
+        return name_str if (name_str.lower().startswith("п-стена") or name_str.lower().startswith("стена")) else f"{dt('П-стена')} {name_str}".strip()
     elif elem_type == "t_wall":
-        return name_str if (name_str.lower().startswith("t-стена") or name_str.lower().startswith("стена")) else f"T-стена {name_str}".strip()
+        return name_str if (name_str.lower().startswith("t-стена") or name_str.lower().startswith("стена")) else f"{dt('T-стена')} {name_str}".strip()
     return name_str
 
 EXTRA_PAGE_MAX_PX = 3500  # страниците след първата - най-много толкова пиксела по дългата страна
@@ -677,21 +687,21 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
     p_comp.paragraph_format.space_after = Pt(12)
     p_comp.paragraph_format.line_spacing = 1.15
 
-    r_comp = p_comp.add_run("ТЕКО България ООД | ЕИК 208141542\n")
+    r_comp = p_comp.add_run(dt("ТЕКО България ООД | ЕИК 208141542\n"))
     r_comp.bold = True
     r_comp.font.size = Pt(10.5)
     r_comp.font.color.rgb = BLUE_COLOR
 
-    r_addr = p_comp.add_run(
+    r_addr = p_comp.add_run(dt(
         "2700 Благоевград, ул. „Ал. Стамболийски” №9, ет. 1\n"
         "www.tekoform.com | e-mail: bulgaria@tekoform.com | тел: +359 879 044 188"
-    )
+    ))
     r_addr.font.size = Pt(8.5)
     r_addr.font.color.rgb = RGBColor(90, 90, 90)
 
     p_title = doc.add_paragraph()
-    action_text = "закупуване" if is_sale else "наемане"
-    run_title = p_title.add_run(f"ОФЕРТА\nЗа {action_text} на пластмасова кофражна система TEKO")
+    run_title = p_title.add_run(dt("ОФЕРТА\nЗа закупуване на пластмасова кофражна система TEKO") if is_sale
+                                else dt("ОФЕРТА\nЗа наемане на пластмасова кофражна система TEKO"))
     run_title.bold = True
     run_title.font.size = Pt(14)
     run_title.font.color.rgb = BLUE_COLOR
@@ -700,18 +710,18 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
     p_info = doc.add_paragraph()
     p_info.paragraph_format.line_spacing = 1.25
     p_info.paragraph_format.space_after = Pt(12)
-    p_info.add_run("До: ").bold = True
+    p_info.add_run(dt("До: ")).bold = True
     p_info.add_run(f"{client_name}\n")
-    p_info.add_run("Относно: ").bold = True
-    p_info.add_run(f"Кофриране на стоманобетонови елементи за обект: „{project_name}“\n")
-    p_info.add_run("Дата: ").bold = True
-    p_info.add_run(f"{offer_date.strftime('%d.%m.%Y')} г.")
+    p_info.add_run(dt("Относно: ")).bold = True
+    p_info.add_run(dt("Кофриране на стоманобетонови елементи за обект: „{project}“\n", project=project_name))
+    p_info.add_run(dt("Дата: ")).bold = True
+    p_info.add_run(f"{offer_date.strftime('%d.%m.%Y')}{dt(' г.')}")
 
     table = doc.add_table(rows=1, cols=6)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
     hdr_cells = table.rows[0].cells
-    headers = ["Елемент", "Размери", "Брой", "Площ (m²)", "Ед. цена (€/m²)", "Обща сума (€)"]
+    headers = [dt(h) for h in ("Елемент", "Размери", "Брой", "Площ (m²)", "Ед. цена (€/m²)", "Обща сума (€)")]
     
     for i, header_text in enumerate(headers):
         hdr_cells[i].text = header_text
@@ -727,7 +737,7 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
         row_cells = table.add_row().cells
         row_cells[0].text = str(row_data["Елемент"])
         row_cells[1].text = str(row_data["Размери"])
-        row_cells[2].text = f"{row_data['Брой']} бр."
+        row_cells[2].text = f"{row_data['Брой']} {dt('бр.')}"
         row_cells[3].text = f"{row_data['Площ (m²)']:.2f} m²"
         row_cells[4].text = f"{price_per_m2:.2f} €"
         row_cells[5].text = f"{row_data['Обща сума (€)']:.2f} €"
@@ -740,16 +750,16 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
 
     doc.add_paragraph().paragraph_format.space_after = Pt(10)
 
-    action_word = "покупка" if is_sale else "наем"
     p_summary = doc.add_paragraph()
     p_summary.paragraph_format.line_spacing = 1.25
     p_summary.paragraph_format.space_after = Pt(12)
     
-    p_summary.add_run(f"Обща кофражна площ: {total_area:.2f} m²\n").bold = True
-    p_summary.add_run(f"Обща стойност за {action_word} (без ДДС): {subtotal:.2f} €\n").bold = True
-    p_summary.add_run(f"ДДС (20%): {vat_amount:.2f} €\n")
+    p_summary.add_run(dt("Обща кофражна площ: {area} m²\n", area=f"{total_area:.2f}")).bold = True
+    p_summary.add_run(dt("Обща стойност за покупка (без ДДС): {value} €\n" if is_sale
+                         else "Обща стойност за наем (без ДДС): {value} €\n", value=f"{subtotal:.2f}")).bold = True
+    p_summary.add_run(dt("ДДС (20%): {value} €\n", value=f"{vat_amount:.2f}"))
     
-    run_total = p_summary.add_run(f"ОБЩО ЗА ПЛАЩАНЕ: {grand_total:.2f} €")
+    run_total = p_summary.add_run(dt("ОБЩО ЗА ПЛАЩАНЕ: {value} €", value=f"{grand_total:.2f}"))
     run_total.bold = True
     run_total.font.size = Pt(11)
     run_total.font.color.rgb = BLUE_COLOR
@@ -759,7 +769,7 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
     notes_p.paragraph_format.space_after = Pt(12)
     notes_p.paragraph_format.line_spacing = 1.15
     
-    run_th = notes_p.add_run("Условия на офертата:\n")
+    run_th = notes_p.add_run(dt("Условия на офертата:\n"))
     run_th.bold = True
     run_th.font.color.rgb = BLUE_COLOR
 
@@ -772,13 +782,13 @@ def generate_word_offer(client_name, project_name, offer_date, offer_type, price
         "6. Място на вземане: Склад на фирмата (Транспортът е за сметка на Купувача/Наемателя)."
     ]
     for term in terms:
-        r = notes_p.add_run(f"{term}\n")
+        r = notes_p.add_run(f"{dt(term)}\n")
         r.font.size = Pt(8.5)
 
     p_sign = doc.add_paragraph()
     p_sign.paragraph_format.space_before = Pt(8)
-    p_sign.add_run("С уважение,\n").bold = True
-    run_sign = p_sign.add_run("Екипът на ТЕКО България ООД\nwww.tekoform.com")
+    p_sign.add_run(dt("С уважение,\n")).bold = True
+    run_sign = p_sign.add_run(dt("Екипът на ТЕКО България ООД\nwww.tekoform.com"))
     run_sign.font.color.rgb = BLUE_COLOR
     run_sign.bold = True
 
@@ -807,13 +817,14 @@ else:
     st.session_state["edited_df"] = thickness_to_walls(columns_to_cm(st.session_state["edited_df"]))
 
 with st.sidebar:
-    st.header("⚙️ Настройки")
+    st.header(t("⚙️ Настройки"))
     if not api_key:
-        api_key = st.text_input("Въведете Gemini API Key:", type="password")
+        api_key = st.text_input(t("Въведете Gemini API Key:"), type="password", key="api_key_input")
     else:
-        st.success("🔑 API Ключът е зареден!")
+        st.success(t("🔑 API Ключът е зареден!"))
 
 # === ГОРНА ЛЕНТА И ВИД НА СТРАНИЦАТА „ПРОЕКТИ“ (по снимка 19 в reference/screenshots) ===
+language_switch()  # езикът - горе вдясно, над лентата
 st.markdown("""
     <style>
     .teko-header {display: flex; align-items: center; gap: 14px; background: #0f1b2d; color: #fff;
@@ -842,9 +853,9 @@ st.markdown("""
     </style>
     <div class="teko-header">
       <div class="teko-logo">TK</div>
-      <div><div class="teko-title">TEKO — Оптимизация на панели</div>
-           <div class="teko-sub">AI система за кофражно планиране</div></div>
-      <div class="teko-right">ТЕКО България ООД</div>
+      <div><div class="teko-title">""" + t("TEKO — Оптимизация на панели") + """</div>
+           <div class="teko-sub">""" + t("AI система за кофражно планиране") + """</div></div>
+      <div class="teko-right">""" + t("ТЕКО България ООД") + """</div>
     </div>
 """, unsafe_allow_html=True)
 
@@ -928,41 +939,41 @@ def render_projects_page():
     _, page, _ = st.columns([1, 6, 1])
     with page:
         col_h, col_new = st.columns([5, 1], vertical_alignment="center")
-        col_h.markdown('<p class="teko-projects-title">Проекти</p>', unsafe_allow_html=True)
+        col_h.markdown(f'<p class="teko-projects-title">{t("Проекти")}</p>', unsafe_allow_html=True)
         with col_new.container(key="new_project"):
-            with st.popover("Нов проект", use_container_width=True):
-                st.text_input("Име на проекта:", key="new_project_name")
-                st.text_input("Клиент:", key="new_project_client")
-                st.date_input("Дата:", key="new_project_date")
-                st.button("Създай и отвори", type="primary", on_click=create_project, use_container_width=True)
+            with st.popover(t("Нов проект"), use_container_width=True):
+                st.text_input(t("Име на проекта:"), key="new_project_name")
+                st.text_input(t("Клиент:"), key="new_project_client")
+                st.date_input(t("Дата:"), key="new_project_date")
+                st.button(t("Създай и отвори"), type="primary", on_click=create_project, use_container_width=True)
 
         if archive_error:
-            st.error(f"Архивът в Google не е достъпен ({archive_error}). Проектите се пазят само докато "
-                     "страницата е отворена.")
+            st.error(t("Архивът в Google не е достъпен ({error}). Проектите се пазят само докато страницата е "
+                       "отворена.", error=archive_error))
         elif not projects_store.has_archive():
-            st.caption("Без архив (няма ключ за Google в secrets): проектите се губят при презареждане.")
+            st.caption(t("Без архив (няма ключ за Google в secrets): проектите се губят при презареждане."))
         else:
             try:
                 projects_store.refresh(st.session_state["projects"])
             except Exception as exc:  # noqa: BLE001
-                st.error(f"Списъкът не може да се зареди от Google: {exc}")
+                st.error(t("Списъкът не може да се зареди от Google: {error}", error=exc))
 
         if st.session_state.pop("open_project_failed", False):
-            st.warning("Презаредете страницата (F5). Проектът е създаден и записан, но не можа да се отвори "
-                       "веднага, защото бутонът „Създай и отвори“ беше натиснат твърде бързо след въвеждането "
-                       "на името. Следващия път изчакайте 2-3 секунди, преди да натиснете бутона.")
+            st.warning(t("Презаредете страницата (F5). Проектът е създаден и записан, но не можа да се отвори "
+                         "веднага, защото бутонът „Създай и отвори“ беше натиснат твърде бързо след въвеждането "
+                         "на името. Следващия път изчакайте 2-3 секунди, преди да натиснете бутона."))
 
         rows = projects_store.project_rows(st.session_state["projects"])
         if not rows:
-            st.info("ℹ️ Няма проекти. Натиснете „Нов проект“.")
+            st.info(t("ℹ️ Няма проекти. Натиснете „Нов проект“."))
             return
         widths = [3.6, 2.8, 1.4, 1.7, 2.3]
         with st.container(border=True, key="projects_table"):
             with st.container(key="projects_head"):
                 head = st.columns(widths, vertical_alignment="center")
                 for col, title in zip(head, ["Име", "Клиент", "Дата", "Последна промяна"]):
-                    col.markdown(title)
-                head[-1].markdown('<p class="teko-right-head">Действия</p>', unsafe_allow_html=True)
+                    col.markdown(t(title))
+                head[-1].markdown(f'<p class="teko-right-head">{t("Действия")}</p>', unsafe_allow_html=True)
             for row in rows:
                 pid = row["id"]
                 with st.container(key=f"prow_{pid}"):
@@ -974,14 +985,14 @@ def render_projects_page():
                     c_date.markdown(f'<span class="teko-mono">{row["Дата"]}</span>', unsafe_allow_html=True)
                     c_mod.markdown(f'<span class="teko-mono">{row["Последна промяна"]}</span>',
                                    unsafe_allow_html=True)
-                    actions.button("Дублирай", key=f"dup_{pid}", type="tertiary", width="content", on_click=duplicate_project,
+                    actions.button(t("Дублирай"), key=f"dup_{pid}", type="tertiary", width="content", on_click=duplicate_project,
                                  args=(pid,))
                     if st.session_state.get("delete_project_id") == pid:
-                        actions.button("Потвърди", key=f"delok_{pid}", type="primary", width="content", on_click=delete_project,
+                        actions.button(t("Потвърди"), key=f"delok_{pid}", type="primary", width="content", on_click=delete_project,
                                      args=(pid,),
-                                     help="Проектът се маха от списъка (в архива остава с отметка „Изтрит“).")
+                                     help=t("Проектът се маха от списъка (в архива остава с отметка „Изтрит“)."))
                     else:
-                        actions.button("Изтрий", key=f"del_{pid}", type="tertiary", width="content",
+                        actions.button(t("Изтрий"), key=f"del_{pid}", type="tertiary", width="content",
                                      on_click=st.session_state.__setitem__, args=("delete_project_id", pid))
 
 current = projects_store.get_project(st.session_state["projects"], st.session_state["current_project"])
@@ -1001,57 +1012,60 @@ def rename_current_project(pid):
 
 col_proj, col_edit, col_back = st.columns([4, 1, 1], vertical_alignment="center")
 col_proj.subheader(f"📁 {current['name']}" + (f" · {current['client']}" if current["client"] else ""))
-with col_edit.popover("✏️ Промени", use_container_width=True,
-                      help="Промяна на името на проекта, клиента (възложителя) и датата."):
+with col_edit.popover(t("✏️ Промени"), use_container_width=True,
+                      help=t("Промяна на името на проекта, клиента (възложителя) и датата.")):
     pid = current["id"]
-    st.text_input("Име на проекта:", value=current["name"], key=f"rename_name_{pid}")
-    st.text_input("Клиент (възложител):", value=current["client"], key=f"rename_client_{pid}")
-    st.date_input("Дата:", value=current["date"], key=f"rename_date_{pid}")
-    st.button("Запази", type="primary", on_click=rename_current_project, args=(pid,), use_container_width=True)
-col_back.button("← Проекти", on_click=close_project, use_container_width=True,
-                help="Записва таблицата и се връща към списъка с проекти.")
+    st.text_input(t("Име на проекта:"), value=current["name"], key=f"rename_name_{pid}")
+    st.text_input(t("Клиент (възложител):"), value=current["client"], key=f"rename_client_{pid}")
+    st.date_input(t("Дата:"), value=current["date"], key=f"rename_date_{pid}")
+    st.button(t("Запази"), type="primary", on_click=rename_current_project, args=(pid,), use_container_width=True)
+col_back.button(t("← Проекти"), on_click=close_project, use_container_width=True,
+                help=t("Записва таблицата и се връща към списъка с проекти."))
 
 load_stock_once()  # преди табовете - предупрежденията за наличността са и в табове 1 и 2
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([t(label) for label in (
     "📐 Чертеж и Редактиране",
     "🧱 Кофражни Елементи и Панели TEKO",
     "📄 PDF Чертежи",
     "📄 Оферта",
     "📦 Складова наличност"
-])
+)])
 
 with tab1:
-    st.header("1. Избор на начин за въвеждане на елементи")
+    st.header(t("1. Избор на начин за въвеждане на елементи"))
     
     input_mode = st.radio(
-        "Изберете режим на работа:",
+        t("Изберете режим на работа:"),
         ["🤖 Автоматично разчитане от чертежи", "⌨️ Ръчно въвеждане (Таблица)"],
-        horizontal=True
+        format_func=t,
+        horizontal=True,
+        key="input_mode"
     )
 
     if input_mode == "🤖 Автоматично разчитане от чертежи":
-        st.subheader("Качване на чертеж и AI разчитане")
-        uploaded_file = st.file_uploader("Изберете чертеж (PDF, PNG, JPG):", type=["pdf", "png", "jpg", "jpeg"])
+        st.subheader(t("Качване на чертеж и AI разчитане"))
+        uploaded_file = st.file_uploader(t("Изберете чертеж (PDF, PNG, JPG):"), type=["pdf", "png", "jpg", "jpeg"],
+                                         key="blueprint_upload")
 
         if uploaded_file:
             col_img, col_actions = st.columns([1, 1])
             with col_img:
-                st.subheader("🖼️ Преглед на файла")
+                st.subheader(t("🖼️ Преглед на файла"))
                 try:
                     preview_img, n_pages = uploaded_preview(uploaded_file)
                     st.image(preview_img, use_container_width=True,
-                             caption="Качен чертеж" + (f" - стр. 1 от {n_pages}; към AI отиват всички {n_pages}"
-                                                       if n_pages > 1 else ""))
+                             caption=t("Качен чертеж") + (t(" - стр. 1 от {n}; към AI отиват всички {n}", n=n_pages)
+                                                          if n_pages > 1 else ""))
                     file_ok = True
                 except Exception as e:
-                    st.error(f"Грешка при зареждането: {e}")
+                    st.error(t("Грешка при зареждането: {error}", error=e))
                     file_ok = False
 
             with col_actions:
-                st.subheader("AI Разчитане")
+                st.subheader(t("AI Разчитане"))
                 
                 selected_model = st.selectbox(
-                    "Избери AI модел за разчитане:",
+                    t("Избери AI модел за разчитане:"),
                     options=[
                         "gemini-3.1-pro",
                         "gemini-2.5-pro",
@@ -1059,22 +1073,24 @@ with tab1:
                         "gemini-3.6-flash"
                     ],
                     index=0,
-                    help="Изберете кой модел на Gemini да анализира чертежа."
+                    help=t("Изберете кой модел на Gemini да анализира чертежа."),
+                    key="ai_model"
                 )
 
                 if not api_key:
-                    st.warning("⚠️ Моля, въведете Gemini API Key в страничното меню.")
+                    st.warning(t("⚠️ Моля, въведете Gemini API Key в страничното меню."))
                 else:
-                    if st.button("🔍 Разчети чертежа с Vision AI", type="primary", use_container_width=True):
+                    if st.button(t("🔍 Разчети чертежа с Vision AI"), type="primary", use_container_width=True,
+                                 key="read_blueprint"):
                         # пълните страници за Gemini се рисуват само тук, не при всеки клик
                         processed_img = None
                         if file_ok:
                             try:
                                 processed_img = process_uploaded_file(uploaded_file)
                             except Exception as e:
-                                st.error(f"Грешка при зареждането: {e}")
+                                st.error(t("Грешка при зареждането: {error}", error=e))
                         if processed_img:
-                            with st.spinner("Извличане на вертикални кофражни елементи..."):
+                            with st.spinner(t("Извличане на вертикални кофражни елементи...")):
                                 try:
                                     res = analyze_blueprint(processed_img, api_key, model_choice=selected_model)
                                     if isinstance(res, tuple):
@@ -1091,58 +1107,47 @@ with tab1:
                                         if col not in df_ai.columns:
                                             df_ai[col] = True if col in CLOSED_END_COLUMNS else None
                                     st.session_state["edited_df"] = thickness_to_walls(df_ai)
-                                    st.success(f"✅ Готово! Разчетено с: **{used_model}**")
+                                    st.success(t("✅ Готово! Разчетено с: **{model}**", model=used_model))
                                     # противоречия и несигурности в чертежа - потребителят проверява таблицата
                                     for note in blueprint_data.get("notes") or []:
                                         st.warning(f"⚠️ {note}")
                                 except Exception as e:
-                                    st.error(f"Грешка при анализа: {e}")
+                                    st.error(t("Грешка при анализа: {error}", error=e))
     else:
-        st.subheader("⌨️ Ръчно въвеждане и управление в таблицата")
-        st.markdown(
-            "📝 **Инструкция за попълване в таблицата по-долу:**\n"
-            "- Изберете **тип елемент**: Колона, Права стена, L-стена, П-стена или T-стена.\n"
-            "- Всички размери (стени, дебелини, височина) са в **сантиметри**.\n"
-            "- За **права стена**: попълнете **Стена A** (дължината) и **Дебелина стена A**.\n"
-            "- За **колона**: попълнете **Стена A** и **Дебелина стена A** - колона 50x30: стена A 50 (страна A на чертежа), дебелина 30 (страна B).\n"
-            "- За **L-стена**: попълнете **Стена A**, **Стена B** и **Дебелина стена A**.\n"
-            "- За **П-стена**: попълнете **Стена A**, **Стена B**, **Стена C** и **Дебелина стена A**.\n"
-            "- За **T-стена**: **Стена A** (цялата полка), **Стена B** (реброто, от полката до края му) и **Дебелина стена A**. **Стена C** - мястото на реброто: от левия край на полката до лявото лице на реброто; празно = реброто е в средата на полката. Реброто може да е и до самия край - остава Т-стена. Край 1 е десният край на полката, край 2 - левият, **Затворен край 3** - краят на реброто (само за T-стена).\n"
-            "- **Дебелина стена A** е дебелината на целия елемент. **Дебелина стена B / C** (L-, П- и T-стена) се попълва само когато стената е с различна дебелина; празното поле = като стена A (равна на A се изчиства). При T-стена стена A е полката, стена B - реброто.\n"
-            "- **Затворен край 1 / Затворен край 2** (отметки) за стени, L- и П-стени: челните краища, затворени с панел колкото дебелината. Край 1 е краят на стена A (при права стена - десният), край 2 - краят на последната стена (при права стена - левият). **Всички краища са затворени по подразбиране** - за отворен край махнете отметката.\n"
-            "- Непотребните полета за съответния тип могат да се оставят празни — системата автоматично игнорира празни клетки без грешки!"
-        )
+        st.subheader(t("⌨️ Ръчно въвеждане и управление в таблицата"))
+        st.markdown(t(MANUAL_HELP_BG))
 
     st.divider()
-    st.subheader("📏 Стандартна височина на етажа")
+    st.subheader(t("📏 Стандартна височина на етажа"))
     std_choice = st.radio(
-        "Стандартна височина за всички елементи:",
+        t("Стандартна височина за всички елементи:"),
         ["270 см", "300 см", "Друга"],
+        format_func=t,
         index=0,
         horizontal=True,
         key="std_height_choice_cm"
     )
     if std_choice == "Друга":
-        std_height = st.number_input("Височина (см):", min_value=60, max_value=1200, value=DEFAULT_HEIGHT_CM,
+        std_height = st.number_input(t("Височина (см):"), min_value=60, max_value=1200, value=DEFAULT_HEIGHT_CM,
                                      step=10, key="std_height_other_cm")
     else:
         std_height = int(std_choice.split()[0])
     st.session_state["std_height_cm"] = std_height
-    st.caption(f"Елементите с празна „Височина (см)“ в таблицата се смятат с {std_height} см. "
-               "Височината, въведена в таблицата, остава с предимство.")
-    if st.button(f"↕️ Приложи {std_height} см към всички редове", key="apply_std_height",
-                 help="Записва стандартната височина във всички редове на таблицата, включително разчетените "
-                      "от чертежа. Незапазените промени в таблицата се губят - първо натиснете „Запази и Изчисли“."):
+    st.caption(t("Елементите с празна „Височина (см)“ в таблицата се смятат с {h} см. Височината, въведена в "
+                 "таблицата, остава с предимство.", h=std_height))
+    if st.button(t("↕️ Приложи {h} см към всички редове", h=std_height), key="apply_std_height",
+                 help=t("Записва стандартната височина във всички редове на таблицата, включително разчетените от "
+                        "чертежа. Незапазените промени в таблицата се губят - първо натиснете „Запази и Изчисли“.")):
         df_all = st.session_state["edited_df"].copy()
         if df_all.empty:
-            st.info("ℹ️ Таблицата е празна - няма редове за промяна.")
+            st.info(t("ℹ️ Таблицата е празна - няма редове за промяна."))
         else:
             df_all["height_cm"] = std_height
             st.session_state["edited_df"] = df_all
             st.session_state.pop("elements_form_editor", None)  # таблицата се показва наново с новите височини
-            st.success(f"✅ Височина {std_height} см е записана в {len(df_all)} реда.")
+            st.success(t("✅ Височина {h} см е записана в {n} реда.", h=std_height, n=len(df_all)))
 
-    st.subheader("✏️ Таблица с вертикални кофражни елементи")
+    st.subheader(t("✏️ Таблица с вертикални кофражни елементи"))
     
     st.markdown("""
         <style>
@@ -1159,27 +1164,27 @@ with tab1:
             st.session_state["edited_df"],
             num_rows="delete",  # нов ред - само с „➕ Добави елемент“, без „+“ под всяка колона
             column_config={
-                "type": st.column_config.SelectboxColumn("Тип елемент", options=list(TYPE_LABELS), required=True, default="wall", width="auto",
-                                                         format_func=lambda code: TYPE_LABELS.get(code, code)),
-                "name": st.column_config.TextColumn("Наименование / Маркировка", width="auto"),
-                "count": st.column_config.NumberColumn("Брой", min_value=1, step=1, default=1, width="auto"),
-                "l1_cm": st.column_config.NumberColumn("Стена A (см)", format="%g", width="auto",
-                                                       help="При права стена и колона - дължината"),
-                "thickness1_cm": st.column_config.NumberColumn("Дебелина стена A (см)", format="%g", width="auto"),
-                "l2_cm": st.column_config.NumberColumn("Стена B (см)", format="%g", width="auto"),
-                "thickness2_cm": st.column_config.NumberColumn("Дебелина стена B (см)", format="%g", width="auto",
-                                                               help="L-, П- и Т-стена; празна = като стена A "
-                                                                    "(попълва се само когато е различна)"),
-                "l3_cm": st.column_config.NumberColumn("Стена C (см)", format="%g", width="auto",
-                                                       help="При Т-стена: от левия край на полката до лявото лице "
-                                                            "на реброто; празно = реброто е в средата"),
-                "thickness3_cm": st.column_config.NumberColumn("Дебелина стена C (см)", format="%g", width="auto",
-                                                               help="Само за П-стена; празна = като стена A "
-                                                                    "(попълва се само когато е различна)"),
-                "height_cm": st.column_config.NumberColumn("Височина (см)", format="%g", width="auto"),
-                "closed_end_1": st.column_config.CheckboxColumn("Затворен край 1", default=True, width="auto"),
-                "closed_end_2": st.column_config.CheckboxColumn("Затворен край 2", default=True, width="auto"),
-                "closed_end_3": st.column_config.CheckboxColumn("Затворен край 3 (само T-стена)", default=True, width="auto")
+                "type": st.column_config.SelectboxColumn(t("Тип елемент"), options=list(TYPE_LABELS), required=True, default="wall", width="auto",
+                                                         format_func=lambda code: t(TYPE_LABELS.get(code, code))),
+                "name": st.column_config.TextColumn(t("Наименование / Маркировка"), width="auto"),
+                "count": st.column_config.NumberColumn(t("Брой"), min_value=1, step=1, default=1, width="auto"),
+                "l1_cm": st.column_config.NumberColumn(t("Стена A (см)"), format="%g", width="auto",
+                                                       help=t("При права стена и колона - дължината")),
+                "thickness1_cm": st.column_config.NumberColumn(t("Дебелина стена A (см)"), format="%g", width="auto"),
+                "l2_cm": st.column_config.NumberColumn(t("Стена B (см)"), format="%g", width="auto"),
+                "thickness2_cm": st.column_config.NumberColumn(t("Дебелина стена B (см)"), format="%g", width="auto",
+                                                               help=t("L-, П- и Т-стена; празна = като стена A "
+                                                                      "(попълва се само когато е различна)")),
+                "l3_cm": st.column_config.NumberColumn(t("Стена C (см)"), format="%g", width="auto",
+                                                       help=t("При Т-стена: от левия край на полката до лявото лице "
+                                                              "на реброто; празно = реброто е в средата")),
+                "thickness3_cm": st.column_config.NumberColumn(t("Дебелина стена C (см)"), format="%g", width="auto",
+                                                               help=t("Само за П-стена; празна = като стена A "
+                                                                      "(попълва се само когато е различна)")),
+                "height_cm": st.column_config.NumberColumn(t("Височина (см)"), format="%g", width="auto"),
+                "closed_end_1": st.column_config.CheckboxColumn(t("Затворен край 1"), default=True, width="auto"),
+                "closed_end_2": st.column_config.CheckboxColumn(t("Затворен край 2"), default=True, width="auto"),
+                "closed_end_3": st.column_config.CheckboxColumn(t("Затворен край 3 (само T-стена)"), default=True, width="auto")
             },
             column_order=TABLE_COLUMNS,
             hide_index=True,
@@ -1188,15 +1193,16 @@ with tab1:
         )
         
         col_new_type, col_add = st.columns([2, 1], vertical_alignment="bottom")
-        new_type = col_new_type.selectbox("Какъв елемент да се добави?", options=list(TYPE_LABELS), index=None,
-                                          format_func=lambda code: TYPE_LABELS.get(code, code),
-                                          placeholder="Изберете тип елемент", key="new_element_type")
-        add_btn = col_add.form_submit_button("➕ Добави елемент", use_container_width=True,
-                                             help="Записва таблицата и добавя нов ред от избрания тип "
-                                                  "(1 бр., затворени краища).")
-        submit_btn = st.form_submit_button("💾 Запази и Изчисли", type="primary", use_container_width=True)
+        new_type = col_new_type.selectbox(t("Какъв елемент да се добави?"), options=list(TYPE_LABELS), index=None,
+                                          format_func=lambda code: t(TYPE_LABELS.get(code, code)),
+                                          placeholder=t("Изберете тип елемент"), key="new_element_type")
+        add_btn = col_add.form_submit_button(t("➕ Добави елемент"), use_container_width=True,
+                                             help=t("Записва таблицата и добавя нов ред от избрания тип "
+                                                    "(1 бр., затворени краища)."), key="add_element")
+        submit_btn = st.form_submit_button(t("💾 Запази и Изчисли"), type="primary", use_container_width=True,
+                                           key="save_table")
         if add_btn and new_type is None:
-            st.warning("Изберете тип елемент и натиснете отново „➕ Добави елемент“.")
+            st.warning(t("Изберете тип елемент и натиснете отново „➕ Добави елемент“."))
         elif add_btn or submit_btn:
             if add_btn:
                 # новият ред - с всички колони на таблицата, иначе празните (дължини, височина ...) изчезват
@@ -1213,29 +1219,35 @@ with tab1:
             st.session_state["table_saved"] = True
             st.rerun()
     if st.session_state.pop("table_saved", False):
-        st.success("✅ Данните са запазени и преизчислени успешно! Можете да проверите резултатите в следващите табове.")
+        st.success(t("✅ Данните са запазени и преизчислени успешно! Можете да проверите резултатите в следващите табове."))
     show_stock_warnings(fill_default_height(st.session_state["edited_df"],
                                             st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM)))
 
-    st.subheader("👁 Преглед на елементите")
-    st.caption("Прегледът показва записаните данни - обновява се след „Запази и Изчисли“. "
-               "Полетата се отварят без презареждане; отметката „Покажи изгледа отпред“ презарежда страницата, "
-               "затова първо запишете промените в таблицата.")
+    st.subheader(t("👁 Преглед на елементите"))
+    st.caption(t("Прегледът показва записаните данни - обновява се след „Запази и Изчисли“. Полетата се отварят без "
+                 "презареждане; отметката „Покажи изгледа отпред“ презарежда страницата, затова първо запишете "
+                 "промените в таблицата."))
     df_preview = fill_default_height(st.session_state["edited_df"],
                                      st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM))
     if df_preview.empty:
-        st.info("ℹ️ Няма записани елементи за преглед.")
+        st.info(t("ℹ️ Няма записани елементи за преглед."))
     for idx, row in df_preview.iterrows():
         render_element_preview(idx, row)
+
+def doc_language_select(key, on_change=None):
+    """Падащо меню до бутона на файла: езикът на документа (doc_lang), по подразбиране български."""
+    return st.selectbox(t("Език на документа:"), list(DOC_LANGUAGES), format_func=DOC_LANGUAGES.get, key=key,
+                        on_change=on_change, width=260,
+                        help=t("Езикът, на който се генерира файлът (екранът не се сменя)."))
 
 # Табове 2-4: всеки е отделна част (st.fragment) - поле или бутон в таба презарежда само него.
 # Таблицата се сменя само в таб 1, а това презарежда цялата страница и всички табове.
 @st.fragment
 def render_specification_tab(df_calc):
-    st.header("2. Спецификация на кофражните елементи и панели TEKO")
+    st.header(t("2. Спецификация на кофражните елементи и панели TEKO"))
     
     if df_calc.empty or len(df_calc) == 0:
-        st.info("ℹ️ Въведете елементи в Таб 1 и натиснете 'Запази и Изчисли'.")
+        st.info(t("ℹ️ Въведете елементи в Таб 1 и натиснете 'Запази и Изчисли'."))
     else:
         detailed_rows = []
         all_warnings = []
@@ -1263,19 +1275,19 @@ def render_specification_tab(df_calc):
             for p_name, p_qty in panels_dict.items():
                 project_panels_summary[p_name] = project_panels_summary.get(p_name, 0) + p_qty
 
-            panels_str = ", ".join([f"{k} ({v} бр.)" for k, v in panels_dict.items()])
+            panels_str = ", ".join([f"{t_item(k)} ({v} {t('бр.')})" for k, v in panels_dict.items()])
 
             acc_dict = get_element_accessories(elem_type, row)
             for acc_name, acc_qty in acc_dict.items():
                 project_accessories_summary[acc_name] = project_accessories_summary.get(acc_name, 0) + acc_qty
 
             detailed_rows.append({
-                "Елемент": elem_label,
-                "Размери": dim_str,
-                "Брой": cnt,
-                "Площ (m²)": round(area, 2),
-                "Разпределение по височина": h_breakdown_str,
-                "Панели TEKO (Вид и брой)": panels_str
+                t("Елемент"): elem_label,
+                t("Размери"): t_item(dim_str),
+                t("Брой"): cnt,
+                t("Площ (m²)"): round(area, 2),
+                t("Разпределение по височина"): h_breakdown_str,
+                t("Панели TEKO (Вид и брой)"): panels_str
             })
 
         df_detailed = pd.DataFrame(detailed_rows)
@@ -1289,10 +1301,10 @@ def render_specification_tab(df_calc):
             tot_w = unit_w * v
             total_panels_weight += tot_w
             panels_sum_data.append({
-                "Код на панела / коф. елемент": k,
-                "Общ брой (бр.)": v,
-                "Ед. тегло (kg)": round(unit_w, 2),
-                "Общо тегло (kg)": round(tot_w, 2)
+                t("Код на панела / коф. елемент"): t_item(k),
+                t("Общ брой (бр.)"): v,
+                t("Ед. тегло (kg)"): round(unit_w, 2),
+                t("Общо тегло (kg)"): round(tot_w, 2)
             })
         df_panels_sum = pd.DataFrame(panels_sum_data)
         if not df_panels_sum.empty:
@@ -1305,10 +1317,10 @@ def render_specification_tab(df_calc):
             tot_w = unit_w * v
             total_acc_weight += tot_w
             acc_sum_data.append({
-                "Аксесоар / Окомплектовка": k,
-                "Общ брой (бр.)": v,
-                "Ед. тегло (kg)": round(unit_w, 2),
-                "Общо тегло (kg)": round(tot_w, 2)
+                t("Аксесоар / Окомплектовка"): t_item(k),
+                t("Общ брой (бр.)"): v,
+                t("Ед. тегло (kg)"): round(unit_w, 2),
+                t("Общо тегло (kg)"): round(tot_w, 2)
             })
         df_acc_sum = pd.DataFrame(acc_sum_data)
         if not df_acc_sum.empty:
@@ -1318,40 +1330,42 @@ def render_specification_tab(df_calc):
 
         col_m1, col_m2 = st.columns(2)
         with col_m1:
-            st.metric("📊 ОБЩА КОФРАЖНА ПЛОЩ", f"{total_a:.2f} m²")
+            st.metric(t("📊 ОБЩА КОФРАЖНА ПЛОЩ"), f"{total_a:.2f} m²")
         with col_m2:
-            st.metric("⚖️ ОБЩО ТЕГЛО НА КОФРАЖА", f"{total_formwork_weight:.2f} kg ({total_formwork_weight/1000.0:.2f} t)")
+            st.metric(t("⚖️ ОБЩО ТЕГЛО НА КОФРАЖА"), f"{total_formwork_weight:.2f} kg ({total_formwork_weight/1000.0:.2f} t)")
 
         if all_warnings:
-            with st.expander("⚠️ Предупреждения за нестандартни размери в кофражните елементи", expanded=True):
+            with st.expander(t("⚠️ Предупреждения за нестандартни размери в кофражните елементи"), expanded=True):
                 for w_msg in all_warnings:
                     st.markdown(w_msg)
         show_stock_warnings(df_calc)
 
-        st.subheader("📋 Спецификация на кофражните елементи и съответните панели")
+        st.subheader(t("📋 Спецификация на кофражните елементи и съответните панели"))
         st.dataframe(df_detailed, use_container_width=True)
 
         st.divider()
         col_p1, col_p2 = st.columns(2)
         
         with col_p1:
-            st.subheader(f"📦 Панели TEKO (Общо: {total_panels_weight:.2f} kg)")
+            st.subheader(t("📦 Панели TEKO (Общо: {w} kg)", w=f"{total_panels_weight:.2f}"))
             st.dataframe(df_panels_sum, use_container_width=True)
 
         with col_p2:
-            st.subheader(f"Аксесоари и Ъгли (Общо: {total_acc_weight:.2f} kg)")
+            st.subheader(t("Аксесоари и Ъгли (Общо: {w} kg)", w=f"{total_acc_weight:.2f}"))
             st.dataframe(df_acc_sum, use_container_width=True)
 
         st.divider()
-        st.subheader("📊 КСС и чертежи в Excel")
-        st.caption("Лист „Кол. сметка“ - артикулите в реда на офертата; лист за всеки елемент - изглед отгоре "
-                   "и изглед отпред от клетки (1 клетка = 5 см) за редакция; лист с всички панели за копиране.")
-        if st.button("📊 Създай Excel (КСС и чертежи)", key="make_excel"):
-            with st.spinner("Генериране на Excel..."):
+        st.subheader(t("📊 КСС и чертежи в Excel"))
+        st.caption(t("Лист „Кол. сметка“ - артикулите в реда на офертата; лист за всеки елемент - изглед отгоре и "
+                     "изглед отпред от клетки (1 клетка = 5 см) за редакция; лист с всички панели за копиране."))
+        # смяна на езика - готовият файл вече не отговаря, създава се наново
+        excel_lang = doc_language_select("doc_lang_excel", on_change=lambda: st.session_state.pop("excel_bytes", None))
+        if st.button(t("📊 Създай Excel (КСС и чертежи)"), key="make_excel"):
+            with st.spinner(t("Генериране на Excel...")), document_language(excel_lang):
                 st.session_state["excel_bytes"] = generate_excel(build_drawing_elements(df_calc)).getvalue()
         if st.session_state.get("excel_bytes"):
             st.download_button(
-                label="📥 Изтегли КСС и чертежи (Excel .xlsx)",
+                label=t("📥 Изтегли КСС и чертежи (Excel .xlsx)"),
                 data=st.session_state["excel_bytes"],
                 file_name="Teko_KSS_i_Chertezhi.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1360,16 +1374,17 @@ def render_specification_tab(df_calc):
 
 @st.fragment
 def render_pdf_tab(df_calc, current):
-    st.header("3. Генериране на PDF чертежи и спецификации")
+    st.header(t("3. Генериране на PDF чертежи и спецификации"))
     if df_calc.empty or len(df_calc) == 0:
-        st.info("ℹ️ Въведете елементи в Таб 1, за да генерирате чертежи.")
+        st.info(t("ℹ️ Въведете елементи в Таб 1, за да генерирате чертежи."))
     else:
-        proj_name_input = st.text_input("Наименование на обекта:", value=current["name"])
-        client_name_input = st.text_input("Име на клиент / инвеститор:",
+        proj_name_input = st.text_input(t("Наименование на обекта:"), value=current["name"])
+        client_name_input = st.text_input(t("Име на клиент / инвеститор:"),
                                           value=current["client"] or "Няма посочен клиент")
 
-        if st.button("📄 Генерирай PDF Чертежи на обект", type="primary"):
-            with st.spinner("Генериране на векторни чертежи и PDF документ..."):
+        pdf_lang = doc_language_select("doc_lang_pdf")
+        if st.button(t("📄 Генерирай PDF Чертежи на обект"), type="primary", key="make_pdf"):
+            with st.spinner(t("Генериране на векторни чертежи и PDF документ...")), document_language(pdf_lang):
                 pdf_elements = build_drawing_elements(df_calc)
 
                 # общата сметка - сборът от сметките на елементите (същите числа като в таб 2)
@@ -1384,9 +1399,9 @@ def render_pdf_tab(df_calc, current):
                 }
 
                 pdf_bytes = generate_pdf_drawings(pdf_elements, project_full_bom, proj_info)
-                st.success("✅ PDF чертежите бяха генерирани успешно!")
+                st.success(t("✅ PDF чертежите бяха генерирани успешно!"))
                 st.download_button(
-                    label="📥 Изтегли пълен PDF с чертежи и спецификации",
+                    label=t("📥 Изтегли пълен PDF с чертежи и спецификации"),
                     data=pdf_bytes,
                     file_name="Teko_Drawings_And_Specification.pdf",
                     mime="application/pdf",
@@ -1395,113 +1410,121 @@ def render_pdf_tab(df_calc, current):
 
 @st.fragment
 def render_offer_tab(df_calc, current):
-    st.header("4. Търговска оферта")
+    st.header(t("4. Търговска оферта"))
     if df_calc.empty or len(df_calc) == 0:
-        st.info("ℹ️ Въведете елементи в Таб 1, за да генерирате оферта.")
+        st.info(t("ℹ️ Въведете елементи в Таб 1, за да генерирате оферта."))
     else:
         col_o1, col_o2 = st.columns(2)
         with col_o1:
-            offer_client = st.text_input("Клиент / Инвеститор:", value=current["client"] or "Строителна Компания ООД")
-            offer_project = st.text_input("Име на обект:", value=current["name"])
-            offer_date_val = st.date_input("Дата на офертата:", value=current["date"])
+            offer_client = st.text_input(t("Клиент / Инвеститор:"), value=current["client"] or "Строителна Компания ООД")
+            offer_project = st.text_input(t("Име на обект:"), value=current["name"])
+            offer_date_val = st.date_input(t("Дата на офертата:"), value=current["date"])
         with col_o2:
-            offer_type_sel = st.selectbox("Тип на офертата:", ["Наем на кофраж (€/m² за месец)", "Покупка на нов кофраж (€/m²)"])
+            # стойностите остават на български - отиват в Word офертата (на български)
+            offer_type_sel = st.selectbox(t("Тип на офертата:"),
+                                          ["Наем на кофраж (€/m² за месец)", "Покупка на нов кофраж (€/m²)"],
+                                          format_func=t, key="offer_type")
             default_price = 18.0 if "наем" in offer_type_sel.lower() else 125.0
-            price_m2 = st.number_input("Цена на m² (€):", min_value=0.0, value=default_price, step=0.5)
+            price_m2 = st.number_input(t("Цена на m² (€):"), min_value=0.0, value=default_price, step=0.5)
 
-        if st.button("📄 Създай Word оферта", type="primary"):
-            total_a = sum(element_dims_and_area(str(row.get("type", "wall")), row)[1] for _, row in df_calc.iterrows())
-            subtotal_val = total_a * price_m2
-            vat_val = subtotal_val * 0.20
-            grand_total_val = subtotal_val + vat_val
+        offer_lang = doc_language_select("doc_lang_offer")
+        if st.button(t("📄 Създай Word оферта"), type="primary", key="make_offer"):
+            with document_language(offer_lang):   # таблицата и документът - на езика на офертата
+                total_a = sum(element_dims_and_area(str(row.get("type", "wall")), row)[1] for _, row in df_calc.iterrows())
+                subtotal_val = total_a * price_m2
+                vat_val = subtotal_val * 0.20
+                grand_total_val = subtotal_val + vat_val
 
-            offer_table_rows = []
-            for _, row in df_calc.iterrows():
-                cnt = int(_row_float(row, "count", 1))
-                elem_type = str(row.get("type", "wall"))
-                name = str(row.get("name", "Елемент"))
-                dim_str, area = element_dims_and_area(elem_type, row)
+                offer_table_rows = []
+                for _, row in df_calc.iterrows():
+                    cnt = int(_row_float(row, "count", 1))
+                    elem_type = str(row.get("type", "wall"))
+                    name = str(row.get("name", "Елемент"))
+                    dim_str, area = element_dims_and_area(elem_type, row)
 
-                offer_table_rows.append({
-                    "Елемент": format_element_label(elem_type, name),
-                    "Размери": dim_str,
-                    "Брой": cnt,
-                    "Площ (m²)": area,
-                    "Обща сума (€)": area * price_m2
-                })
+                    offer_table_rows.append({
+                        "Елемент": format_element_label(elem_type, name),
+                        "Размери": dim_str,
+                        "Брой": cnt,
+                        "Площ (m²)": area,
+                        "Обща сума (€)": area * price_m2
+                    })
 
-            word_stream = generate_word_offer(
-                offer_client, offer_project, offer_date_val, offer_type_sel,
-                price_m2, offer_table_rows, total_a, subtotal_val, vat_val, grand_total_val
-            )
+                word_stream = generate_word_offer(
+                    offer_client, offer_project, offer_date_val, offer_type_sel,
+                    price_m2, offer_table_rows, total_a, subtotal_val, vat_val, grand_total_val
+                )
 
-            st.success("✅ Търговската оферта беше генерирана успешно в Word формат!")
-            st.download_button(
-                label="📥 Изтегли оферта (Word .docx)",
-                data=word_stream,
-                file_name="Teko_Commercial_Offer.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True
-            )
+                st.success(t("✅ Търговската оферта беше генерирана успешно в Word формат!"))
+                st.download_button(
+                    label=t("📥 Изтегли оферта (Word .docx)"),
+                    data=word_stream,
+                    file_name="Teko_Commercial_Offer.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True
+                )
 
 
 @st.fragment
 def render_stock_tab(df_calc):
-    st.header("5. Складова наличност")
+    st.header(t("5. Складова наличност"))
     show_stock_warnings(df_calc)
     if st.session_state.get("stock_error"):
-        st.error(f"Архивът в Google не е достъпен ({st.session_state['stock_error']}). Наличността се пази "
-                 "само докато страницата е отворена.")
+        st.error(t("Архивът в Google не е достъпен ({error}). Наличността се пази само докато страницата е "
+                   "отворена.", error=st.session_state["stock_error"]))
     if projects_store.has_archive():
         modified = st.session_state.get("stock_modified")
-        st.caption("Имената, мярката и наличността се редактират в таблицата; ред се добавя с „+“ под таблицата, "
-                   "изтрива се с отметка вляво и кошчето. „💾 Запази наличността“ записва в Google (общо за всички "
-                   "проекти) и обновява предупрежденията в табовете. Промяна от друг компютър се вижда след F5."
-                   + (f" Последна промяна: {modified.strftime('%d.%m.%Y %H:%M')}." if modified else ""))
+        st.caption(t("Имената, мярката и наличността се редактират в таблицата; ред се добавя с „+“ под таблицата, "
+                     "изтрива се с отметка вляво и кошчето. „💾 Запази наличността“ записва в Google (общо за всички "
+                     "проекти) и обновява предупрежденията в табовете. Промяна от друг компютър се вижда след F5.")
+                   + (t(" Последна промяна: {date}.", date=modified.strftime('%d.%m.%Y %H:%M')) if modified else ""))
     else:
-        st.caption("Имената, мярката и наличността се редактират в таблицата; ред се добавя с „+“ под таблицата, "
-                   "изтрива се с отметка вляво и кошчето. „💾 Запази наличността“ обновява предупрежденията в "
-                   "табовете. Без архив (няма ключ за Google в secrets) наличността се губи при презареждане.")
+        st.caption(t("Имената, мярката и наличността се редактират в таблицата; ред се добавя с „+“ под таблицата, "
+                     "изтрива се с отметка вляво и кошчето. „💾 Запази наличността“ обновява предупрежденията в "
+                     "табовете. Без архив (няма ключ за Google в secrets) наличността се губи при презареждане."))
     with st.form("stock_form"):
         # Елемент - колкото най-дългото име, Мярка - колкото „комплект“, Остава - както преди (~360 px).
         # Без разтягане на таблицата: при разтягане Streamlit разпределя ширината и не спазва колоните.
         edited_stock = st.data_editor(
             st.session_state["stock_df"], num_rows="dynamic", hide_index=True, width="content",
             height=35 * (len(st.session_state["stock_df"]) + 2) + 3,
-            column_config={"Елемент": st.column_config.TextColumn("Елемент", width=240),
-                           "Мярка": st.column_config.TextColumn("Мярка", width=80),
-                           "Остава": st.column_config.NumberColumn("Остава", width=360, min_value=0, format="%g")},
+            column_config={"Елемент": st.column_config.TextColumn(t("Елемент"), width=240),
+                           "Мярка": st.column_config.TextColumn(t("Мярка"), width=80),
+                           "Остава": st.column_config.NumberColumn(t("Остава"), width=360, min_value=0, format="%g")},
             column_order=STOCK_COLUMNS, key="stock_editor")
-        if st.form_submit_button("💾 Запази наличността", type="primary"):
+        if st.form_submit_button(t("💾 Запази наличността"), type="primary", key="save_stock"):
             store_stock(edited_stock)
             # както в таб 1: таблицата се показва наново от записаните данни, иначе следващата промяна се губи
             st.session_state.pop("stock_editor", None)
             st.rerun()  # цялата страница - предупрежденията в табове 1 и 2 също се обновяват
 
     st.subheader("Excel")
-    st.download_button("📤 Изтегли като Excel", data=stock_to_excel(st.session_state["stock_df"]).getvalue(),
+    stock_lang = doc_language_select("doc_lang_stock")
+    with document_language(stock_lang):  # заглавията на файла; имената в склада са данни - както са въведени
+        stock_xlsx = stock_to_excel(st.session_state["stock_df"]).getvalue()
+    st.download_button(t("📤 Изтегли като Excel"), data=stock_xlsx,
                        file_name="Складова_наличност.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                       help="Записаната наличност (без незаписаните промени в таблицата), подредена като "
-                            "„1. Наличности.xlsx“.")
-    uploaded = st.file_uploader("Excel с наличност (подреден като „1. Наличности.xlsx“ - колони Елемент, Мярка, "
-                                "Остава):", type=["xlsx"], key="stock_upload")
-    if uploaded is not None and st.button("📥 Зареди от Excel", help="Заменя цялата таблица с тази от файла "
-                                                                     "и я записва."):
+                       help=t("Записаната наличност (без незаписаните промени в таблицата), подредена като "
+                              "„1. Наличности.xlsx“."), key="download_stock")
+    uploaded = st.file_uploader(t("Excel с наличност (подреден като „1. Наличности.xlsx“ - колони Елемент, Мярка, "
+                                  "Остава):"), type=["xlsx"], key="stock_upload")
+    if uploaded is not None and st.button(t("📥 Зареди от Excel"), key="load_stock",
+                                          help=t("Заменя цялата таблица с тази от файла и я записва.")):
         try:
             loaded = stock_from_excel(uploaded)
         except Exception as exc:  # noqa: BLE001 - грешен файл
-            st.error(f"Файлът не може да се прочете: {exc}")
+            st.error(t("Файлът не може да се прочете: {error}", error=exc))
         else:
             if loaded.empty:
-                st.error("Във файла няма редове под „Елемент“.")
+                st.error(t("Във файла няма редове под „Елемент“."))
             else:
                 store_stock(loaded)
                 st.session_state.pop("stock_editor", None)
                 st.session_state["stock_loaded"] = len(loaded)
                 st.rerun()
     if st.session_state.get("stock_loaded"):
-        st.success(f"✅ Заредени {st.session_state.pop('stock_loaded')} реда от Excel.")
+        st.success(t("✅ Заредени {n} реда от Excel.", n=st.session_state.pop("stock_loaded")))
 
 
 df_calc = fill_default_height(st.session_state["edited_df"],
