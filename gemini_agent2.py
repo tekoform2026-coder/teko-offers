@@ -1,6 +1,48 @@
 import json
+import re
 from PIL import Image
-import google.generativeai as genai
+from google import genai  # новият пакет google-genai (старият google-generativeai е без поддръжка)
+from google.genai import types
+
+# Предупреждение, когато отговорът на Gemini е отрязан (стигнал е ограничението на дължината)
+TRUNCATED_NOTE = ("Отговорът на Gemini е отрязан - чертежът е твърде голям. Разделете го на части или "
+                  "опитайте с по-малко страници.")
+
+
+def _is_max_tokens(response):
+    """Gemini е спрял отговора, защото е стигнал ограничението на дължината."""
+    try:
+        reason = response.candidates[0].finish_reason
+    except (AttributeError, IndexError, TypeError):
+        return False
+    return getattr(reason, "name", reason) == "MAX_TOKENS" or reason == 2
+
+
+def _salvage_truncated(raw_text):
+    """Отрязан JSON: полетата преди "elements" и всички цели елементи до мястото на отрязване;
+    (данни, текстът след последния цял елемент)."""
+    start = raw_text.find('{')
+    found = re.search(r'"elements"\s*:\s*\[', raw_text)
+    if start == -1 or not found:
+        return None
+    decoder = json.JSONDecoder()
+    elements, pos = [], found.end()
+    while True:
+        while pos < len(raw_text) and raw_text[pos] in " \t\r\n,":
+            pos += 1
+        if pos >= len(raw_text) or raw_text[pos] != '{':
+            break
+        try:
+            element, pos = decoder.raw_decode(raw_text, pos)
+        except json.JSONDecodeError:
+            break  # последният елемент е отрязан
+        elements.append(element)
+    try:
+        head = json.loads(raw_text[start:found.start()].rstrip().rstrip(',') + '}')
+    except json.JSONDecodeError:
+        head = {}
+    head["elements"] = elements
+    return head, raw_text[pos:].strip()
 
 def _open_image(image_input):
     if isinstance(image_input, Image.Image):
@@ -15,7 +57,7 @@ def analyze_blueprint(image_input, api_key, model_choice=None):
     else:
         images = [_open_image(image_input)]
 
-    genai.configure(api_key=api_key)
+    client = genai.Client(api_key=api_key)
 
     prompt = """
     Изображенията са страниците на ЕДИН чертеж (може да е една страница). Прегледай ВСИЧКИ страници -
@@ -114,8 +156,8 @@ def analyze_blueprint(image_input, api_key, model_choice=None):
             candidate_models.append(m)
 
     try:
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
+        for m in client.models.list():
+            if 'generateContent' in (m.supported_actions or []):
                 clean_name = m.name.replace('models/', '')
                 if clean_name not in candidate_models:
                     candidate_models.append(clean_name)
@@ -125,17 +167,19 @@ def analyze_blueprint(image_input, api_key, model_choice=None):
     raw_text = None
     last_error = None
     used_model = None
+    truncated = False
 
     for model_name in candidate_models:
         try:
-            model = genai.GenerativeModel(
-                model_name=model_name,
-                generation_config={"response_mime_type": "application/json"}
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[*images, prompt],
+                config=types.GenerateContentConfig(response_mime_type="application/json")
             )
-            response = model.generate_content([*images, prompt])
             if response and response.text:
                 raw_text = response.text.strip()
                 used_model = model_name
+                truncated = _is_max_tokens(response)
                 break
         except Exception as e:
             last_error = e
@@ -154,9 +198,18 @@ def analyze_blueprint(image_input, api_key, model_choice=None):
 
     try:
         parsed_json = json.loads(json_str)
-        return parsed_json, used_model
     except json.JSONDecodeError as e:
-        raise Exception(f"Грешка при обработка на JSON отговора: {e}\nПолучен текст: {raw_text[:200]}")
+        # отрязан отговор: в таблицата влизат елементите до мястото на отрязване
+        # (Gemini е спрял заради дължината или текстът свършва веднага след цял елемент)
+        salvaged = _salvage_truncated(raw_text)
+        if salvaged is None or not (truncated or not salvaged[1]):
+            raise Exception(f"Грешка при обработка на JSON отговора: {e}\nПолучен текст: {raw_text[:200]}")
+        parsed_json, truncated = salvaged[0], True
+
+    if truncated:
+        notes = parsed_json.get("notes") or []
+        parsed_json["notes"] = [TRUNCATED_NOTE] + ([notes] if isinstance(notes, str) else list(notes))
+    return parsed_json, used_model
 
 def analyze_blueprint_with_agent2(image_input, api_key, model_choice=None):
     res, _ = analyze_blueprint(image_input, api_key, model_choice=model_choice)
