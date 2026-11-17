@@ -95,6 +95,10 @@ def language_switch():
 EN = {
     # Страница и горна лента
     "TEKO - Вертикален Кофраж и Оферти": "TEKO - Vertical Formwork and Offers",
+    "🔒 Вход в системата TEKO": "🔒 Sign in to TEKO",
+    "🔑 Въведете парола за достъп:": "🔑 Enter the access password:",
+    "Вход": "Sign in",
+    "❌ Грешна парола! Опитайте отново.": "❌ Wrong password! Please try again.",
     "TEKO — Оптимизация на панели": "TEKO — Panel Optimization",
     "AI система за кофражно планиране": "AI system for formwork planning",
     "ТЕКО България ООД": "TEKO Bulgaria Ltd.",
