@@ -20,6 +20,9 @@ DOC_LANGUAGES = {
     "hr": "Hrvatski", "ro": "Română", "pl": "Polski", "uk": "Українська", "ru": "Русский", "ga": "Gaeilge",
     "sr": "Српски", "tr": "Türkçe",
 }
+# Флагчетата в падащите менюта (на Windows - с шрифта „Twemoji Country Flags“, виж FLAG_FONT_CSS в app.py)
+DOC_FLAGS = {"bg": "🇧🇬", "en": "🇬🇧", "de": "🇩🇪", "fr": "🇫🇷", "es": "🇪🇸", "el": "🇬🇷", "hr": "🇭🇷", "ro": "🇷🇴",
+             "pl": "🇵🇱", "uk": "🇺🇦", "ru": "🇷🇺", "ga": "🇮🇪", "sr": "🇷🇸", "tr": "🇹🇷"}
 # редът на преводите в TR и TERMS
 _ORDER = ("en", "de", "fr", "es", "el", "hr", "ro", "pl", "uk", "ru", "ga", "sr", "tr")
 
