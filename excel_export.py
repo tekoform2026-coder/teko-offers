@@ -20,6 +20,7 @@ from drawing_generator import PANEL_T, _face_strips, _plan_geometry
 from teko_calculator import (format_panel_code, is_compensator_row, thickness_label, t_wall_offset_label,
                              face_row_pieces, panel_height_cm)
 from weights_db import WEIGHTS_DB
+from doc_lang import TR, dt, dt_face, dt_item
 
 CELL_CM = 5          # една клетка = 5 см
 FIRST_COL = 3        # чертежите започват от колона C
@@ -326,7 +327,7 @@ def _top_view(sheet, layout, top_row):
         s = 0
         for w, is_board, panel_w in (pieces[::-1] if rev and rev[0] else pieces):
             # надписът на дъската - само на външните страни (A1, B1 ... са срещу тях)
-            note = f"ДЪСКА {w:g} см".replace(".", ",") if face["name"][1:2] != "1" else None
+            note = dt("ДЪСКА {w} см", w=f"{w:g}").replace(".", ",") if face["name"][1:2] != "1" else None
             if is_board:
                 normal = strips[face["name"]][5]
                 boards.append((x0 + s, y0, w, T, axis, normal, note) if axis == 'x'
@@ -470,7 +471,7 @@ def _front_view(sheet, layout, face, top_row, start_col=None):
             if is_board:
                 sheet.board_col(row, c, _cells(h))
             elif is_compensator_row(h):
-                sheet.block(row, c, _cells(h), max(1, n), f"TC {int(h)} см", FILL_COMPENSATOR, size=9)
+                sheet.block(row, c, _cells(h), max(1, n), f"TC {int(h)} {dt('см')}", FILL_COMPENSATOR, size=9)
             else:
                 sheet.block(row, c, _cells(h), max(1, n), _panel_label(panel_w, h), FILL_PANEL, size=14,
                             rotation=90 if h > panel_w else 0)
@@ -488,36 +489,36 @@ def _element_title(index, element):
     layout = element["layout"]
     d = layout["dims"]
     typ = layout["type"]
-    parts = [str(element.get("name") or "").strip(), TYPE_WORDS.get(typ, typ)]
+    parts = [str(element.get("name") or "").strip(), dt(TYPE_WORDS.get(typ, typ))]
     if typ == "column":
         parts.append(f"{d['a']:g}x{d['b']:g}")
     elif typ == "wall":
-        parts.append(f"дължина {d['length']:g}")
+        parts.append(f"{dt('дължина')} {d['length']:g}")
     elif typ == "u_wall":
         parts += [f"A {d['l1']:g}", f"B {d['l2']:g}", f"C {d['l3']:g}"]
     else:
         parts += [f"A {d['l1']:g}", f"B {d['l2']:g}", t_wall_offset_label(layout, "")]
-    parts.append(f"височина {panel_height_cm(layout):g}")   # височината на панелите (262 -> 265)
+    parts.append(f"{dt('височина')} {panel_height_cm(layout):g}")   # височината на панелите (262 -> 265)
     if typ != "column":
         parts.append(thickness_label(layout, ""))
-    parts.append(f"бр. {element.get('count', 1)}")
-    return f"Елемент {index}  —  " + " · ".join(p for p in parts if p)
+    parts.append(f"{dt('бр.')} {element.get('count', 1)}")
+    return dt("Елемент {i}", i=index) + "  —  " + " · ".join(p for p in parts if p)
 
 
 def _draw_views(sheet, layout):
     """Изглед отгоре, под него изгледите отпред на всяка група еднакви страни."""
-    sheet.text(4, FIRST_COL, "Изглед отгоре")
+    sheet.text(4, FIRST_COL, dt("Изглед отгоре"))
     last, starts = _top_view(sheet, layout, 5)
     for group in _face_groups(layout):
         label_row = last + 3
-        names = " / ".join(f["name"] for f in group)
-        sheet.text(label_row, FIRST_COL, f"Изглед — {names}")
+        names = " / ".join(dt_face(f["name"]) for f in group)
+        sheet.text(label_row, FIRST_COL, f"{dt('Изглед')} — {names}")
         last = _front_view(sheet, layout, group[0], label_row + 1, starts.get(group[0]["name"]))
 
 
 def _element_sheet(wb, index, element):
     """Лист „Елемент N“; връща {наименование в КСС: адрес на клетката „Кол. общо“}."""
-    ws = wb.create_sheet(f"Елемент {index}")
+    ws = wb.create_sheet(dt("Елемент {i}", i=index))
     layout = element["layout"]
     count = max(1, int(element.get("count", 1)))
 
@@ -533,13 +534,13 @@ def _element_sheet(wb, index, element):
     unit_col = name_col + 16
     one_col = unit_col + 3
     all_col = one_col + 4
-    sheet.cell(4, name_col, all_col - name_col, "Брой елементи:", bold=True, align="right")
+    sheet.cell(4, name_col, all_col - name_col, dt("Брой елементи:"), bold=True, align="right")
     sheet.cell(4, all_col, 4, count, bold=True, fill=FILL_COUNT)
     count_ref = f"${get_column_letter(all_col)}$4"
     ws.row_dimensions[5].height = 30
     for col, n, title in ((name_col, 16, "Елемент"), (unit_col, 3, "Мярка"),
                           (one_col, 4, "Кол. за 1 бр."), (all_col, 4, "Кол. общо")):
-        sheet.cell(5, col, n, title, bold=True, fill=FILL_HEADER)
+        sheet.cell(5, col, n, dt(title), bold=True, fill=FILL_HEADER)
 
     totals = dict(kss_rows(element["bom"]))
     order = [name for name, _codes in KSS_ITEMS]
@@ -547,8 +548,8 @@ def _element_sheet(wb, index, element):
     for i, name in enumerate(order + sorted(n for n in totals if n not in order)):
         r = 6 + i
         one = totals.get(name, 0) / count
-        sheet.cell(r, name_col, 16, name, align="left")
-        sheet.cell(r, unit_col, 3, "бр")
+        sheet.cell(r, name_col, 16, dt_item(name), align="left")
+        sheet.cell(r, unit_col, 3, dt("бр"))
         one_ref = sheet.cell(r, one_col, 4, (int(one) if one == int(one) else one) or None, number_format=HIDE_ZERO)
         refs[name] = sheet.cell(r, all_col, 4, f'=IF({one_ref}="","",{one_ref}*{count_ref})', bold=True,
                                 number_format=HIDE_ZERO)
@@ -576,8 +577,8 @@ def _kss_sheet(ws, names, quantity):
     ws.row_dimensions[5].height = 45
     ws.row_dimensions[6].height = 15.75
     for col, value in (("B", "Елемент"), ("C", "Мярка"), ("D", "Кол.")):
-        ws[f"{col}5"] = value
-    ws["D6"] = "[бр]"
+        ws[f"{col}5"] = dt(value)
+    ws["D6"] = f"[{dt('бр')}]"
     for r in (5, 6):
         for col in "BCD":
             cell = ws[f"{col}{r}"]
@@ -588,8 +589,8 @@ def _kss_sheet(ws, names, quantity):
     for i, name in enumerate(names):
         r = 7 + i
         ws.row_dimensions[r].height = 18
-        ws[f"B{r}"] = name
-        ws[f"C{r}"] = "бр"
+        ws[f"B{r}"] = dt_item(name)
+        ws[f"C{r}"] = dt("бр")
         qty = quantity(name)
         if qty:
             ws[f"D{r}"] = qty
@@ -602,10 +603,10 @@ def _kss_sheet(ws, names, quantity):
                 cell.alignment = Alignment(horizontal="center", vertical="center")
             else:
                 cell.alignment = Alignment(vertical="center")
-    _kss_offer_columns(ws, 7, 6 + len(names))
+    _kss_offer_columns(ws, 7, 6 + len(names), names)
 
 
-def _kss_offer_columns(ws, first, last):
+def _kss_offer_columns(ws, first, last, names):
     """
     Колоните от „1. Оферта.xlsx“ вдясно от „Кол.“ и редовете ОБЩО / ОТСТЪПКА под таблицата.
     Цената, наличността и отстъпката % се попълват на ръка (жълти клетки) - в програмата няма цени и наличност.
@@ -614,7 +615,7 @@ def _kss_offer_columns(ws, first, last):
         ws.column_dimensions[col].width = width
     for col, title in KSS_OFFER_HEADERS.items():
         cell = ws[f"{col}5"]
-        cell.value = title
+        cell.value = dt(title)
         cell.font = Font(size=10)
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         cell.border = BORDER_KSS
@@ -623,7 +624,7 @@ def _kss_offer_columns(ws, first, last):
     total = last + 2
     discount = f"$F${total + 1}"   # ОТСТЪПКА %
     for r in range(first, last + 1):
-        name = ws[f"B{r}"].value
+        name = names[r - first]   # на български - в клетката е преведеното име
         dims, area = KSS_DIMENSIONS.get(name, (None, None))
         weight = KSS_WEIGHTS.get(name)
         values = {
@@ -650,12 +651,12 @@ def _kss_offer_columns(ws, first, last):
     rows = [("ОБЩО", {"F": f"=SUM(F{first}:F{last})", "H": f"=SUM(H{first}:H{last})",
                       "L": f"=SUM(L{first}:L{last})", "M": "kg", "N": f"=SUM(N{first}:N{last})", "O": "m2"}),
             ("ОТСТЪПКА %", {"F": 0}),
-            ("ОТСТЪПКА СТОЙНОСТ", {"F": f"=ROUND(F{total}*{discount}/100,2)", "L": f"=N{total}*0.1", "M": "м3",
-                                   "N": "Приблизителен обем 10м2 - 1 м3"}),
+            ("ОТСТЪПКА СТОЙНОСТ", {"F": f"=ROUND(F{total}*{discount}/100,2)", "L": f"=N{total}*0.1", "M": dt("м3"),
+                                   "N": dt("Приблизителен обем 10м2 - 1 м3")}),
             ("ОБЩО БЕЗ ДДС", {"F": f"=ROUND(F{total}-F{total + 2},2)", "H": f"=H{total}-H{total + 2}"})]
     for i, (label, cells) in enumerate(rows):
         r = total + i
-        ws[f"B{r}"] = label
+        ws[f"B{r}"] = dt(label)
         ws[f"B{r}"].font = Font(size=11, bold=True)
         for col, value in cells.items():
             cell = ws[f"{col}{r}"]
@@ -684,11 +685,11 @@ PALETTE_STANDING = [(150, w) for w in (60, 35, 30, 25, 20, 15, 10, 5)] + \
 
 def _palette_sheet(wb):
     """Всички панели и ъгли: отгоре - изглед отгоре, отдолу - изглед отпред; после легналите."""
-    ws = wb.create_sheet("Елементи Теко България")
+    ws = wb.create_sheet(dt("Елементи Теко България"))
     sheet = _Sheet(ws)
-    sheet.text(4, FIRST_COL, "Елементи (1 клетка = 5 см) - копирайте блок и го поставете в чертежа",
+    sheet.text(4, FIRST_COL, dt("Елементи (1 клетка = 5 см) - копирайте блок и го поставете в чертежа"),
                size=11, bold=True, color="000000")
-    sheet.text(6, FIRST_COL, "Изправени панели", size=9, bold=True)
+    sheet.text(6, FIRST_COL, dt("Изправени панели"), size=9, bold=True)
 
     col = FIRST_COL
     for h, w in PALETTE_STANDING:
@@ -702,7 +703,7 @@ def _palette_sheet(wb):
         col += 4
 
     row = 12 + _cells(240) + 4
-    sheet.text(row - 1, FIRST_COL, "Легнали панели (изглед отгоре вляво, изглед отпред вдясно)", size=9, bold=True)
+    sheet.text(row - 1, FIRST_COL, dt("Легнали панели (изглед отгоре вляво, изглед отпред вдясно)"), size=9, bold=True)
     for h, w in [p for p in PALETTE_STANDING if p[0] in (150, 120)]:
         sheet.block(row, FIRST_COL, _cells(w), 2, str(w), FILL_PANEL, size=9, rotation=90)
         sheet.block(row, FIRST_COL + 4, _cells(w), _cells(h), _panel_label(w, h), FILL_PANEL, size=11)
@@ -719,13 +720,13 @@ def generate_excel(elements):
     """
     wb = Workbook()
     kss = wb.active
-    kss.title = "Кол. сметка"
+    kss.title = dt("Кол. сметка")
     element_refs = []
     extra = []
     known = {name for name, _codes in KSS_ITEMS}
     for i, element in enumerate(elements, 1):
         refs = _element_sheet(wb, i, element)
-        element_refs.append((f"Елемент {i}", refs))
+        element_refs.append((dt("Елемент {i}", i=i), refs))   # името на листа (_element_sheet)
         extra += [n for n in refs if n not in known and n not in extra]
     def formula(name):
         sources = [f"'{sheet}'!{refs[name]}" for sheet, refs in element_refs if name in refs]
@@ -752,9 +753,9 @@ def stock_to_excel(stock_df):
     """Наличността в Excel като „1. Наличности.xlsx“: заглавията на ред 3 в колони B-D. Връща BytesIO."""
     wb = Workbook()
     ws = wb.active
-    ws.title = STOCK_SHEET_TITLE
+    ws.title = dt(STOCK_SHEET_TITLE)
     for col, (header, width) in enumerate(zip(STOCK_HEADERS, (34, 10, 12)), start=2):
-        cell = ws.cell(row=3, column=col, value=header)
+        cell = ws.cell(row=3, column=col, value=dt(header))
         cell.font = Font(bold=True)
         cell.fill = PatternFill("solid", fgColor=FILL_HEADER)
         cell.border = BORDER_KSS
@@ -782,8 +783,10 @@ def stock_from_excel(file):
     rows = [list(r) for r in ws.iter_rows(values_only=True)]
     for i, row in enumerate(rows):
         names = [str(v).strip() if v is not None else "" for v in row]
-        if "Елемент" in names:
-            columns = {h: names.index(h) for h in STOCK_HEADERS if h in names}
+        # заглавията - на всеки от езиците на документите (файл, изтеглен на английски, се зарежда обратно)
+        found = {h: next((j for j, n in enumerate(names) if n in (h, *TR[h])), None) for h in STOCK_HEADERS}
+        if found["Елемент"] is not None:
+            columns = {h: j for h, j in found.items() if j is not None}
             break
     else:
         raise ValueError("Няма колона „Елемент“ в първия лист.")
