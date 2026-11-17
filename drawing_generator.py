@@ -21,6 +21,7 @@ from reportlab.lib.utils import ImageReader
 from accessories_calculator import waler_levels_cm, NARROW_LIMIT_CM
 from teko_calculator import (IN_CORNER_CM, is_compensator_row, thickness_label, t_wall_offset_label, face_row_pieces,
                              panel_height_cm)
+from doc_lang import dt, dt_item, dt_face
 
 # Висока резолюция за чисти линии и четливи надписи
 DPI_RESOLUTION = 300
@@ -129,7 +130,7 @@ def generate_overall_project_3d_buf(pdf_elements):
     
     ax.axis('off')
     ax.view_init(elev=26, azim=-55)
-    ax.set_title("3D Общ кофражен план на обект (Project Overview)", fontsize=10, fontweight='bold', pad=10)
+    ax.set_title(dt("3D Общ кофражен план на обект (Project Overview)"), fontsize=10, fontweight='bold', pad=10)
     
     plt.tight_layout()
     buf = io.BytesIO()
@@ -218,7 +219,7 @@ def _plan_geometry(layout):
 def _closed_label(layout):
     """Кои челни краища са затворени: "няма", "край 1", "край 2" или "край 1 и 2"."""
     ends = [str(i + 1) for i, c in enumerate(layout["closed"]) if c]
-    return f"край {' и '.join(ends)}" if ends else "няма"
+    return dt("край {ends}", ends=dt(" и ").join(ends)) if ends else dt("няма")
 
 def _dims_label(layout):
     d = layout["dims"]
@@ -270,7 +271,7 @@ def _top_view_title(layout, name):
         raw = str(name).strip()
         if raw.lower().startswith("колона"):
             raw = raw[len("колона"):].strip()
-        return f"{raw} колона A={int(d['a'])}, B={int(d['b'])} cm".strip()
+        return f"{raw} {dt('колона')} A={int(d['a'])}, B={int(d['b'])} cm".strip()
     return str(name)
 
 
@@ -552,7 +553,7 @@ def _board_labels(layout, place, strips, walers, props, side_labels, pt_per_cm):
         s = 0
         for w, is_board, _panel_w in (pieces[::-1] if rev and rev[0] else pieces):
             if is_board:
-                text = f"ДЪСКА {w:g} см".replace(".", ",")
+                text = dt("ДЪСКА {w} см", w=f"{w:g}").replace(".", ",")
                 half_w = TOP_BOARD_FS * _text_width_per_pt(text) / pt_per_cm / 2 + 1
                 half_h = TOP_BOARD_FS * 0.7 / pt_per_cm + 1
                 bx, by = (x0 + s + w / 2, y0 + T / 2) if axis == 'x' else (x0 + T / 2, y0 + s + w / 2)
@@ -789,7 +790,7 @@ def _front_view_buf(layout, faces, title=True):
                 # компенсаторът отгоре - една сива лента по цялата страна
                 ax.add_patch(patches.Rectangle((0, curr_y), side_len, h_val, linewidth=0.8,
                                                edgecolor='#4A5560', facecolor=COLOR_COMPENSATOR, zorder=1))
-                ax.text(side_len / 2, curr_y + h_val / 2, f"TC {int(h_val)} см", ha='center', va='center',
+                ax.text(side_len / 2, curr_y + h_val / 2, f"TC {int(h_val)} {dt('см')}", ha='center', va='center',
                         fontsize=4.5, color='#111111', fontweight='bold', zorder=5)
                 curr_y += h_val
                 continue
@@ -834,7 +835,8 @@ def _front_view_buf(layout, faces, title=True):
         ax.set_ylim(-10, top_y)
         ax.set_aspect('equal', adjustable='box')
         ax.axis('off')
-        ax.set_title(f"Страна {face['name']} ({round(side_len, 2):g}x{h_cm:g} cm)".replace(".", ","), fontsize=8, fontweight='bold')
+        ax.set_title(f"{dt('Страна')} {dt_face(face['name'])} ({round(side_len, 2):g}x{h_cm:g} cm)".replace(".", ","),
+                     fontsize=8, fontweight='bold')
 
     flat_axes = axes.flatten()
     for ax, face in zip(flat_axes, faces):
@@ -843,7 +845,7 @@ def _front_view_buf(layout, faces, title=True):
         ax.axis('off')
 
     if title:
-        fig.suptitle("Изглед отпред (Front View)", fontsize=9, fontweight='bold', y=0.99)
+        fig.suptitle(dt("Изглед отпред (Front View)"), fontsize=9, fontweight='bold', y=0.99)
     plt.tight_layout()
 
     buf = io.BytesIO()
@@ -1126,29 +1128,32 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
 
     story = []
     
+    # стойността по подразбиране от таб 3 („Няма посочен клиент“) - на езика на документа
     client = proj_info.get('client') or 'Няма посочен клиент'
-    project = proj_info.get('project') or 'Обект TEKO'
+    if client == 'Няма посочен клиент':
+        client = dt(client)
+    project = proj_info.get('project') or dt('Обект TEKO')
     
-    story.append(Paragraph("<b>КОФРАЖНА СИСТЕМА TEKO / TEKO FORMWORK SYSTEM</b>", title_style))
-    story.append(Paragraph(f"<b>Обект:</b> {project} | <b>Клиент:</b> {client}", subtitle_style))
+    story.append(Paragraph(f"<b>{dt('КОФРАЖНА СИСТЕМА TEKO / TEKO FORMWORK SYSTEM')}</b>", title_style))
+    story.append(Paragraph(f"<b>{dt('Обект:')}</b> {project} | <b>{dt('Клиент:')}</b> {client}", subtitle_style))
     story.append(Spacer(1, 8))
 
     # --- ОБОБЩЕНА КОЛИЧЕСТВЕНА СМЕТКА (PROJECT BOM) ---
-    story.append(Paragraph("<b>Обобщена количествена сметка (Project BOM)</b>", title_style))
+    story.append(Paragraph(f"<b>{dt('Обобщена количествена сметка (Project BOM)')}</b>", title_style))
     story.append(Spacer(1, 4))
     
     table_data = [[
         Paragraph("<b>№</b>", cell_bold_style),
-        Paragraph("<b>Артикул / Код</b>", cell_bold_style),
-        Paragraph("<b>Система</b>", cell_bold_style),
-        Paragraph("<b>Количество (бр.)</b>", cell_bold_style)
+        Paragraph(f"<b>{dt('Артикул / Код')}</b>", cell_bold_style),
+        Paragraph(f"<b>{dt('Система')}</b>", cell_bold_style),
+        Paragraph(f"<b>{dt('Количество')} ({dt('бр.')})</b>", cell_bold_style)
     ]]
     
     idx = 1
     for code, qty in sorted(bom_summary.items()):
         table_data.append([
             Paragraph(str(idx), cell_style),
-            Paragraph(str(code), cell_style),
+            Paragraph(dt_item(code), cell_style),
             Paragraph("TEKO", cell_style),
             Paragraph(str(qty), cell_style)
         ])
@@ -1170,13 +1175,15 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
     # --- ИНДИВИДУАЛНИ ЧЕРТЕЖИ И СПЕЦИФИКАЦИИ ---
     for idx, elem in enumerate(pdf_elements):
         w_type = str(elem.get('wall_type') or 'Стена')
-        e_name = str(elem.get('name', f'Елемент {idx+1}'))
+        e_name = str(elem.get('name', dt('Елемент {i}', i=idx + 1)))
         layout = elem['layout']
         e_count = int(elem.get('count') or 1)
 
-        story.append(Paragraph(f"<b>Чертеж и Спецификация: {e_name}</b>", title_style))
-        story.append(Paragraph(f"Тип: {w_type} | Размери: {_dims_label(layout)} | Височина: {panel_height_cm(layout):g} cm | "
-                               f"Затворени краища: {_closed_label(layout)} | Брой: {e_count}", subtitle_style))
+        story.append(Paragraph(f"<b>{dt('Чертеж и Спецификация: {name}', name=e_name)}</b>", title_style))
+        story.append(Paragraph(f"{dt('Тип:')} {w_type} | {dt('Размери:')} {_dims_label(layout)} | "
+                               f"{dt('Височина:')} {panel_height_cm(layout):g} cm | "
+                               f"{dt('Затворени краища:')} {_closed_label(layout)} | {dt('Брой:')} {e_count}",
+                               subtitle_style))
         story.append(Spacer(1, 4))
 
         top_buf = generate_top_view_buf(layout, e_name)
@@ -1198,7 +1205,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         img_ax = RLImage(ax_buf, width=ax_w * scale, height=ax_h * scale)
 
         views_table = Table([
-            [Paragraph("TOP VIEW / ИЗГЛЕД ОТГОРЕ", section_style), Paragraph("3D VIEW / 3D ИЗГЛЕД", section_style)],
+            [Paragraph(dt("TOP VIEW / ИЗГЛЕД ОТГОРЕ"), section_style), Paragraph(dt("3D VIEW / 3D ИЗГЛЕД"), section_style)],
             [img_top, img_ax],
         ], colWidths=[260, 285])
         views_table.setStyle(TableStyle([
@@ -1233,21 +1240,21 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
             story.append(row_table)
         story.append(Spacer(1, 6))
 
-        story.append(Paragraph("<b>Необходим артикул за елемента</b>", ParagraphStyle('SubHeading', parent=title_style, fontSize=10, leading=12)))
+        story.append(Paragraph(f"<b>{dt('Необходим артикул за елемента')}</b>", ParagraphStyle('SubHeading', parent=title_style, fontSize=10, leading=12)))
         story.append(Spacer(1, 2))
 
         elem_bom = elem['bom']  # умножена по броя
 
         elem_table_data = [[
-            Paragraph("<b>Артикул / Код</b>", cell_bold_style),
-            Paragraph("<b>За 1 бр.</b>", cell_bold_style),
-            Paragraph(f"<b>Общо за {e_count} бр.</b>", cell_bold_style)
+            Paragraph(f"<b>{dt('Артикул / Код')}</b>", cell_bold_style),
+            Paragraph(f"<b>{dt('За 1 бр.')}</b>", cell_bold_style),
+            Paragraph(f"<b>{dt('Общо за {n} бр.', n=e_count)}</b>", cell_bold_style)
         ]]
 
         for code, qty in sorted(elem_bom.items()):
             one = qty / e_count
             elem_table_data.append([
-                Paragraph(str(code), cell_style),
+                Paragraph(dt_item(code), cell_style),
                 Paragraph(str(int(one) if one == int(one) else round(one, 2)), cell_style),
                 Paragraph(str(qty), cell_style)
             ])
