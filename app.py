@@ -22,7 +22,7 @@ from teko_calculator import (solve_height_cm, layout_element, count_panels, is_c
                              t_wall_offset_label)
 from weights_db import get_item_weight
 from i18n import t, t_item, init_language, language_switch, MANUAL_HELP_BG
-from doc_lang import DOC_LANGUAGES, document_language, dt
+from doc_lang import DOC_FLAGS, DOC_LANGUAGES, document_language, dt
 
 init_language()
 st.set_page_config(
@@ -1234,9 +1234,23 @@ with tab1:
     for idx, row in df_preview.iterrows():
         render_element_preview(idx, row)
 
+# Windows не рисува флагчета-емоджи (показва „DE“) - шрифт само с флагчетата, за падащите менюта; без него
+# (напр. без интернет) остават двете букви
+FLAG_FONT_CSS = """
+    <style>
+    @font-face {font-family: "Twemoji Country Flags"; font-display: swap; unicode-range: U+1F1E6-1F1FF;
+        src: url("https://cdn.jsdelivr.net/npm/country-flag-emoji-polyfill@0.1.8/dist/TwemojiCountryFlags.woff2")
+             format("woff2");}
+    [data-testid="stSelectbox"] *, [role="listbox"] *, [role="option"], [role="option"] * {
+        font-family: "Twemoji Country Flags", "Source Sans", sans-serif !important;}
+    </style>
+"""
+
 def doc_language_select(key, on_change=None):
-    """Падащо меню до бутона на файла: езикът на документа (doc_lang), по подразбиране български."""
-    return st.selectbox(t("Език на документа:"), list(DOC_LANGUAGES), format_func=DOC_LANGUAGES.get, key=key,
+    """Падащо меню до бутона на файла: езикът на документа (doc_lang) с флагче, по подразбиране български."""
+    st.markdown(FLAG_FONT_CSS, unsafe_allow_html=True)
+    return st.selectbox(t("Език на документа:"), list(DOC_LANGUAGES),
+                        format_func=lambda code: f"{DOC_FLAGS[code]} {DOC_LANGUAGES[code]}", key=key,
                         on_change=on_change, width=260,
                         help=t("Езикът, на който се генерира файлът (екранът не се сменя)."))
 
