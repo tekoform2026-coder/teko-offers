@@ -1,5 +1,6 @@
 import io
 import math
+import re
 import hmac
 import fitz  # PyMuPDF
 import pandas as pd
@@ -13,7 +14,7 @@ from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 from gemini_agent2 import analyze_blueprint
 from drawing_generator import generate_pdf_drawings, generate_top_view_buf, generate_front_view_buf
-from excel_export import generate_excel
+from excel_export import generate_excel, stock_to_excel, stock_from_excel
 import projects_store
 from accessories_calculator import calculate_accessories
 from teko_calculator import (solve_height_cm, layout_element, count_panels, is_compensator_row, thickness_label,
@@ -313,6 +314,155 @@ def get_element_accessories(elem_type, row):
     for code, qty in acc["bom_summary"].items():
         res[code] = qty * cnt
     return res
+
+# Складова наличност (таб 5): елементите в реда от „1. Наличности.xlsx“ (лист „Складова наличност“).
+# Таблицата се редактира в таб 5 и се пази в архива (лист „Наличност“, обща за всички проекти);
+# без архив - само докато страницата е отворена. Празен архив - този списък с празна наличност.
+STOCK_ITEMS = [
+    ("Панел TEKO TK 150/60", "бр."),
+    ("Панел TEKO TK 150/35", "бр."),
+    ("Панел TEKO TK 150/30", "бр."),
+    ("Панел TEKO TK 150/25", "бр."),
+    ("Панел TEKO TK 150/20", "бр."),
+    ("Панел TEKO TK 120/60", "бр."),
+    ("Панел TEKO TK 120/35", "бр."),
+    ("Панел TEKO TK 120/30", "бр."),
+    ("Панел TEKO TK 120/25", "бр."),
+    ("Панел TEKO TK 120/20", "бр."),
+    ("Панел TEKO TK 60/30", "бр."),
+    ("Панел TEKO TK 60/25", "бр."),
+    ("Панел TEKO TK 60/20", "бр."),
+    ("Панел TEKO TK 30/15", "бр."),
+    ("Панел TEKO TK 60/10", "бр."),
+    ("Ръкохватка H8 зелени", "бр."),
+    ("Ръкохватка H8 сиви", "бр."),
+    ("Компенсатор TC150/15", "бр."),
+    ("Компенсатор TC150/10", "бр."),
+    ("Компенсатор TC150/5", "бр."),
+    ("Компенсатор TC120/15", "бр."),
+    ("Компенсатор TC120/10", "бр."),
+    ("Компенсатор TC120/5", "бр."),
+    ("Вътрешен ъгъл IN150", "бр."),
+    ("Вътрешен ъгъл IN120", "бр."),
+    ("Външен ъгъл EX240", "бр."),
+    ("Външен скосен ъгъл EС240", "бр."),
+    ("Ръкохватка H4", "бр."),
+    ("Ригел AW 100 поцинкован", "бр."),
+    ("Ригел AW 200 поцинкован", "бр."),
+    ("Ригел AW 300 поцинкован", "бр."),
+    ("Вертикализатор PP", "бр."),
+    ("Шпилка d12 TR12", "бр."),
+    ("Гайка d12/D100 N12", "бр."),
+    ("Панел TEKO TK 60/40", "бр."),
+    ("Панел TEKO TK 60/30", "бр."),
+    ("Панел TEKO TK 60/25", "бр."),
+    ("Панел TEKO TK 60/20", "бр."),
+    ("Панел TEKO TK 40/25", "бр."),
+    ("Панел TEKO TK 30/25", "бр."),
+    ("Панел TEKO TK 20/20", "бр."),
+    ("Панел TEKO TK 20/15", "бр."),
+    ("Панел TEKO TK 15/15", "бр."),
+    ("Ръкохватка H6", "бр."),
+    ("Ръкохватка H5", "бр."),
+    ("Фиксираща планка FP 40/40/45", "бр."),
+    ("Фиксираща планка FP 120/40", "бр."),
+    ("Съединител за ригел AC", "бр."),
+    ("Ригел AW100 зелени", "бр."),
+    ("Ригел AW200 зелени", "бр."),
+]
+STOCK_COLUMNS = ["Елемент", "Мярка", "Остава"]
+
+def default_stock_df():
+    stock_df = pd.DataFrame(STOCK_ITEMS, columns=STOCK_COLUMNS[:2])
+    stock_df["Остава"] = pd.Series([None] * len(stock_df), dtype="float")
+    return stock_df
+
+def load_stock_once():
+    """Наличността от архива - веднъж за сесията (F5 зарежда наново); без архив или празен лист - STOCK_ITEMS."""
+    if "stock_df" in st.session_state:
+        return
+    stock_df, modified = None, None
+    try:
+        stock_df, modified = projects_store.load_stock()
+    except Exception as exc:  # noqa: BLE001 - архивът не е достъпен, таб 5 работи без него
+        st.session_state["stock_error"] = f"{type(exc).__name__}: {exc}"
+    st.session_state["stock_df"] = stock_df if stock_df is not None else default_stock_df()
+    st.session_state["stock_modified"] = modified
+
+def store_stock(stock_df):
+    """Записва наличността в сесията и в архива; при грешка в архива - съобщение в таб 5."""
+    st.session_state["stock_df"] = stock_df.reset_index(drop=True)
+    st.session_state.pop("stock_error", None)
+    try:
+        st.session_state["stock_modified"] = projects_store.save_stock(st.session_state["stock_df"])
+    except Exception as exc:  # noqa: BLE001
+        st.session_state["stock_error"] = f"{type(exc).__name__}: {exc}"
+
+_LATIN = str.maketrans("АВЕКМНОРСТХ", "ABEKMHOPCTX")  # кирилски букви, които изглеждат като латински
+
+def stock_key(name):
+    """
+    Общ ключ за името в склада и кода от сметката: „Панел TEKO TK 150/60“ и „TK 150/60 (полегнал)“ -> TK 150/60,
+    „Ръкохватка H8 зелени“ -> H8, „Шпилка d12 TR12“ и „Шпилка TR 12“ -> TR12. Без ключ (FP, AC, EС240) - None.
+    """
+    s = re.sub(r"\s+", "", str(name).upper().translate(_LATIN))
+    for pattern, fmt in ((r"TK(\d+)/(\d+)", "TK {}/{}"), (r"TC(\d+)/(\d+)", "TC {}/{}"),
+                         (r"(IN|EX)(\d+)", "{}{}"), (r"AW(\d+)", "AW {}"), (r"(TR12)", "{}"),
+                         (r"(N12)", "{}"), (r"(PP)", "{}"), (r"H(\d)(?!\d)", "H{}")):
+        m = re.search(pattern, s)
+        if m:
+            return fmt.format(*m.groups())
+    return None
+
+def project_requirements(df_calc):
+    """Нужните бройки за проекта (панели и аксесоари, по броя елементи), събрани по stock_key."""
+    need = {}
+    for _, row in df_calc.iterrows():
+        elem_type = str(row.get("type", "wall"))
+        try:
+            items = {**get_element_teko_panels(elem_type, row), **get_element_accessories(elem_type, row)}
+        except Exception:
+            continue  # грешен ред - предупреждението за размерите е в таб 2
+        for code, qty in items.items():
+            key = stock_key(code)
+            if key:
+                need[key] = need.get(key, 0) + qty
+    return need
+
+def stock_shortages(df_calc):
+    """
+    Сравнение със складовата наличност: (не стигат [(ключ, нужни, на склад)], няма ги в склада [(ключ, нужни)]).
+    Редовете в склада с един ключ се събират (H8 зелени + сиви). Празна наличност не се проверява;
+    без нито една въведена наличност - няма предупреждения.
+    """
+    stock_df = st.session_state.get("stock_df")
+    if stock_df is None or df_calc.empty:
+        return [], []
+    available, listed = {}, set()
+    for _, row in stock_df.iterrows():
+        key = stock_key(row.get("Елемент", ""))
+        if not key:
+            continue
+        listed.add(key)
+        qty = pd.to_numeric(row.get("Остава"), errors="coerce")
+        if pd.notna(qty):
+            available[key] = available.get(key, 0) + float(qty)
+    if not available:
+        return [], []
+    need = project_requirements(df_calc)
+    short = [(k, q, available[k]) for k, q in need.items() if k in available and q > available[k]]
+    missing = [(k, q) for k, q in need.items() if k not in listed]
+    return short, missing
+
+def show_stock_warnings(df_calc):
+    """Предупреждения при недостиг в склада (табове 1, 2 и 5)."""
+    short, missing = stock_shortages(df_calc)
+    if short:
+        lines = [f"- **{k}**: нужни {q:g} бр., на склад {a:g} бр. (не стигат {q - a:g} бр.)" for k, q, a in short]
+        st.warning("⚠️ Не стигат в склада (таб „Складова наличност“):\n" + "\n".join(lines))
+    if missing:
+        lines = [f"- **{k}**: нужни {q:g} бр." for k, q in missing]
+        st.warning("⚠️ Няма ги в складовата наличност:\n" + "\n".join(lines))
 
 def element_dims_and_area(elem_type, row):
     """
@@ -861,11 +1011,13 @@ with col_edit.popover("✏️ Промени", use_container_width=True,
 col_back.button("← Проекти", on_click=close_project, use_container_width=True,
                 help="Записва таблицата и се връща към списъка с проекти.")
 
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📐 Чертеж и Редактиране", 
-    "🧱 Кофражни Елементи и Панели TEKO", 
+load_stock_once()  # преди табовете - предупрежденията за наличността са и в табове 1 и 2
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📐 Чертеж и Редактиране",
+    "🧱 Кофражни Елементи и Панели TEKO",
     "📄 PDF Чертежи",
-    "📄 Оферта"
+    "📄 Оферта",
+    "📦 Складова наличност"
 ])
 
 with tab1:
@@ -1062,6 +1214,8 @@ with tab1:
             st.rerun()
     if st.session_state.pop("table_saved", False):
         st.success("✅ Данните са запазени и преизчислени успешно! Можете да проверите резултатите в следващите табове.")
+    show_stock_warnings(fill_default_height(st.session_state["edited_df"],
+                                            st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM)))
 
     st.subheader("👁 Преглед на елементите")
     st.caption("Прегледът показва записаните данни - обновява се след „Запази и Изчисли“. "
@@ -1172,6 +1326,7 @@ def render_specification_tab(df_calc):
             with st.expander("⚠️ Предупреждения за нестандартни размери в кофражните елементи", expanded=True):
                 for w_msg in all_warnings:
                     st.markdown(w_msg)
+        show_stock_warnings(df_calc)
 
         st.subheader("📋 Спецификация на кофражните елементи и съответните панели")
         st.dataframe(df_detailed, use_container_width=True)
@@ -1290,6 +1445,65 @@ def render_offer_tab(df_calc, current):
             )
 
 
+@st.fragment
+def render_stock_tab(df_calc):
+    st.header("5. Складова наличност")
+    show_stock_warnings(df_calc)
+    if st.session_state.get("stock_error"):
+        st.error(f"Архивът в Google не е достъпен ({st.session_state['stock_error']}). Наличността се пази "
+                 "само докато страницата е отворена.")
+    if projects_store.has_archive():
+        modified = st.session_state.get("stock_modified")
+        st.caption("Имената, мярката и наличността се редактират в таблицата; ред се добавя с „+“ под таблицата, "
+                   "изтрива се с отметка вляво и кошчето. „💾 Запази наличността“ записва в Google (общо за всички "
+                   "проекти) и обновява предупрежденията в табовете. Промяна от друг компютър се вижда след F5."
+                   + (f" Последна промяна: {modified.strftime('%d.%m.%Y %H:%M')}." if modified else ""))
+    else:
+        st.caption("Имената, мярката и наличността се редактират в таблицата; ред се добавя с „+“ под таблицата, "
+                   "изтрива се с отметка вляво и кошчето. „💾 Запази наличността“ обновява предупрежденията в "
+                   "табовете. Без архив (няма ключ за Google в secrets) наличността се губи при презареждане.")
+    with st.form("stock_form"):
+        # Елемент - колкото най-дългото име, Мярка - колкото „комплект“, Остава - както преди (~360 px).
+        # Без разтягане на таблицата: при разтягане Streamlit разпределя ширината и не спазва колоните.
+        edited_stock = st.data_editor(
+            st.session_state["stock_df"], num_rows="dynamic", hide_index=True, width="content",
+            height=35 * (len(st.session_state["stock_df"]) + 2) + 3,
+            column_config={"Елемент": st.column_config.TextColumn("Елемент", width=240),
+                           "Мярка": st.column_config.TextColumn("Мярка", width=80),
+                           "Остава": st.column_config.NumberColumn("Остава", width=360, min_value=0, format="%g")},
+            column_order=STOCK_COLUMNS, key="stock_editor")
+        if st.form_submit_button("💾 Запази наличността", type="primary"):
+            store_stock(edited_stock)
+            # както в таб 1: таблицата се показва наново от записаните данни, иначе следващата промяна се губи
+            st.session_state.pop("stock_editor", None)
+            st.rerun()  # цялата страница - предупрежденията в табове 1 и 2 също се обновяват
+
+    st.subheader("Excel")
+    st.download_button("📤 Изтегли като Excel", data=stock_to_excel(st.session_state["stock_df"]).getvalue(),
+                       file_name="Складова_наличност.xlsx",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                       help="Записаната наличност (без незаписаните промени в таблицата), подредена като "
+                            "„1. Наличности.xlsx“.")
+    uploaded = st.file_uploader("Excel с наличност (подреден като „1. Наличности.xlsx“ - колони Елемент, Мярка, "
+                                "Остава):", type=["xlsx"], key="stock_upload")
+    if uploaded is not None and st.button("📥 Зареди от Excel", help="Заменя цялата таблица с тази от файла "
+                                                                     "и я записва."):
+        try:
+            loaded = stock_from_excel(uploaded)
+        except Exception as exc:  # noqa: BLE001 - грешен файл
+            st.error(f"Файлът не може да се прочете: {exc}")
+        else:
+            if loaded.empty:
+                st.error("Във файла няма редове под „Елемент“.")
+            else:
+                store_stock(loaded)
+                st.session_state.pop("stock_editor", None)
+                st.session_state["stock_loaded"] = len(loaded)
+                st.rerun()
+    if st.session_state.get("stock_loaded"):
+        st.success(f"✅ Заредени {st.session_state.pop('stock_loaded')} реда от Excel.")
+
+
 df_calc = fill_default_height(st.session_state["edited_df"],
                               st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM))
 with tab2:
@@ -1298,3 +1512,5 @@ with tab3:
     render_pdf_tab(df_calc, current)
 with tab4:
     render_offer_tab(df_calc, current)
+with tab5:
+    render_stock_tab(df_calc)
