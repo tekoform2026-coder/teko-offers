@@ -10,6 +10,8 @@
 import math
 from collections import Counter
 
+from doc_lang import dt, dt_cm
+
 IN_CORNER_CM = 10
 
 STANDARD_HEIGHT_MAP = {
@@ -331,9 +333,10 @@ def arm_thicknesses(layout):
 def thickness_label(layout, unit=" см"):
     """„дебелина 25 см“; при различни стени - „стена A дебелина 30 см, стена B дебелина 25 см“."""
     arms = arm_thicknesses(layout) or [layout["thickness_cm"]]
+    unit = dt_cm(unit)  # на езика на документа (doc_lang)
     if len(set(arms)) == 1:
-        return f"дебелина {arms[0]:g}{unit}"
-    return ", ".join(f"стена {'ABC'[i]} дебелина {t:g}{unit}" for i, t in enumerate(arms))
+        return f"{dt('дебелина')} {arms[0]:g}{unit}"
+    return ", ".join(f"{dt('стена')} {'ABC'[i]} {dt('дебелина')} {t:g}{unit}" for i, t in enumerate(arms))
 
 def t_wall_middle_cm(l1_cm, stem_thickness_cm):
     """Ребро в средата на полката: от левия край до лявото лице на реброто, надолу до 5 см."""
@@ -344,7 +347,7 @@ def t_wall_offset_label(layout, unit=" см"):
     d = layout["dims"]
     if layout["type"] != "t_wall" or d["l3"] == t_wall_middle_cm(d["l1"], d["t2"]):
         return ""
-    return f"ребро на {d['l3']:g}{unit} от левия край"
+    return dt("ребро на {l3}{unit} от левия край", l3=f"{d['l3']:g}", unit=dt_cm(unit))
 
 def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=25,
                    l1_cm=0, l2_cm=0, l3_cm=0, closed_ends=0,
