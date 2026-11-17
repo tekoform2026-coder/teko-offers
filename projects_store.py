@@ -5,6 +5,8 @@
 use_archive) всяка промяна се записва и в таблицата „TEKO Проекти“, а refresh() зарежда общия списък.
 Без архив (напр. в тестовете или без ключ в secrets) проектите се губят при презареждане.
 Проект: id, name, client, date, created, modified, elements (таблицата с елементите), std_height_cm.
+
+Складовата наличност (таб 5) е обща за всички проекти: load_stock() / save_stock(), в архива - лист „Наличност“.
 """
 import math
 import uuid
@@ -93,6 +95,20 @@ def save_project(store, pid, elements=None, std_height_cm=None, now=None):
     return changed
 
 
+def rename_project(store, pid, name, client, project_date, now=None):
+    """Сменя името, клиента и датата на проекта; „Последна промяна“ се мени само ако има промяна."""
+    project = store[pid]
+    name = name.strip() or project["name"]
+    client = client.strip()
+    project_date = project_date or project["date"]
+    if (name, client, project_date) == (project["name"], project["client"], project["date"]):
+        return False
+    project.update(name=name, client=client, date=project_date, modified=_now(now))
+    if _archive is not None:
+        _archive.write_project(project, with_elements=False)
+    return True
+
+
 def duplicate_project(store, pid, now=None):
     """Копие на проекта с „(копие)“ в името; таблицата е отделна, не обща с оригинала."""
     src = store[pid]
@@ -105,6 +121,22 @@ def delete_project(store, pid):
     project = store.pop(pid, None)
     if project is not None and _archive is not None:
         _archive.mark_deleted(pid)
+
+
+def load_stock():
+    """Складовата наличност от архива: (таблица Елемент / Мярка / Остава, последна промяна); без архив
+    или празен лист - (None, None)."""
+    if _archive is None:
+        return None, None
+    return _archive.load_stock()
+
+
+def save_stock(stock_df, now=None):
+    """Записва складовата наличност в архива (целия лист наново); връща времето на записа."""
+    stamp = _now(now)
+    if _archive is not None:
+        _archive.write_stock(stock_rows(stock_df), stamp)
+    return stamp
 
 
 def project_rows(store):
@@ -139,6 +171,16 @@ def element_rows(elements):
     return [[_cell(rec.get(col)) for col in ELEMENT_COLUMNS] for rec in elements.to_dict("records")]
 
 
+def stock_rows(stock_df):
+    """Таблицата с наличността -> редове [Елемент, Мярка, Остава]; празните редове (без име) се пропускат."""
+    rows = []
+    for rec in stock_df.to_dict("records"):
+        row = [_cell(rec.get(col)) for col in STOCK_COLUMNS]
+        if str(row[0]).strip():
+            rows.append(row)
+    return rows
+
+
 def _elements_from_rows(rows):
     """Редове от архива -> таблица с елементите; празните клетки са празни (None)."""
     if not rows:
@@ -169,18 +211,24 @@ PROJECT_HEADER = ["id", "Име", "Клиент", "Дата", "Създаден"
                   "Стандартна височина", "Изтрит"]
 ELEMENT_HEADER = ["project_id", "Ред №"] + ELEMENT_COLUMNS
 DELETED_MARK = "да"
+STOCK_SHEET = "Наличност"
+STOCK_COLUMNS = ["Елемент", "Мярка", "Остава"]
+# „Последна промяна“ е само на първия ред с данни
+STOCK_HEADER = ["Ред №"] + STOCK_COLUMNS + ["Последна промяна"]
 
 
 class GoogleSheetsArchive:
     """
-    Таблица „TEKO Проекти“ с два листа: „Проекти“ (един ред = проект) и „Елементи“
-    (един ред = елемент, с project_id). Листовете и заглавията се създават при първото пускане.
+    Таблица „TEKO Проекти“ с три листа: „Проекти“ (един ред = проект), „Елементи“
+    (един ред = елемент, с project_id) и „Наличност“ (складовата наличност, обща за всички проекти).
+    Листовете и заглавията се създават при първото пускане.
     spreadsheet е gspread.Spreadsheet (или същият интерфейс в тестовете).
     """
 
     def __init__(self, spreadsheet):
         self.projects = self._sheet(spreadsheet, PROJECTS_SHEET, PROJECT_HEADER)
         self.elements = self._sheet(spreadsheet, ELEMENTS_SHEET, ELEMENT_HEADER)
+        self.stock = self._sheet(spreadsheet, STOCK_SHEET, STOCK_HEADER)
 
     @staticmethod
     def _sheet(spreadsheet, title, header):
@@ -261,6 +309,29 @@ class GoogleSheetsArchive:
             column = chr(ord("A") + PROJECT_HEADER.index("Изтрит"))
             self.projects.update(values=[[DELETED_MARK]], range_name=f"{column}{number}",
                                  value_input_option="RAW")
+
+
+    def load_stock(self):
+        rows = [list(r) + [""] * (len(STOCK_HEADER) - len(r)) for r in self._values(self.stock)]
+        rows = sorted((r for r in rows if str(r[1]).strip()), key=lambda r: r[0])
+        if not rows:
+            return None, None
+        stock_df = pd.DataFrame([{col: (None if value == "" else value) for col, value in zip(STOCK_COLUMNS, r[1:4])}
+                                 for r in rows], columns=STOCK_COLUMNS)
+        stock_df["Остава"] = pd.to_numeric(stock_df["Остава"], errors="coerce")
+        stock_df[["Елемент", "Мярка"]] = stock_df[["Елемент", "Мярка"]].astype(object)
+        modified = _parse_datetime(rows[0][4]) if rows[0][4] != "" else None
+        return stock_df, modified
+
+    def write_stock(self, rows, modified):
+        """Старите редове се трият, новите се добавят (с „Последна промяна“ на първия)."""
+        count = len(self.stock.col_values(1))
+        if count > 1:
+            self.stock.delete_rows(2, count)
+        values = [[i + 1] + row + [modified.isoformat(timespec="seconds") if i == 0 else ""]
+                  for i, row in enumerate(rows)]
+        if values:
+            self.stock.append_rows(values, value_input_option="RAW")
 
 
 def connect_google_sheets(service_account_info, sheet_id):
