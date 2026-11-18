@@ -295,6 +295,24 @@ EN = {
     "⚠️ Няма ги в складовата наличност:": "⚠️ Not in the stock list:",
     "- **{k}**: нужни {q} бр.": "- **{k}**: needed {q} pcs",
 
+    # Редене според складовата наличност
+    "📦 Редене според складовата наличност": "📦 Layout by available stock",
+    "Панелите се редят по алгоритъма. Когато някой панел не стига в склада (таб „Складова "
+    "наличност“), той се заменя с най-малко по-малки налични панели в същия ред, а ако не може - "
+    "елементът се пренарежда по височина (напр. 300 = 120 + 120 + 60). Най-големите елементи "
+    "вземат от склада първи. Отметката се пази в проекта.":
+        "Panels are laid out by the algorithm. When a panel is short in stock (tab “Stock”), it is replaced "
+        "with the fewest smaller panels in stock in the same row; if that is not possible, the element is "
+        "re-laid by height (e.g. 300 = 120 + 120 + 60). The largest elements take from stock first. "
+        "The checkbox is saved with the project.",
+    "ℹ️ Редене според складовата наличност: няма въведена наличност - панелите са по алгоритъма.":
+        "ℹ️ Layout by available stock: no stock quantities entered - panels follow the algorithm.",
+    "- **{e}**: пренареден по височина - {levels} см": "- **{e}**: re-laid by height - {levels} cm",
+    "- **{e}**: {old} → {new} ({n} места)": "- **{e}**: {old} → {new} ({n} places)",
+    "🔁 Редене според складовата наличност - сменени панели:": "🔁 Layout by available stock - replaced panels:",
+    "✅ Редене според складовата наличност: всички панели по алгоритъма са налични.":
+        "✅ Layout by available stock: all panels of the algorithm layout are in stock.",
+
     # Таб 2
     "2. Спецификация на кофражните елементи и панели TEKO": "2. Specification of formwork elements and TEKO panels",
     "ℹ️ Въведете елементи в Таб 1 и натиснете 'Запази и Изчисли'.":
