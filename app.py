@@ -1193,9 +1193,9 @@ def element_column_config():
         "closed_end_3": st.column_config.CheckboxColumn(t("Затворен край 3 (само T-стена)"), default=True, width="auto")
     }
 
-def render_drawing_notes(box):
+def render_drawing_notes():
     """
-    Забележките на AI (противоречия и несигурности в чертежа) - най-отгоре в таб 1, по чертежи, с по-малък шрифт.
+    Забележките на AI (противоречия и несигурности в чертежа) - точно над таблица 1, по чертежи, с по-малък шрифт.
     Пазят се докато страницата е отворена.
     """
     notes = st.session_state.get("drawing_notes", {})
@@ -1203,7 +1203,7 @@ def render_drawing_notes(box):
     shown = [(name, items) for name, items in notes.items() if items and name in numbers]
     if not shown:
         return
-    with box:
+    with st.container(key="drawing_notes_box"):
         st.markdown("<style>.st-key-drawing_notes_box [data-testid='stAlert'] p, "
                     ".st-key-drawing_notes_box [data-testid='stAlert'] li {font-size: 13px; line-height: 1.35;}</style>",
                     unsafe_allow_html=True)
@@ -1253,7 +1253,6 @@ def render_drawing_manager(groups):
 
 with tab1:
     st.header(t("1. Избор на начин за въвеждане на елементи"))
-    notes_box = st.container(key="drawing_notes_box")   # забележките на AI - най-отгоре (попълва се по-долу)
     
     input_mode = st.radio(
         t("Изберете режим на работа:"),
@@ -1359,7 +1358,7 @@ with tab1:
                                                t("Чертеж „{name}“: {n} елемента - записани в проекта.",
                                                  name=drawing, n=len(new_part)))
                                     # противоречия и несигурности в чертежа - потребителят проверява таблицата;
-                                    # показват се най-отгоре в таб 1 (render_drawing_notes)
+                                    # показват се точно над таблица 1 (render_drawing_notes)
                                     notes = list(blueprint_data.get("notes") or [])
                                     st.session_state.setdefault("drawing_notes", {})[drawing] = notes
                                 except Exception as e:
@@ -1367,7 +1366,6 @@ with tab1:
     else:
         st.subheader(t("⌨️ Ръчно въвеждане и управление в таблицата"))
         st.markdown(t(MANUAL_HELP_BG))
-    render_drawing_notes(notes_box)
 
     st.divider()
     st.subheader(t("📏 Стандартна височина на етажа"))
@@ -1404,6 +1402,7 @@ with tab1:
                        "наличност“), той се заменя с най-малко по-малки налични панели в същия ред, а ако не може - "
                        "елементът се пренарежда по височина (напр. 300 = 120 + 120 + 60). Най-големите елементи "
                        "вземат от склада първи. Отметката се пази в проекта."))
+    render_drawing_notes()   # забележките на AI - точно над таблица 1
     st.subheader(t("✏️ Таблица с вертикални кофражни елементи"))
     
     st.markdown("""
