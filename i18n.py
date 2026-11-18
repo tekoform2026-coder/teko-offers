@@ -155,6 +155,33 @@ EN = {
     "🤖 Автоматично разчитане от чертежи": "🤖 Automatic reading from drawings",
     "⌨️ Ръчно въвеждане (Таблица)": "⌨️ Manual entry (Table)",
     "Качване на чертеж и AI разчитане": "Upload a drawing and AI reading",
+    "Чертеж „{name}“ вече е разчетен в този проект:": "Drawing “{name}” has already been read in this project:",
+    "Замени елементите му": "Replace its elements",
+    "Добави като нов чертеж": "Add as a new drawing",
+    "Елементите ще се добавят като Чертеж {n} под вече разчетените.":
+        "The elements will be added as Drawing {n} below the ones already read.",
+    "Чертеж „{name}“: {n} елемента - записани в проекта.": "Drawing “{name}”: {n} elements - saved in the project.",
+    "📄 Чертеж {i}: {name}": "📄 Drawing {i}: {name}",
+    "⚠️ Забележки на AI - Чертеж {i}: {name}": "⚠️ AI notes - Drawing {i}: {name}",
+    # gemini_agent2.TRUNCATED_NOTE - бележките на Gemini са на езика на екрана, а тази я добавя програмата
+    "Отговорът на Gemini е отрязан - чертежът е твърде голям. Разделете го на части или опитайте с по-малко "
+    "страници.":
+        "The Gemini answer was cut off - the drawing is too large. Split it into parts or try with fewer pages.",
+    "📄 Без чертеж (въведени ръчно)": "📄 No drawing (entered manually)",
+    "{n} елемента": "{n} elements",
+    "Към кой чертеж?": "To which drawing?",
+    "Чертеж {i}: {name}": "Drawing {i}: {name}",
+    "Без чертеж (въведени ръчно)": "No drawing (entered manually)",
+    "📄 Чертежи в проекта ({n}) - преименуване и изтриване": "📄 Drawings in the project ({n}) - rename and delete",
+    "Първо натиснете „💾 Запази и Изчисли“ - незаписаните промени в таблиците се губят.":
+        "First press “💾 Save and Calculate” - unsaved changes in the tables are lost.",
+    "Чертеж {i} ({n} елемента)": "Drawing {i} ({n} elements)",
+    "✏️ Преименувай": "✏️ Rename",
+    "Името е празно или вече има такъв чертеж.": "The name is empty or such a drawing already exists.",
+    "Отказ": "Cancel",
+    "Да се изтрият ли {n} елемента на „{name}“?": "Delete the {n} elements of “{name}”?",
+    "🗑 Да, изтрий чертежа": "🗑 Yes, delete the drawing",
+    "🗑 Изтрий": "🗑 Delete",
     "Изберете чертеж (PDF, PNG, JPG):": "Choose a drawing (PDF, PNG, JPG):",
     "🖼️ Преглед на файла": "🖼️ File preview",
     "Качен чертеж": "Uploaded drawing",
@@ -394,10 +421,17 @@ EN = {
     "Остава": "In stock",
     "💾 Запази наличността": "💾 Save stock",
     "📤 Изтегли като Excel": "📤 Download as Excel",
-    "Записаната наличност (без незаписаните промени в таблицата), подредена като „1. Наличности.xlsx“.":
-        "The saved stock (without unsaved changes in the table), laid out like “1. Наличности.xlsx”.",
-    "Excel с наличност (подреден като „1. Наличности.xlsx“ - колони Елемент, Мярка, Остава):":
-        "Excel with stock (laid out like “1. Наличности.xlsx” - columns Елемент, Мярка, Остава):",
+    "Записаната наличност (без незаписаните промени в таблицата) и нужното за проекта, подредени като "
+    "„1. Оферта – софтуер.xlsx“.":
+        "The saved stock (without unsaved changes in the table) and the project needs, laid out like "
+        "“1. Оферта – софтуер.xlsx”.",
+    "Excel с наличност („1. Оферта – софтуер.xlsx“ или „1. Наличности.xlsx“ - колони Елемент, Мярка, Наличност в "
+    "склада):":
+        "Excel with stock (“1. Оферта – софтуер.xlsx” or “1. Наличности.xlsx” - columns Елемент, Мярка, Наличност "
+        "в склада):",
+    "Наличност в склада": "Stock in warehouse",
+    "Нужно за проекта": "Needed for the project",
+    "Остават": "Remaining",
     "📥 Зареди от Excel": "📥 Load from Excel",
     "Заменя цялата таблица с тази от файла и я записва.": "Replaces the whole table with the one in the file and saves it.",
     "Файлът не може да се прочете: {error}": "The file cannot be read: {error}",
