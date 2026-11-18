@@ -20,6 +20,7 @@ from accessories_calculator import calculate_accessories
 from teko_calculator import (solve_height_cm, layout_element, count_panels, is_compensator_row, thickness_label,
                              panel_height_cm,
                              t_wall_offset_label)
+from stock_layout import plan_project
 from weights_db import get_item_weight
 from i18n import t, t_item, init_language, language_switch, MANUAL_HELP_BG
 from doc_lang import DOC_FLAGS, DOC_LANGUAGES, document_language, dt
@@ -298,16 +299,30 @@ def row_to_layout(elem_type, row):
                               closed_end_3=_closed_end(row, "closed_end_3"), **closed)
     return None
 
+def row_layout_key(elem_type, row):
+    """Размерите, от които зависи разположението (без броя и името) - еднаквите редове имат един ключ."""
+    sizes = ("height_cm", "thickness_cm", "l1_cm", "l2_cm", "l3_cm", "thickness1_cm", "thickness2_cm", "thickness3_cm")
+    return ((elem_type,) + tuple(_row_float(row, col, None) for col in sizes)
+            + tuple(_closed_end(row, col) for col in CLOSED_END_COLUMNS))
+
+def element_layout(elem_type, row):
+    """
+    Разположението на реда: при „Редене според складовата наличност“ - от плана (stock_layout.py),
+    иначе - алгоритъмът (row_to_layout).
+    """
+    planned = st.session_state.get("stock_plan", {}).get(row_layout_key(elem_type, row))
+    return planned["layout"] if planned else row_to_layout(elem_type, row)
+
 def get_element_teko_panels(elem_type, row):
     cnt = int(_row_float(row, "count", 1))
-    layout = row_to_layout(elem_type, row)
+    layout = element_layout(elem_type, row)
     if layout is None:
         return {}
     return count_panels(layout, cnt)
 
 def get_element_accessories(elem_type, row):
     cnt = int(_row_float(row, "count", 1))
-    layout = row_to_layout(elem_type, row)
+    layout = element_layout(elem_type, row)
     if layout is None:
         return {}
 
@@ -451,16 +466,15 @@ def project_requirements(df_calc):
                 need[key] = need.get(key, 0) + qty
     return need
 
-def stock_shortages(df_calc):
+def stock_available():
     """
-    Сравнение със складовата наличност: (не стигат [(ключ, нужни, на склад)], няма ги в склада [(ключ, нужни)]).
-    Редовете в склада с един ключ се събират (H8 зелени + сиви). Празна наличност не се проверява;
-    без нито една въведена наличност - няма предупреждения.
+    Въведената наличност по stock_key: ({ключ: наличност}, всички ключове в склада). Редовете с един ключ
+    се събират (H8 зелени + сиви); празна наличност не се брои.
     """
     stock_df = st.session_state.get("stock_df")
-    if stock_df is None or df_calc.empty:
-        return [], []
     available, listed = {}, set()
+    if stock_df is None:
+        return available, listed
     for _, row in stock_df.iterrows():
         key = stock_key(row.get("Елемент", ""))
         if not key:
@@ -469,6 +483,90 @@ def stock_shortages(df_calc):
         qty = pd.to_numeric(row.get("Остава"), errors="coerce")
         if pd.notna(qty):
             available[key] = available.get(key, 0) + float(qty)
+    return available, listed
+
+def update_stock_plan(df_calc):
+    """
+    „Редене според складовата наличност“ (stock_layout.py): разположенията на всички елементи според склада,
+    в st.session_state["stock_plan"]; без отметката или без въведена наличност - празно (алгоритъмът).
+    Смята се наново само при промяна на таблицата, наличността или отметката.
+    """
+    on = bool(st.session_state.get("stock_layout_on")) and not df_calc.empty
+    stock_df = st.session_state.get("stock_df")
+    signature = (df_calc.to_json(), None if stock_df is None else stock_df.to_json()) if on else None
+    if st.session_state.get("stock_plan_signature", None) == signature and "stock_plan" in st.session_state:
+        return
+    st.session_state.pop("excel_bytes", None)  # старият Excel е с другото разположение
+    st.session_state["stock_plan_signature"] = signature
+    if not on:
+        st.session_state["stock_plan"] = {}
+        return
+    elements, index = [], {}
+    for _, row in df_calc.iterrows():
+        elem_type = str(row.get("type", "wall"))
+        try:
+            layout = row_to_layout(elem_type, row)
+        except Exception:
+            continue  # грешен ред - предупреждението за размерите е в таб 2
+        if layout is None:
+            continue
+        key = row_layout_key(elem_type, row)
+        cnt = int(_row_float(row, "count", 1))
+        if key in index:   # еднакви редове - един елемент, броят се събира
+            elements[index[key]][2] += cnt
+        else:
+            index[key] = len(elements)
+            elements.append([key, layout, cnt])
+    available, _ = stock_available()
+    st.session_state["stock_plan"] = plan_project([tuple(e) for e in elements], available, stock_key)
+    st.session_state["stock_plan_signature"] = signature
+
+def stock_plan_signature(elem_type, row):
+    """Разположението на реда според склада като текст - за кеша на прегледа; без промяна - празно."""
+    planned = st.session_state.get("stock_plan", {}).get(row_layout_key(elem_type, row))
+    if not planned or not (planned["replaced"] or planned["levels_changed"]):
+        return ""
+    layout = planned["layout"]
+    return repr((layout["height_levels"], [face["rows"] for face in layout["faces"]]))
+
+def show_stock_layout_notes(df_calc):
+    """Какво е сменено при „Редене според складовата наличност“ (табове 1 и 2)."""
+    if not st.session_state.get("stock_layout_on"):
+        return
+    plan = st.session_state.get("stock_plan", {})
+    if not plan:
+        st.info(t("ℹ️ Редене според складовата наличност: няма въведена наличност - панелите са по алгоритъма."))
+        return
+    names = {}
+    for _, row in df_calc.iterrows():
+        elem_type = str(row.get("type", "wall"))
+        names.setdefault(row_layout_key(elem_type, row), []).append(format_element_label(elem_type, row.get("name", "")))
+    lines = []
+    for key, result in plan.items():
+        label = ", ".join(names.get(key, []))
+        if result["levels_changed"]:
+            levels = " + ".join(str(h) for h in result["layout"]["height_levels"])
+            lines.append(t("- **{e}**: пренареден по височина - {levels} см", e=label, levels=levels))
+        moved = {}
+        for old, new, qty in result["replaced"]:
+            item = (old, " + ".join(new))
+            moved[item] = moved.get(item, 0) + qty
+        for (old, new), qty in moved.items():
+            lines.append(t("- **{e}**: {old} → {new} ({n} места)", e=label, old=t_item(old), new=t_item(new), n=qty))
+    if lines:
+        st.info(t("🔁 Редене според складовата наличност - сменени панели:") + "\n" + "\n".join(lines))
+    else:
+        st.info(t("✅ Редене според складовата наличност: всички панели по алгоритъма са налични."))
+
+def stock_shortages(df_calc):
+    """
+    Сравнение със складовата наличност: (не стигат [(ключ, нужни, на склад)], няма ги в склада [(ключ, нужни)]).
+    Редовете в склада с един ключ се събират (H8 зелени + сиви). Празна наличност не се проверява;
+    без нито една въведена наличност - няма предупреждения.
+    """
+    if st.session_state.get("stock_df") is None or df_calc.empty:
+        return [], []
+    available, listed = stock_available()
     if not available:
         return [], []
     need = project_requirements(df_calc)
@@ -498,13 +596,13 @@ def element_dims_and_area(elem_type, row):
     t = _row_float(row, "thickness_cm", 25)
     if elem_type not in ("column", "wall", "l_wall", "u_wall", "t_wall"):
         return "", 0.0
-    panels = row_to_layout(elem_type, row)
+    panels = element_layout(elem_type, row)
     hp = panel_height_cm(panels)  # H в надписа - височината на панелите (262 -> 265)
     panel_area = sum(sum(widths) * h_val for face in panels["faces"]
                      for h_val, widths in zip(panels["height_levels"], face["rows"])) / 10000.0
     if elem_type in ("l_wall", "u_wall", "t_wall"):
         # с „Дебелина стена A / B / C“: една дебелина (B=30 см) или по стени (стена A дебелина 30 см, ...)
-        layout = row_to_layout(elem_type, row)
+        layout = element_layout(elem_type, row)
         t = layout["dims"]["t1"]
         b_str = f"B={t:g} см" if thickness_label(layout).startswith(dt("дебелина")) else thickness_label(layout)
     if elem_type == "column":
@@ -546,7 +644,7 @@ def build_drawing_elements(df):
     for _, row in df.iterrows():
         elem_type = str(row.get("type", "wall"))
         name = str(row.get("name", "Елемент"))
-        layout = row_to_layout(elem_type, row)
+        layout = element_layout(elem_type, row)
         if layout is None:
             continue
         elem_bom = dict(get_element_teko_panels(elem_type, row))
@@ -563,19 +661,19 @@ def build_drawing_elements(df):
 
 # === Преглед на елементите под таблицата ===
 @st.cache_data(show_spinner=False, max_entries=300)
-def preview_top_png(row_items):
-    """Изгледът отгоре (PNG) на реда; кешира се по стойностите на реда."""
+def preview_top_png(row_items, plan_sig=""):
+    """Изгледът отгоре (PNG) на реда; кешира се по стойностите на реда и разположението според склада."""
     row = dict(row_items)
     elem_type = str(row.get("type", "wall"))
-    layout = row_to_layout(elem_type, row)
+    layout = element_layout(elem_type, row)
     return generate_top_view_buf(layout, format_element_label(elem_type, row.get("name", ""))).getvalue()
 
 @st.cache_data(show_spinner=False, max_entries=300)
-def preview_front_png(row_items):
-    """Изгледът отпред (PNG) на реда; кешира се по стойностите на реда."""
+def preview_front_png(row_items, plan_sig=""):
+    """Изгледът отпред (PNG) на реда; кешира се по стойностите на реда и разположението според склада."""
     row = dict(row_items)
     elem_type = str(row.get("type", "wall"))
-    layout = row_to_layout(elem_type, row)
+    layout = element_layout(elem_type, row)
     return generate_front_view_buf(layout, format_element_label(elem_type, row.get("name", ""))).getvalue()
 
 def preview_counts(elem_type, row):
@@ -606,9 +704,10 @@ def render_element_preview(idx, row):
         for w in check_element_dimensions(row):
             st.warning(w)
         row_items = tuple(row.items())
+        plan_sig = stock_plan_signature(elem_type, row)
         try:
             counts = preview_counts(elem_type, row)
-            top_png = preview_top_png(row_items)
+            top_png = preview_top_png(row_items, plan_sig)
         except Exception as e:
             st.error(t("Елементът не може да се начертае - проверете размерите ({error}).", error=e))
             return
@@ -616,7 +715,7 @@ def render_element_preview(idx, row):
                     + " ".join(f":gray-badge[{qty} {t(word)}]" for word, qty in counts))
         st.image(top_png, caption=t("Изглед отгоре"), width=700)
         if st.checkbox(t("Покажи изгледа отпред"), key=f"preview_front_{idx}"):
-            st.image(preview_front_png(row_items), caption=t("Изглед отпред"), width=900)
+            st.image(preview_front_png(row_items, plan_sig), caption=t("Изглед отпред"), width=900)
 
 def format_element_label(elem_type, name):
     name_str = str(name).strip() if name else ""
@@ -914,6 +1013,7 @@ def open_project(pid):
     st.session_state["blueprint_data"] = None
     h = project["std_height_cm"]
     st.session_state["std_height_cm"] = h
+    st.session_state["stock_layout_on"] = bool(project.get("stock_layout", False))
     choice = f"{h} см"
     if choice in STD_HEIGHT_CHOICES:
         st.session_state["std_height_choice_cm"] = choice
@@ -927,7 +1027,8 @@ def save_current_project():
     if pid in st.session_state["projects"]:
         projects_store.save_project(st.session_state["projects"], pid,
                                     elements=st.session_state["edited_df"],
-                                    std_height_cm=st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM))
+                                    std_height_cm=st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM),
+                                    stock_layout=st.session_state.get("stock_layout_on", False))
 
 def close_project():
     save_current_project()
@@ -1162,6 +1263,11 @@ with tab1:
             st.session_state.pop("elements_form_editor", None)  # таблицата се показва наново с новите височини
             st.success(t("✅ Височина {h} см е записана в {n} реда.", h=std_height, n=len(df_all)))
 
+    st.checkbox(t("📦 Редене според складовата наличност"), key="stock_layout_on", on_change=save_current_project,
+                help=t("Панелите се редят по алгоритъма. Когато някой панел не стига в склада (таб „Складова "
+                       "наличност“), той се заменя с най-малко по-малки налични панели в същия ред, а ако не може - "
+                       "елементът се пренарежда по височина (напр. 300 = 120 + 120 + 60). Най-големите елементи "
+                       "вземат от склада първи. Отметката се пази в проекта."))
     st.subheader(t("✏️ Таблица с вертикални кофражни елементи"))
     
     st.markdown("""
@@ -1235,8 +1341,11 @@ with tab1:
             st.rerun()
     if st.session_state.pop("table_saved", False):
         st.success(t("✅ Данните са запазени и преизчислени успешно! Можете да проверите резултатите в следващите табове."))
-    show_stock_warnings(fill_default_height(st.session_state["edited_df"],
-                                            st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM)))
+    df_saved = fill_default_height(st.session_state["edited_df"],
+                                   st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM))
+    update_stock_plan(df_saved)
+    show_stock_layout_notes(df_saved)
+    show_stock_warnings(df_saved)
 
     st.subheader(t("👁 Преглед на елементите"))
     st.caption(t("Прегледът показва записаните данни - обновява се след „Запази и Изчисли“. Полетата се отварят без "
@@ -1298,7 +1407,7 @@ def render_specification_tab(df_calc):
 
             total_a += area
             
-            h_breakdown_str = format_height_breakdown_text(h, row_to_layout(elem_type, row))
+            h_breakdown_str = format_height_breakdown_text(h, element_layout(elem_type, row))
 
             panels_dict = get_element_teko_panels(elem_type, row)
             for p_name, p_qty in panels_dict.items():
@@ -1367,6 +1476,7 @@ def render_specification_tab(df_calc):
             with st.expander(t("⚠️ Предупреждения за нестандартни размери в кофражните елементи"), expanded=True):
                 for w_msg in all_warnings:
                     st.markdown(w_msg)
+        show_stock_layout_notes(df_calc)
         show_stock_warnings(df_calc)
 
         st.subheader(t("📋 Спецификация на кофражните елементи и съответните панели"))
@@ -1558,6 +1668,7 @@ def render_stock_tab(df_calc):
 
 df_calc = fill_default_height(st.session_state["edited_df"],
                               st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM))
+update_stock_plan(df_calc)
 with tab2:
     render_specification_tab(df_calc)
 with tab3:
