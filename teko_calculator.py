@@ -286,9 +286,15 @@ def face_row_pieces(face, height_level_cm, row):
     extra = sum(board_cm(s) for s in face["segments"]) if face.get("stretch") else 0
     if is_compensator_row(height_level_cm):
         return [(row[0] + sum(boards) + extra, False, row[0])]
+    # seg_rows - панелите по сегменти, сменени според склада (stock_layout.py); без тях - алгоритъмът
+    seg_rows = face.get("seg_rows")
+    if seg_rows:
+        r = next((k for k, x in enumerate(face["rows"]) if x is row),
+                 next(k for k, x in enumerate(face["rows"]) if x == row))
     pieces = []
     for i, seg in enumerate(face["segments"]):
-        widths = [(w, False, w) for w in solve_width_cm(seg, height_level_cm)]
+        source = seg_rows[r][i] if seg_rows else solve_width_cm(seg, height_level_cm)
+        widths = [(w, False, w) for w in source]
         if boards[i]:
             widths.insert(max(0, len(widths) - 1), (boards[i], True, boards[i]))
         pieces += widths[::-1] if i in face["flip"] else widths
