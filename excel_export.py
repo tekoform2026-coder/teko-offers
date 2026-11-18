@@ -1,8 +1,8 @@
 """
 excel_export.py
 Количествена сметка (КСС) и чертежи в Excel за редактиране - по образеца reference/expected/12345676.xlsx:
-  - лист „Кол. сметка“: всички артикули в реда на офертата, количествата са формули към листовете на елементите;
-    колоните от „1. Оферта.xlsx“ - цена и наличност за попълване на ръка, размери, площ, тегло, общо, отстъпка;
+  - лист „Кол. сметка“ като „Цена BG“ в „1. Оферта – софтуер.xlsx“: артикулите в реда на офертата, количествата
+    са формули към листовете на елементите; цена на ръка, размери, площ, тегло, наличност от таб 5, общо, отстъпка;
   - лист „Елемент N“: изглед отгоре и изглед отпред на всяка страна от слети клетки (1 клетка = 5 см),
     всеки панел и ъгъл с дебела външна граница; вдясно от чертежите - пълната КСС за елемента
     (за 1 бр. и общо = за 1 бр. x брой);
@@ -13,6 +13,7 @@ import io
 import math
 
 from openpyxl import Workbook
+from openpyxl.formatting.rule import CellIsRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -43,84 +44,69 @@ HIDE_ZERO = "0;-0;;@"   # нулите в КСС не се показват
 FILL_COUNT = "FFF2CC"
 FILL_BOARD = "FFD966"   # дървена дъска (под 5 см) - отделна колона, само на чертежа, не в КСС
 
-# Редът на артикулите в КСС (като в офертата) и кодовете от сметката, които влизат във всеки ред
-KSS_ITEMS = [
-    ("Панел TEKO  TK 150/60", ["TK 150/60", "TK 150/60 (полегнал)"]),
-    ("Панел TEKO  TK 150/35", ["TK 150/35"]),
-    ("Панел TEKO  TK 150/30", ["TK 150/30"]),
-    ("Панел TEKO  TK 150/25", ["TK 150/25"]),
-    ("Панел TEKO  TK 150/20", ["TK 150/20"]),
-    ("Панел TEKO  TK 120/60", ["TK 120/60", "TK 120/60 (полегнал)"]),
-    ("Панел TEKO  TK 120/35", ["TK 120/35"]),
-    ("Панел TEKO  TK 120/30", ["TK 120/30"]),
-    ("Панел TEKO  TK 120/25", ["TK 120/25"]),
-    ("Панел TEKO  TK 120/20", ["TK 120/20"]),
-    ("Панел TEKO  TK 60/30", ["TK 60/30"]),
-    ("Панел TEKO  TK 60/25", ["TK 60/25"]),
-    ("Панел TEKO  TK 60/20", ["TK 60/20"]),
-    ("Панел TEKO  TK 60/15", ["TK 60/15"]),
-    ("Панел TEKO  TK 60/10", ["TK 60/10"]),
-    ("Ръкохватка H8", ["Ръкохватка H8"]),
-    ("TEKO КОМПЕНСАТОР  TC150/15", ["TC 150/15"]),
-    ("TEKO КОМПЕНСАТОР  TC150/10", ["TC 150/10"]),
-    ("TEKO КОМПЕНСАТОР  TC150/5", ["TC 150/5"]),
-    ("TEKO КОМПЕНСАТОР  TC120/15", ["TC 120/15"]),
-    ("TEKO КОМПЕНСАТОР  TC120/10", ["TC 120/10"]),
-    ("TEKO КОМПЕНСАТОР  TC120/5", ["TC 120/5"]),
-    ("ВЪТРЕШЕН ЪГЪЛ  IN150", ["Вътрешен ъгъл IN150"]),
-    ("ВЪТРЕШЕН ЪГЪЛ  IN120", ["Вътрешен ъгъл IN120"]),
-    ("ВЪНШЕН ЪГЪЛ  EX240", ["Външен ъгъл EX240"]),
-    ("ВЪНШЕН  СКОСЕН ЪГЪЛ EС240", []),
-    ("Ръкохватка  H4", ["Ръкохватка H4"]),
-    ("Подравняващ ригел   AW 100 поцинковани", ["Ригел AW 100"]),
-    ("Подравняващ ригел   AW 200 поцинковани", ["Ригел AW 200"]),
-    ("Подравняващ ригел   AW 300 поцинковани", ["Ригел AW 300"]),
-    ("Вертикализатор PP", ["Вертикализатор PP"]),
-    ("Панел TEKO  TK 40/25", ["TK 40/25"]),
-    ("Панел TEKO  TK 30/25", ["TK 30/25"]),
-    ("Панел TEKO  TK 20/20", ["TK 20/20"]),
-    ("Панел TEKO  TK 20/15", ["TK 20/15"]),
-    ("Панел TEKO  TK 15/15", ["TK 15/15"]),
-    ("Ръкохватка  H6", ["Ръкохватка H6"]),
-    ("Ръкохватка  H5", ["Ръкохватка H5"]),
-    ("Шпилка TR 12", ["Шпилка TR 12"]),
-    ("Гайка N12", ["Гайка N12"]),
+# Редът на артикулите в КСС и имената - като в „1. Оферта – софтуер.xlsx“ (потребителят, 18.11.2026);
+# кодовете от сметката, които влизат във всеки ред; размер (Dimensions) и покривна площ на 1 бр. [m2]
+KSS_TABLE = [
+    ("Панел TEKO TK 150/60", ["TK 150/60", "TK 150/60 (полегнал)"], "150/60/7,8", 0.9),
+    ("Панел TEKO TK 150/35", ["TK 150/35"], "150/35/7,8", 0.525),
+    ("Панел TEKO TK 150/30", ["TK 150/30"], "150/30/7,8", 0.45),
+    ("Панел TEKO TK 150/25", ["TK 150/25"], "150/25/7,8", 0.375),
+    ("Панел TEKO TK 150/20", ["TK 150/20"], "150/20/7,8", 0.3),
+    ("Панел TEKO TK 120/60", ["TK 120/60", "TK 120/60 (полегнал)"], "120/60/7,8", 0.72),
+    ("Панел TEKO TK 120/35", ["TK 120/35"], "120/35/7,8", 0.42),
+    ("Панел TEKO TK 120/30", ["TK 120/30"], "120/30/7,8", 0.36),
+    ("Панел TEKO TK 120/25", ["TK 120/25"], "120/25/7,8", 0.3),
+    ("Панел TEKO TK 120/20", ["TK 120/20"], "120/20/7,8", 0.24),
+    ("Панел TEKO TK 60/30", ["TK 60/30"], "60/30/7,8", 0.18),
+    ("Панел TEKO TK 60/25", ["TK 60/25"], "60/25/7,8", 0.15),
+    ("Панел TEKO TK 60/20", ["TK 60/20"], "60/20/7,8", 0.12),
+    ("Панел TEKO TK 60/15", ["TK 60/15"], "60/15/7,8", 0.09),   # във файла размерът е „30/15/7,8“, площта - на 60/15
+    ("Ръкохватка H8", ["Ръкохватка H8"], "8", None),
+    ("Компенсатор TC150/15", ["TC 150/15"], "150/7/15/7", 0.225),
+    ("Компенсатор TC150/10", ["TC 150/10"], "150/7/10/7", 0.15),
+    ("Компенсатор TC150/5", ["TC 150/5"], "150/6/5/6", 0.075),
+    ("Компенсатор TC120/15", ["TC 120/15"], "120/7/15/7", 0.18),
+    ("Компенсатор TC120/10", ["TC 120/10"], "120/7/10/7", 0.12),
+    ("Компенсатор TC120/5", ["TC 120/5"], "120/6/5/6", 0.06),
+    ("Вътрешен ъгъл IN150", ["Вътрешен ъгъл IN150"], "150/10/10", 0.3),
+    ("Вътрешен ъгъл IN120", ["Вътрешен ъгъл IN120"], "120/10/10", 0.24),
+    ("Външен ъгъл EX240", ["Външен ъгъл EX240"], "240/7/7", None),
+    ("Ръкохватка H4", ["Ръкохватка H4"], "4,3", None),
+    ("Ригел AW 100", ["Ригел AW 100"], "100", None),
+    ("Ригел AW 200", ["Ригел AW 200"], "200", None),
+    ("Ригел AW 300", ["Ригел AW 300"], "300", None),
+    ("Вертикализатор PP", ["Вертикализатор PP"], "210 - 350", None),
+    ("Шпилка d12 TR12", ["Шпилка TR 12"], "1,2/100", None),
+    ("Гайка d12/D100 N12", ["Гайка N12"], "10", None),
+    ("Панел TEKO TK 40/25", ["TK 40/25"], "40/25/7,8", 0.1),
+    ("Панел TEKO TK 30/25", ["TK 30/25"], "30/25/7,8", 0.075),
+    ("Панел TEKO TK 20/20", ["TK 20/20"], "20/20/7,8", 0.04),
+    ("Панел TEKO TK 20/15", ["TK 20/15"], "20/15/7,8", 0.03),
+    ("Панел TEKO TK 15/15", ["TK 15/15"], "15/15/7,8", 0.0225),
+    ("Ръкохватка H6", ["Ръкохватка H6"], "6,5", None),
+    ("Ръкохватка H5", ["Ръкохватка H5"], "5", None),
+    ("Фиксираща планка FP 40/40/45", [], "4/4/4,5", None),
+    ("Фиксираща планка FP 120/40", [], "12/4", None),
+    ("Съединител за ригел AC", [], "25/10", None),
+    ("Тапа 15", [], "1,5/1,2", None),
 ]
-_KSS_NAME_BY_CODE = {code: name for name, codes in KSS_ITEMS for code in codes}
+# Само когато програмата ги ползва - най-отдолу (TK 60/10 го има в спецификацията на TEKO, но не и в офертата)
+KSS_EXTRA = [("Панел TEKO TK 60/10", ["TK 60/10"], "60/10/7,8", 0.06)]
+KSS_ITEMS = [(name, codes) for name, codes, _dims, _area in KSS_TABLE]
+_KSS_NAME_BY_CODE = {code: name for name, codes, _d, _a in KSS_TABLE + KSS_EXTRA for code in codes}
+KSS_DIMENSIONS = {name: (dims, area) for name, _codes, dims, area in KSS_TABLE + KSS_EXTRA}
+KSS_WEIGHTS = {name: WEIGHTS_DB.get(codes[0] if codes else name) for name, codes, _d, _a in KSS_TABLE + KSS_EXTRA}
 
-
-def _kss_dimensions():
-    """Колона „Dimensions“ и покривна площ на 1 бр. [m2] по редовете на КСС (както в „1. Оферта.xlsx“)."""
-    dims = {}
-    for name, codes in KSS_ITEMS:
-        if codes and codes[0].startswith("TK "):
-            h, w = (int(x) for x in codes[0].split()[1].split("/"))
-            dims[name] = (f"{h}/{w}/7,8", round(h * w / 10000, 4))
-    dims.update({
-        "TEKO КОМПЕНСАТОР  TC150/15": ("150/7/15/7", 0.225), "TEKO КОМПЕНСАТОР  TC150/10": ("150/7/10/7", 0.15),
-        "TEKO КОМПЕНСАТОР  TC150/5": ("150/6/5/6", 0.075), "TEKO КОМПЕНСАТОР  TC120/15": ("120/7/15/7", 0.18),
-        "TEKO КОМПЕНСАТОР  TC120/10": ("120/7/10/7", 0.12), "TEKO КОМПЕНСАТОР  TC120/5": ("120/6/5/6", 0.06),
-        "ВЪТРЕШЕН ЪГЪЛ  IN150": ("150/10/10", 0.3), "ВЪТРЕШЕН ЪГЪЛ  IN120": ("120/10/10", 0.24),
-        "ВЪНШЕН ЪГЪЛ  EX240": ("240/7/7", None), "ВЪНШЕН  СКОСЕН ЪГЪЛ EС240": ("240/7/7/3,5", None),
-        "Ръкохватка H8": ("8", None), "Ръкохватка  H6": ("6,5", None), "Ръкохватка  H5": ("5", None),
-        "Ръкохватка  H4": ("4,3", None),
-        "Подравняващ ригел   AW 100 поцинковани": ("100", None),
-        "Подравняващ ригел   AW 200 поцинковани": ("200", None),
-        "Подравняващ ригел   AW 300 поцинковани": ("300", None),
-        "Вертикализатор PP": ("210 - 350", None), "Шпилка TR 12": ("1,2/100", None), "Гайка N12": ("10", None),
-    })
-    return dims
-
-
-KSS_DIMENSIONS = _kss_dimensions()
-KSS_WEIGHTS = {name: WEIGHTS_DB.get(codes[0]) for name, codes in KSS_ITEMS if codes}
-
-# Колоните на „Кол. сметка“ след „Кол.“ (като в „1. Оферта.xlsx“); M и O - мерните единици под „ОБЩО“
+# Колоните на „Кол. сметка“ след „Кол.“ (като в „1. Оферта – софтуер.xlsx“); M и O - мерните единици под „ОБЩО“
 KSS_OFFER_HEADERS = {"E": "Ед. Цена", "F": "Стойност", "G": "Ед. Цена с отстъпка", "H": "Стойност с отстъпка",
                      "I": "Dimensions,  [cm]", "J": "Покривна площ,  [m2]", "K": "Тегло, [кг]",
                      "L": "Тегло общо, [кг]", "N": "Кол,  [m2]", "P": "Наличност в склада", "Q": "Остават"}
-KSS_OFFER_WIDTHS = {"E": 9.3, "F": 14.6, "G": 9.7, "H": 13.7, "I": 12.3, "J": 8.1, "K": 7.3, "L": 9.4,
-                    "M": 2.1, "N": 9.1, "O": 2.0, "P": 9.1, "Q": 9.1}
+KSS_WIDTHS = {"A": 1.9, "B": 34.3, "C": 7.4, "D": 8.9, "E": 9.3, "F": 14.6, "G": 9.7, "H": 13.7, "I": 12.3,
+              "J": 8.1, "K": 7.3, "L": 9.4, "M": 2.1, "N": 9.1, "O": 2.0, "P": 9.1, "Q": 9.1}
+FILL_DISCOUNT = "FDE9D9"   # „с отстъпка“ (G, H) - светло оранжево, като във файла
+FILL_H8 = "EBF1DE"         # редът на H8 - светло зелено, като във файла
+FILL_TOTAL = "FFC000"      # ОБЩО на „Стойност с отстъпка“ и „Тегло общо“
+EURO = r'#,##0.00 [$€-1]'
 MONEY = "#,##0.00;-#,##0.00;;@"
 
 TYPE_WORDS = {"column": "колона", "wall": "права стена", "l_wall": "L-стена",
@@ -567,104 +553,95 @@ def _element_sheet(wb, index, element):
 # ==========================================
 # КОЛИЧЕСТВЕНА СМЕТКА
 # ==========================================
-def _kss_sheet(ws, names, quantity):
-    """Лист КСС като „Кол. сметка“ в образеца: наименование, мярка, количество (формула или число)."""
-    ws.column_dimensions["A"].width = 19
-    ws.column_dimensions["B"].width = 41.43
-    ws.column_dimensions["C"].width = 7.43
-    ws.column_dimensions["D"].width = 9.86
-    ws.row_dimensions[4].height = 23.25
-    ws.row_dimensions[5].height = 45
-    ws.row_dimensions[6].height = 15.75
-    for col, value in (("B", "Елемент"), ("C", "Мярка"), ("D", "Кол.")):
-        ws[f"{col}5"] = dt(value)
-    ws["D6"] = f"[{dt('бр')}]"
-    for r in (5, 6):
-        for col in "BCD":
-            cell = ws[f"{col}{r}"]
-            cell.font = Font(size=12)
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            cell.border = BORDER_KSS
-
-    for i, name in enumerate(names):
-        r = 7 + i
-        ws.row_dimensions[r].height = 18
-        ws[f"B{r}"] = dt_item(name)
-        ws[f"C{r}"] = dt("бр")
-        qty = quantity(name)
-        if qty:
-            ws[f"D{r}"] = qty
-            ws[f"D{r}"].number_format = HIDE_ZERO
-        for col in "BCD":
-            cell = ws[f"{col}{r}"]
-            cell.font = Font(size=11)
-            cell.border = BORDER_KSS
-            if col != "B":
-                cell.alignment = Alignment(horizontal="center", vertical="center")
-            else:
-                cell.alignment = Alignment(vertical="center")
-    _kss_offer_columns(ws, 7, 6 + len(names), names)
-
-
-def _kss_offer_columns(ws, first, last, names):
+def _kss_sheet(ws, names, quantity, stock=None):
     """
-    Колоните от „1. Оферта.xlsx“ вдясно от „Кол.“ и редовете ОБЩО / ОТСТЪПКА под таблицата.
-    Цената, наличността и отстъпката % се попълват на ръка (жълти клетки) - в програмата няма цени и наличност.
+    „Кол. сметка“ като „Цена BG“ в „1. Оферта – софтуер.xlsx“ (потребителят, 18.11.2026): заглавия на ред 3,
+    артикулите от ред 4, после ОБЩО / ОТСТЪПКА. quantity(name) - количеството (формула към елементите или число);
+    stock - {наименование: наличност} от таб 5 (колона „Наличност в склада“).
+    Цената се попълва на ръка (жълта клетка) - в програмата няма цени; отстъпката % е формулата от файла.
     """
-    for col, width in KSS_OFFER_WIDTHS.items():
-        ws.column_dimensions[col].width = width
-    for col, title in KSS_OFFER_HEADERS.items():
-        cell = ws[f"{col}5"]
-        cell.value = dt(title)
-        cell.font = Font(size=10)
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        cell.border = BORDER_KSS
-        ws[f"{col}6"].border = BORDER_KSS
-
-    total = last + 2
+    first = 4
+    last = first + len(names) - 1
+    total = last + 1
     discount = f"$F${total + 1}"   # ОТСТЪПКА %
-    for r in range(first, last + 1):
-        name = names[r - first]   # на български - в клетката е преведеното име
+    stock = stock or {}
+    for col, width in KSS_WIDTHS.items():
+        ws.column_dimensions[col].width = width
+    ws.row_dimensions[2].height = 23.25
+    ws.row_dimensions[3].height = 45
+    headers = {"B": "Елемент", "C": "Мярка", "D": "Кол.", **KSS_OFFER_HEADERS}
+    for col, title in headers.items():
+        cell = ws[f"{col}3"]
+        cell.value = dt(title)
+        cell.font = Font(name="Calibri", size=12)
+        cell.alignment = Alignment(horizontal="left" if col == "B" else "center", vertical="center", wrap_text=True)
+        cell.border = BORDER_KSS
+
+    for r, name in enumerate(names, start=first):
+        ws.row_dimensions[r].height = 18
         dims, area = KSS_DIMENSIONS.get(name, (None, None))
         weight = KSS_WEIGHTS.get(name)
+        qty = stock.get(name)
         values = {
+            "B": dt_item(name), "C": dt("бр"), "D": quantity(name),
             "F": f'=IF(E{r}="","",N(D{r})*E{r})',
             "G": f'=IF(E{r}="","",ROUND(E{r}*(100-{discount})/100,2))',
             "H": f'=IF(E{r}="","",N(D{r})*G{r})',
             "I": dims, "J": area, "K": weight,
             "L": f'=IF(K{r}="","",N(D{r})*K{r})' if weight else None,
             "N": f'=IF(J{r}="","",N(D{r})*J{r})' if area else None,
-            "Q": f'=IF(P{r}="","",P{r}-N(D{r}))',
+            "P": qty, "Q": f'=IF(P{r}="","",P{r}-N(D{r}))',
         }
-        for col in "EFGHIJKLNPQ":
+        for col in "BCDEFGHIJKLNPQ":
             cell = ws[f"{col}{r}"]
             if values.get(col) is not None:
                 cell.value = values[col]
-            cell.font = Font(size=11)
+            cell.font = Font(name="Calibri", size=11 if col in "IJPQ" else 12)
             cell.border = BORDER_KSS
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            if col in "FHLNQ":
+            horizontal = "left" if col == "B" else "right" if col in "EFGHN" else "center"
+            cell.alignment = Alignment(horizontal=horizontal, vertical="center")
+            if col in "EFGHKLN":
                 cell.number_format = MONEY
-            if col in "EP":
-                cell.fill = PatternFill("solid", fgColor=FILL_COUNT)
+            elif col in "DPQ":
+                cell.number_format = HIDE_ZERO
+            if col == "E":
+                cell.fill = PatternFill("solid", fgColor=FILL_COUNT)   # цената - на ръка
+            elif col in "GH":
+                cell.fill = PatternFill("solid", fgColor=FILL_DISCOUNT)
+            elif name == "Ръкохватка H8":
+                cell.fill = PatternFill("solid", fgColor=FILL_H8)
+    # недостиг в склада - червено, както във файла
+    ws.conditional_formatting.add(f"Q{first}:Q{last}", CellIsRule(
+        operator="lessThan", formula=["0"], font=Font(color="9C0006"),
+        fill=PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")))
 
     rows = [("ОБЩО", {"F": f"=SUM(F{first}:F{last})", "H": f"=SUM(H{first}:H{last})",
                       "L": f"=SUM(L{first}:L{last})", "M": "kg", "N": f"=SUM(N{first}:N{last})", "O": "m2"}),
-            ("ОТСТЪПКА %", {"F": 0}),
-            ("ОТСТЪПКА СТОЙНОСТ", {"F": f"=ROUND(F{total}*{discount}/100,2)", "L": f"=N{total}*0.1", "M": dt("м3"),
-                                   "N": dt("Приблизителен обем 10м2 - 1 м3")}),
-            ("ОБЩО БЕЗ ДДС", {"F": f"=ROUND(F{total}-F{total + 2},2)", "H": f"=H{total}-H{total + 2}"})]
+            # отстъпката % - по общата стойност и площта, както във файла
+            ("ОТСТЪПКА %", {"F": f"=ROUND(IF(N{total}>5,((F{total}+N{total}*111+5000)/2-5000)*0.0001+3,0),2)"}),
+            ("ОТСТЪПКА СТОЙНОСТ", {"F": f"=ROUND(F{total}*{discount}/100,2)"}),
+            ("ОБЩО БЕЗ ДДС", {"F": f"=ROUND(F{total}-F{total + 2},2)", "H": f"=H{total}"})]
     for i, (label, cells) in enumerate(rows):
         r = total + i
+        ws.row_dimensions[r].height = 20.25
         ws[f"B{r}"] = dt(label)
-        ws[f"B{r}"].font = Font(size=11, bold=True)
+        for col in "BCDEFGH":
+            ws[f"{col}{r}"].border = BORDER_KSS
+        for col in "IJKL" if i == 0 else "":
+            ws[f"{col}{r}"].border = BORDER_KSS
+        ws[f"N{r}"].border = BORDER_KSS if i == 0 else Border()
+        for col in "BCDEFGHIJKLMNO":
+            ws[f"{col}{r}"].font = Font(name="Calibri", size=12, bold=True)
         for col, value in cells.items():
             cell = ws[f"{col}{r}"]
             cell.value = value
-            cell.font = Font(size=11, bold=col in "FHLN")
-            if str(value).startswith("="):
+            cell.alignment = Alignment(horizontal="right", vertical="center")
+            if col in "FH":
+                cell.number_format = "0.00" if label == "ОТСТЪПКА %" else EURO
+            elif col in "LN":
                 cell.number_format = "#,##0.00"
-    ws[f"F{total + 1}"].fill = PatternFill("solid", fgColor=FILL_COUNT)
+    for col in "HL":
+        ws[f"{col}{total}"].fill = PatternFill("solid", fgColor=FILL_TOTAL)
 
     # печат: хоризонтално, една страница по ширина
     ws.page_setup.orientation = "landscape"
@@ -713,9 +690,10 @@ def _palette_sheet(wb):
 # ==========================================
 # ГЛАВНА ФУНКЦИЯ
 # ==========================================
-def generate_excel(elements):
+def generate_excel(elements, stock=None):
     """
     elements: [{"name", "count", "layout", "bom"}] - bom е сметката на елемента, умножена по броя.
+    stock: {наименование в КСС: наличност} от таб 5 - колона „Наличност в склада“ (без него - празна).
     Връща BytesIO с .xlsx.
     """
     wb = Workbook()
@@ -732,7 +710,7 @@ def generate_excel(elements):
         sources = [f"'{sheet}'!{refs[name]}" for sheet, refs in element_refs if name in refs]
         return f"=SUM({','.join(sources)})" if sources else None
 
-    _kss_sheet(kss, [name for name, _codes in KSS_ITEMS] + extra, formula)
+    _kss_sheet(kss, [name for name, _codes in KSS_ITEMS] + extra, formula, stock)
     _palette_sheet(wb)
     wb.calculation.fullCalcOnLoad = True
 
@@ -746,26 +724,56 @@ def generate_excel(elements):
 # СКЛАДОВА НАЛИЧНОСТ (таб 5)
 # ==========================================
 STOCK_SHEET_TITLE = "Складова наличност"
-STOCK_HEADERS = ["Елемент", "Мярка", "Остава"]
+STOCK_HEADERS = ["Елемент", "Мярка", "Остава"]   # колоните в данните и в архива
+# „Остава“ се показва като „Наличност в склада“ (като в „1. Оферта – софтуер.xlsx“); при зареждане се приемат
+# и старото заглавие, и „Наличност в слада“ (с грешката от файла)
+STOCK_QTY_HEADERS = ("Остава", "Наличност в склада", "Наличност в слада")
+STOCK_NEED = "Нужно за проекта"
 
 
-def stock_to_excel(stock_df):
-    """Наличността в Excel като „1. Наличности.xlsx“: заглавията на ред 3 в колони B-D. Връща BytesIO."""
+def _blank(value):
+    return value is None or (isinstance(value, float) and math.isnan(value))
+
+
+def stock_to_excel(stock_df, need=None):
+    """
+    Наличността в Excel като „Цена BG“ в „1. Оферта – софтуер.xlsx“ (потребителят, 18.11.2026): заглавия на
+    ред 3 в B-F - Елемент, Мярка, Наличност в склада, Нужно за проекта, Остават (= наличност - нужно; червено
+    при недостиг). need - нужните бройки за отворения проект по реда на таблицата (без проект - празни).
+    Връща BytesIO.
+    """
     wb = Workbook()
     ws = wb.active
     ws.title = dt(STOCK_SHEET_TITLE)
-    for col, (header, width) in enumerate(zip(STOCK_HEADERS, (34, 10, 12)), start=2):
+    ws.column_dimensions["A"].width = 1.9
+    ws.row_dimensions[3].height = 45
+    headers = ["Елемент", "Мярка", "Наличност в склада", STOCK_NEED, "Остават"]
+    for col, (header, width) in enumerate(zip(headers, (34.3, 7.4, 11, 11, 11)), start=2):
         cell = ws.cell(row=3, column=col, value=dt(header))
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill("solid", fgColor=FILL_HEADER)
+        cell.font = Font(name="Calibri", size=12)
+        cell.alignment = Alignment(horizontal="left" if col == 2 else "center", vertical="center", wrap_text=True)
         cell.border = BORDER_KSS
         ws.column_dimensions[get_column_letter(col)].width = width
-    for r, rec in enumerate(stock_df.to_dict("records"), start=4):
-        for col, header in enumerate(STOCK_HEADERS, start=2):
-            value = rec.get(header)
-            if value is None or (isinstance(value, float) and math.isnan(value)):
-                value = None
-            ws.cell(row=r, column=col, value=value).border = BORDER_KSS
+    need = list(need) if need is not None else []
+    last = 3
+    for i, rec in enumerate(stock_df.to_dict("records")):
+        r = 4 + i
+        last = r
+        ws.row_dimensions[r].height = 18
+        qty = rec.get("Остава")
+        values = [rec.get("Елемент"), rec.get("Мярка"), qty, need[i] if i < len(need) else None,
+                  f'=IF(D{r}="","",D{r}-N(E{r}))']
+        for col, value in enumerate(values, start=2):
+            cell = ws.cell(row=r, column=col, value=None if _blank(value) or value == 0 and col == 5 else value)
+            cell.font = Font(name="Calibri", size=12 if col < 4 else 11)
+            cell.border = BORDER_KSS
+            cell.alignment = Alignment(horizontal="left" if col == 2 else "center", vertical="center")
+            if col > 3:
+                cell.number_format = "General"   # 260, 16963,55 (с „0.##“ Excel пише „260,“)
+    if last > 3:
+        ws.conditional_formatting.add(f"F4:F{last}", CellIsRule(
+            operator="lessThan", formula=["0"], font=Font(color="9C0006"),
+            fill=PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")))
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -774,17 +782,21 @@ def stock_to_excel(stock_df):
 
 def stock_from_excel(file):
     """
-    Наличността от Excel, подреден като „1. Наличности.xlsx“: първият лист, редът със заглавие „Елемент“
-    (на всеки ред и колона), под него колоните „Елемент“, „Мярка“, „Остава“ (липсващата - празна).
-    Двойните интервали в имената се махат, редовете без име се пропускат.
+    Наличността от Excel: първият лист, редът със заглавие „Елемент“ (на всеки ред и колона), под него колоните
+    „Елемент“, „Мярка“ и наличността („Остава“ или „Наличност в склада“; липсващата - празна). Чете и
+    „1. Наличности.xlsx“, и „1. Оферта – софтуер.xlsx“ (лист „Цена BG“, колона P) - спира на „ОБЩО“.
+    Двойните интервали в имената се махат, редовете без име се пропускат, дробната наличност се закръгля надолу.
     """
     from openpyxl import load_workbook
     ws = load_workbook(file, data_only=True, read_only=True).worksheets[0]
     rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    # заглавията - на всеки от езиците на документите (файл, изтеглен на английски, се зарежда обратно)
+    variants = {"Елемент": {"Елемент", *TR["Елемент"]}, "Мярка": {"Мярка", *TR["Мярка"]},
+                "Остава": {v for h in STOCK_QTY_HEADERS for v in (h, *TR.get(h, ()))}}
+    stop = {"ОБЩО", *TR["ОБЩО"]}
     for i, row in enumerate(rows):
-        names = [str(v).strip() if v is not None else "" for v in row]
-        # заглавията - на всеки от езиците на документите (файл, изтеглен на английски, се зарежда обратно)
-        found = {h: next((j for j, n in enumerate(names) if n in (h, *TR[h])), None) for h in STOCK_HEADERS}
+        names = [" ".join(str(v).split()) if v is not None else "" for v in row]
+        found = {h: next((j for j, n in enumerate(names) if n in v), None) for h, v in variants.items()}
         if found["Елемент"] is not None:
             columns = {h: j for h, j in found.items() if j is not None}
             break
@@ -796,6 +808,8 @@ def stock_from_excel(file):
             j = columns.get(header)
             return row[j] if j is not None and j < len(row) else None
         name = " ".join(str(value("Елемент") or "").split())
+        if name in stop:
+            break
         if not name:
             continue
         unit = value("Мярка")
@@ -803,5 +817,6 @@ def stock_from_excel(file):
                         "Остава": value("Остава")})
     import pandas as pd
     stock_df = pd.DataFrame(records, columns=STOCK_HEADERS)
-    stock_df["Остава"] = pd.to_numeric(stock_df["Остава"], errors="coerce")
+    stock_df["Остава"] = pd.to_numeric(stock_df["Остава"], errors="coerce").apply(
+        lambda q: q if pd.isna(q) else float(math.floor(q + 1e-9)))
     return stock_df
