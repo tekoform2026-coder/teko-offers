@@ -14,7 +14,7 @@ from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 from gemini_agent2 import analyze_blueprint
 from drawing_generator import generate_pdf_drawings, generate_top_view_buf, generate_front_view_buf
-from excel_export import generate_excel, stock_to_excel, stock_from_excel
+from excel_export import KSS_EXTRA, KSS_ITEMS, generate_excel, stock_to_excel, stock_from_excel
 import projects_store
 from accessories_calculator import calculate_accessories
 from teko_calculator import (solve_height_cm, layout_element, count_panels, is_compensator_row, thickness_label,
@@ -189,7 +189,46 @@ WALL_THICKNESS_COLUMNS = {"column": 1, "wall": 1, "l_wall": 2, "t_wall": 2, "u_w
 TYPE_LABELS = {"column": "Колона", "wall": "Права стена", "l_wall": "L-стена", "u_wall": "П-стена", "t_wall": "T-стена"}
 TABLE_COLUMNS = ["type", "name", "count", "l1_cm", "thickness1_cm", "l2_cm", "thickness2_cm", "l3_cm",
                  "thickness3_cm", "height_cm", "closed_end_1", "closed_end_2", "closed_end_3"]
-DATA_COLUMNS = TABLE_COLUMNS + ["thickness_cm"]
+DATA_COLUMNS = TABLE_COLUMNS + ["thickness_cm", "drawing"]
+
+# Чертежи (потребителят, 18.11.2026): всеки разчетен чертеж добавя своите елементи в отделна таблица под
+# заглавие „Чертеж N: име на файла“; drawing е името на чертежа, празно - без чертеж (ръчно, стари проекти).
+# Сметките (табове 2-5) са за всички чертежи заедно.
+TABLE_EDITOR_KEY = "elements_form_editor"
+
+def drawing_name(value):
+    return "" if value is None or (not isinstance(value, str) and pd.isna(value)) else str(value).strip()
+
+def drawing_groups(df):
+    """[(име на чертежа, редовете му)] по реда на първата поява; "" - редовете без чертеж."""
+    if "drawing" not in df.columns:
+        return [("", df)] if len(df) else []
+    names = df["drawing"].map(drawing_name)
+    return [(name, df[names == name]) for name in dict.fromkeys(names)]
+
+def join_drawing_groups(groups):
+    """Обратно в една таблица: чертежите един след друг, всеки ред с името на своя чертеж."""
+    parts = []
+    for name, part in groups:
+        part = part.copy()
+        part["drawing"] = name or None
+        parts.append(part)
+    parts = [p for p in parts if len(p)]
+    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=DATA_COLUMNS)
+
+def unique_drawing_name(name, existing):
+    """„план.pdf“, а ако го има - „план.pdf (2)“, „план.pdf (3)“ ..."""
+    if name not in existing:
+        return name
+    n = 2
+    while f"{name} ({n})" in existing:
+        n += 1
+    return f"{name} ({n})"
+
+def reset_table_editors():
+    """Таблиците на чертежите се показват наново от записаните данни (след смяна на редовете или чертежите)."""
+    for key in [k for k in st.session_state if str(k).startswith(TABLE_EDITOR_KEY)]:
+        st.session_state.pop(key, None)
 
 def thickness_to_walls(df, migrate=True):
     """
@@ -355,58 +394,9 @@ def get_element_accessories(elem_type, row):
 # Складова наличност (таб 5): елементите в реда от „1. Наличности.xlsx“ (лист „Складова наличност“).
 # Таблицата се редактира в таб 5 и се пази в архива (лист „Наличност“, обща за всички проекти);
 # без архив - само докато страницата е отворена. Празен архив - този списък с празна наличност.
-STOCK_ITEMS = [
-    ("Панел TEKO TK 150/60", "бр."),
-    ("Панел TEKO TK 150/35", "бр."),
-    ("Панел TEKO TK 150/30", "бр."),
-    ("Панел TEKO TK 150/25", "бр."),
-    ("Панел TEKO TK 150/20", "бр."),
-    ("Панел TEKO TK 120/60", "бр."),
-    ("Панел TEKO TK 120/35", "бр."),
-    ("Панел TEKO TK 120/30", "бр."),
-    ("Панел TEKO TK 120/25", "бр."),
-    ("Панел TEKO TK 120/20", "бр."),
-    ("Панел TEKO TK 60/30", "бр."),
-    ("Панел TEKO TK 60/25", "бр."),
-    ("Панел TEKO TK 60/20", "бр."),
-    ("Панел TEKO TK 30/15", "бр."),
-    ("Панел TEKO TK 60/10", "бр."),
-    ("Ръкохватка H8 зелени", "бр."),
-    ("Ръкохватка H8 сиви", "бр."),
-    ("Компенсатор TC150/15", "бр."),
-    ("Компенсатор TC150/10", "бр."),
-    ("Компенсатор TC150/5", "бр."),
-    ("Компенсатор TC120/15", "бр."),
-    ("Компенсатор TC120/10", "бр."),
-    ("Компенсатор TC120/5", "бр."),
-    ("Вътрешен ъгъл IN150", "бр."),
-    ("Вътрешен ъгъл IN120", "бр."),
-    ("Външен ъгъл EX240", "бр."),
-    ("Външен скосен ъгъл EС240", "бр."),
-    ("Ръкохватка H4", "бр."),
-    ("Ригел AW 100 поцинкован", "бр."),
-    ("Ригел AW 200 поцинкован", "бр."),
-    ("Ригел AW 300 поцинкован", "бр."),
-    ("Вертикализатор PP", "бр."),
-    ("Шпилка d12 TR12", "бр."),
-    ("Гайка d12/D100 N12", "бр."),
-    ("Панел TEKO TK 60/40", "бр."),
-    ("Панел TEKO TK 60/30", "бр."),
-    ("Панел TEKO TK 60/25", "бр."),
-    ("Панел TEKO TK 60/20", "бр."),
-    ("Панел TEKO TK 40/25", "бр."),
-    ("Панел TEKO TK 30/25", "бр."),
-    ("Панел TEKO TK 20/20", "бр."),
-    ("Панел TEKO TK 20/15", "бр."),
-    ("Панел TEKO TK 15/15", "бр."),
-    ("Ръкохватка H6", "бр."),
-    ("Ръкохватка H5", "бр."),
-    ("Фиксираща планка FP 40/40/45", "бр."),
-    ("Фиксираща планка FP 120/40", "бр."),
-    ("Съединител за ригел AC", "бр."),
-    ("Ригел AW100 зелени", "бр."),
-    ("Ригел AW200 зелени", "бр."),
-]
+# Складът - същите артикули и ред като „Кол. сметка“ в Excel („1. Оферта – софтуер.xlsx“, потребителят 18.11.2026);
+# наличността не е в кода - зарежда се от Excel („📥 Зареди от Excel“) или се пише в таблицата
+STOCK_ITEMS = [(name, "бр") for name, _codes in KSS_ITEMS]
 STOCK_COLUMNS = ["Елемент", "Мярка", "Остава"]
 
 def default_stock_df():
@@ -430,6 +420,7 @@ def store_stock(stock_df):
     """Записва наличността в сесията и в архива; при грешка в архива - съобщение в таб 5."""
     st.session_state["stock_df"] = stock_df.reset_index(drop=True)
     st.session_state.pop("stock_error", None)
+    st.session_state.pop("excel_bytes", None)   # колоната „Наличност в склада“ в Excel - наново
     try:
         st.session_state["stock_modified"] = projects_store.save_stock(st.session_state["stock_df"])
     except Exception as exc:  # noqa: BLE001
@@ -557,6 +548,34 @@ def show_stock_layout_notes(df_calc):
         st.info(t("🔁 Редене според складовата наличност - сменени панели:") + "\n" + "\n".join(lines))
     else:
         st.info(t("✅ Редене според складовата наличност: всички панели по алгоритъма са налични."))
+
+def kss_stock():
+    """
+    Наличността за колоната „Наличност в склада“ в „Кол. сметка“ (Excel): {наименование в КСС: наличност}.
+    По името в склада, иначе по stock_key (FP, AC, Тапа нямат код - само по името).
+    """
+    stock_df = st.session_state.get("stock_df")
+    if stock_df is None:
+        return {}
+    by_name = {}
+    for _, row in stock_df.iterrows():
+        qty = pd.to_numeric(row.get("Остава"), errors="coerce")
+        if pd.notna(qty):
+            name = " ".join(str(row.get("Елемент", "")).split())
+            by_name[name] = by_name.get(name, 0) + float(qty)
+    available, _ = stock_available()
+    result = {}
+    for name in [n for n, _codes in KSS_ITEMS] + [n for n, *_rest in KSS_EXTRA]:
+        if name in by_name:
+            result[name] = by_name[name]
+        elif stock_key(name) in available:
+            result[name] = available[stock_key(name)]
+    return result
+
+def stock_need(stock_df, df_calc):
+    """„Нужно за проекта“ за всеки ред на склада (по stock_key; без проект или без код - празно)."""
+    need = project_requirements(df_calc) if not df_calc.empty else {}
+    return [need.get(stock_key(name)) or None for name in stock_df["Елемент"].fillna("")]
 
 def stock_shortages(df_calc):
     """
@@ -1008,8 +1027,9 @@ def open_project(pid):
     st.session_state["current_project"] = pid
     elements = project["elements"]
     st.session_state["edited_df"] = EMPTY_DF.copy() if elements is None else elements.copy()
-    for key in ("elements_form_editor", "excel_bytes", "delete_project_id"):
+    for key in ("excel_bytes", "delete_project_id", "drawing_notes", "delete_drawing"):
         st.session_state.pop(key, None)
+    reset_table_editors()
     st.session_state["blueprint_data"] = None
     h = project["std_height_cm"]
     st.session_state["std_height_cm"] = h
@@ -1147,8 +1167,93 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([t(label) for label in (
     "📦 Складова наличност"
 )])
 
+def element_column_config():
+    """Колоните на таблицата с елементите (една и съща за всеки чертеж)."""
+    return {
+        "type": st.column_config.SelectboxColumn(t("Тип елемент"), options=list(TYPE_LABELS), required=True, default="wall", width="auto",
+                                                 format_func=lambda code: t(TYPE_LABELS.get(code, code))),
+        "name": st.column_config.TextColumn(t("Наименование / Маркировка"), width="auto"),
+        "count": st.column_config.NumberColumn(t("Брой"), min_value=1, step=1, default=1, width="auto"),
+        "l1_cm": st.column_config.NumberColumn(t("Стена A (см)"), format="%g", width="auto",
+                                               help=t("При права стена и колона - дължината")),
+        "thickness1_cm": st.column_config.NumberColumn(t("Дебелина стена A (см)"), format="%g", width="auto"),
+        "l2_cm": st.column_config.NumberColumn(t("Стена B (см)"), format="%g", width="auto"),
+        "thickness2_cm": st.column_config.NumberColumn(t("Дебелина стена B (см)"), format="%g", width="auto",
+                                                       help=t("L-, П- и Т-стена; празна = като стена A "
+                                                              "(попълва се само когато е различна)")),
+        "l3_cm": st.column_config.NumberColumn(t("Стена C (см)"), format="%g", width="auto",
+                                               help=t("При Т-стена: от левия край на полката до лявото лице "
+                                                      "на реброто; празно = реброто е в средата")),
+        "thickness3_cm": st.column_config.NumberColumn(t("Дебелина стена C (см)"), format="%g", width="auto",
+                                                       help=t("Само за П-стена; празна = като стена A "
+                                                              "(попълва се само когато е различна)")),
+        "height_cm": st.column_config.NumberColumn(t("Височина (см)"), format="%g", width="auto"),
+        "closed_end_1": st.column_config.CheckboxColumn(t("Затворен край 1"), default=True, width="auto"),
+        "closed_end_2": st.column_config.CheckboxColumn(t("Затворен край 2"), default=True, width="auto"),
+        "closed_end_3": st.column_config.CheckboxColumn(t("Затворен край 3 (само T-стена)"), default=True, width="auto")
+    }
+
+def render_drawing_notes(box):
+    """
+    Забележките на AI (противоречия и несигурности в чертежа) - най-отгоре в таб 1, по чертежи, с по-малък шрифт.
+    Пазят се докато страницата е отворена.
+    """
+    notes = st.session_state.get("drawing_notes", {})
+    numbers = {name: i for i, (name, _part) in enumerate(drawing_groups(st.session_state["edited_df"]), 1)}
+    shown = [(name, items) for name, items in notes.items() if items and name in numbers]
+    if not shown:
+        return
+    with box:
+        st.markdown("<style>.st-key-drawing_notes_box [data-testid='stAlert'] p, "
+                    ".st-key-drawing_notes_box [data-testid='stAlert'] li {font-size: 13px; line-height: 1.35;}</style>",
+                    unsafe_allow_html=True)
+        for name, items in shown:
+            st.warning("**" + t("⚠️ Забележки на AI - Чертеж {i}: {name}", i=numbers[name], name=name) + "**\n"
+                       + "\n".join(f"- {t(note)}" for note in items))   # t() - само TRUNCATED_NOTE
+
+def render_drawing_manager(groups):
+    """Чертежите в проекта: преименуване и изтриване (с потвърждение). Незаписаните промени в таблиците се губят."""
+    with st.expander(t("📄 Чертежи в проекта ({n}) - преименуване и изтриване", n=len(groups))):
+        st.caption(t("Първо натиснете „💾 Запази и Изчисли“ - незаписаните промени в таблиците се губят."))
+        for i, (dname, part) in enumerate(groups):
+            if not dname:
+                continue
+            c_name, c_save, c_del = st.columns([4, 1, 1], vertical_alignment="bottom")
+            new_name = c_name.text_input(t("Чертеж {i} ({n} елемента)", i=i + 1, n=len(part)), value=dname,
+                                         key=f"drawing_name_{i}_{dname}")
+            if c_save.button(t("✏️ Преименувай"), key=f"rename_drawing_{i}", use_container_width=True):
+                others = [n for n, _p in groups if n != dname]
+                new_name = new_name.strip()
+                if not new_name or new_name in others:
+                    st.warning(t("Името е празно или вече има такъв чертеж."))
+                else:
+                    df = st.session_state["edited_df"]
+                    df.loc[df["drawing"].map(drawing_name) == dname, "drawing"] = new_name
+                    notes = st.session_state.get("drawing_notes", {})
+                    if dname in notes:
+                        notes[new_name] = notes.pop(dname)
+                    reset_table_editors()
+                    save_current_project()
+                    st.rerun()
+            if st.session_state.get("delete_drawing") == dname:
+                c_del.button(t("Отказ"), key=f"cancel_delete_drawing_{i}", use_container_width=True,
+                             on_click=lambda: st.session_state.pop("delete_drawing", None))
+                st.warning(t("Да се изтрият ли {n} елемента на „{name}“?", n=len(part), name=dname))
+                if st.button(t("🗑 Да, изтрий чертежа"), key=f"confirm_delete_drawing_{i}", type="primary"):
+                    st.session_state["edited_df"] = join_drawing_groups([g for g in groups if g[0] != dname])
+                    st.session_state.get("drawing_notes", {}).pop(dname, None)
+                    st.session_state.pop("delete_drawing", None)
+                    reset_table_editors()
+                    save_current_project()
+                    st.session_state.pop("excel_bytes", None)
+                    st.rerun()
+            elif c_del.button(t("🗑 Изтрий"), key=f"delete_drawing_{i}", use_container_width=True):
+                st.session_state["delete_drawing"] = dname
+                st.rerun()
+
 with tab1:
     st.header(t("1. Избор на начин за въвеждане на елементи"))
+    notes_box = st.container(key="drawing_notes_box")   # забележките на AI - най-отгоре (попълва се по-долу)
     
     input_mode = st.radio(
         t("Изберете режим на работа:"),
@@ -1193,6 +1298,22 @@ with tab1:
                     key="ai_model"
                 )
 
+                # Чертежът се добавя в отделна таблица под таблиците на вече разчетените (18.11.2026);
+                # повторно разчитане на същия файл - замяна на елементите му или нов чертеж
+                drawing = uploaded_file.name
+                existing = [name for name, _part in drawing_groups(st.session_state["edited_df"]) if name]
+                replace_drawing = False
+                if drawing in existing:
+                    choice = st.radio(t("Чертеж „{name}“ вече е разчетен в този проект:", name=drawing),
+                                      ["Замени елементите му", "Добави като нов чертеж"], format_func=t,
+                                      key="drawing_again")
+                    replace_drawing = choice == "Замени елементите му"
+                    if not replace_drawing:
+                        drawing = unique_drawing_name(drawing, existing)
+                elif existing:
+                    st.caption(t("Елементите ще се добавят като Чертеж {n} под вече разчетените.",
+                                 n=len(drawing_groups(st.session_state["edited_df"])) + 1))
+
                 if not api_key:
                     st.warning(t("⚠️ Моля, въведете Gemini API Key в страничното меню."))
                 else:
@@ -1208,7 +1329,8 @@ with tab1:
                         if processed_img:
                             with st.spinner(t("Извличане на вертикални кофражни елементи...")):
                                 try:
-                                    res = analyze_blueprint(processed_img, api_key, model_choice=selected_model)
+                                    res = analyze_blueprint(processed_img, api_key, model_choice=selected_model,
+                                                            notes_language=st.session_state.get("lang", "bg"))
                                     if isinstance(res, tuple):
                                         blueprint_data, used_model = res
                                     else:
@@ -1222,16 +1344,30 @@ with tab1:
                                     for col in DATA_COLUMNS:
                                         if col not in df_ai.columns:
                                             df_ai[col] = True if col in CLOSED_END_COLUMNS else None
-                                    st.session_state["edited_df"] = thickness_to_walls(df_ai)
-                                    st.success(t("✅ Готово! Разчетено с: **{model}**", model=used_model))
-                                    # противоречия и несигурности в чертежа - потребителят проверява таблицата
-                                    for note in blueprint_data.get("notes") or []:
-                                        st.warning(f"⚠️ {note}")
+                                    df_ai["drawing"] = drawing
+                                    groups = drawing_groups(st.session_state["edited_df"])
+                                    new_part = thickness_to_walls(df_ai)
+                                    if replace_drawing:   # на мястото на старите елементи на чертежа
+                                        groups = [(n, new_part if n == drawing else part) for n, part in groups]
+                                    else:
+                                        groups.append((drawing, new_part))
+                                    st.session_state["edited_df"] = join_drawing_groups(groups)
+                                    reset_table_editors()
+                                    save_current_project()   # платеното разчитане не се губи при F5
+                                    st.session_state.pop("excel_bytes", None)
+                                    st.success(t("✅ Готово! Разчетено с: **{model}**", model=used_model) + " " +
+                                               t("Чертеж „{name}“: {n} елемента - записани в проекта.",
+                                                 name=drawing, n=len(new_part)))
+                                    # противоречия и несигурности в чертежа - потребителят проверява таблицата;
+                                    # показват се най-отгоре в таб 1 (render_drawing_notes)
+                                    notes = list(blueprint_data.get("notes") or [])
+                                    st.session_state.setdefault("drawing_notes", {})[drawing] = notes
                                 except Exception as e:
                                     st.error(t("Грешка при анализа: {error}", error=e))
     else:
         st.subheader(t("⌨️ Ръчно въвеждане и управление в таблицата"))
         st.markdown(t(MANUAL_HELP_BG))
+    render_drawing_notes(notes_box)
 
     st.divider()
     st.subheader(t("📏 Стандартна височина на етажа"))
@@ -1260,7 +1396,7 @@ with tab1:
         else:
             df_all["height_cm"] = std_height
             st.session_state["edited_df"] = df_all
-            st.session_state.pop("elements_form_editor", None)  # таблицата се показва наново с новите височини
+            reset_table_editors()  # таблиците се показват наново с новите височини
             st.success(t("✅ Височина {h} см е записана в {n} реда.", h=std_height, n=len(df_all)))
 
     st.checkbox(t("📦 Редене според складовата наличност"), key="stock_layout_on", on_change=save_current_project,
@@ -1280,40 +1416,38 @@ with tab1:
         </style>
     """, unsafe_allow_html=True)
 
+    groups = drawing_groups(st.session_state["edited_df"]) or [("", st.session_state["edited_df"])]
+    named = any(name for name, _part in groups)
+    if named:
+        render_drawing_manager(groups)
     with st.form("manual_elements_form"):
-        edited_grid = st.data_editor(
-            st.session_state["edited_df"],
-            num_rows="delete",  # нов ред - само с „➕ Добави елемент“, без „+“ под всяка колона
-            column_config={
-                "type": st.column_config.SelectboxColumn(t("Тип елемент"), options=list(TYPE_LABELS), required=True, default="wall", width="auto",
-                                                         format_func=lambda code: t(TYPE_LABELS.get(code, code))),
-                "name": st.column_config.TextColumn(t("Наименование / Маркировка"), width="auto"),
-                "count": st.column_config.NumberColumn(t("Брой"), min_value=1, step=1, default=1, width="auto"),
-                "l1_cm": st.column_config.NumberColumn(t("Стена A (см)"), format="%g", width="auto",
-                                                       help=t("При права стена и колона - дължината")),
-                "thickness1_cm": st.column_config.NumberColumn(t("Дебелина стена A (см)"), format="%g", width="auto"),
-                "l2_cm": st.column_config.NumberColumn(t("Стена B (см)"), format="%g", width="auto"),
-                "thickness2_cm": st.column_config.NumberColumn(t("Дебелина стена B (см)"), format="%g", width="auto",
-                                                               help=t("L-, П- и Т-стена; празна = като стена A "
-                                                                      "(попълва се само когато е различна)")),
-                "l3_cm": st.column_config.NumberColumn(t("Стена C (см)"), format="%g", width="auto",
-                                                       help=t("При Т-стена: от левия край на полката до лявото лице "
-                                                              "на реброто; празно = реброто е в средата")),
-                "thickness3_cm": st.column_config.NumberColumn(t("Дебелина стена C (см)"), format="%g", width="auto",
-                                                               help=t("Само за П-стена; празна = като стена A "
-                                                                      "(попълва се само когато е различна)")),
-                "height_cm": st.column_config.NumberColumn(t("Височина (см)"), format="%g", width="auto"),
-                "closed_end_1": st.column_config.CheckboxColumn(t("Затворен край 1"), default=True, width="auto"),
-                "closed_end_2": st.column_config.CheckboxColumn(t("Затворен край 2"), default=True, width="auto"),
-                "closed_end_3": st.column_config.CheckboxColumn(t("Затворен край 3 (само T-стена)"), default=True, width="auto")
-            },
-            column_order=TABLE_COLUMNS,
-            hide_index=True,
-            use_container_width=True,
-            key="elements_form_editor"
-        )
-        
+        edited_groups = []
+        for i, (dname, part) in enumerate(groups):
+            if named:   # отделна таблица за всеки чертеж, под заглавие
+                title = (t("📄 Чертеж {i}: {name}", i=i + 1, name=dname) if dname
+                         else t("📄 Без чертеж (въведени ръчно)"))
+                st.markdown(f"#### {title}")
+                st.caption(t("{n} елемента", n=len(part)))
+            edited = st.data_editor(
+                part,
+                num_rows="delete",  # нов ред - само с „➕ Добави елемент“, без „+“ под всяка колона
+                column_config=element_column_config(),
+                column_order=TABLE_COLUMNS,
+                hide_index=True,
+                use_container_width=True,
+                key=f"{TABLE_EDITOR_KEY}_{i}"
+            )
+            edited_groups.append((dname, edited))
+
         col_new_type, col_add = st.columns([2, 1], vertical_alignment="bottom")
+        if named:
+            col_new_type, col_drawing, col_add = st.columns([2, 2, 1], vertical_alignment="bottom")
+            target = col_drawing.selectbox(
+                t("Към кой чертеж?"), options=list(range(len(groups))), index=len(groups) - 1,
+                format_func=lambda i: (t("Чертеж {i}: {name}", i=i + 1, name=groups[i][0]) if groups[i][0]
+                                       else t("Без чертеж (въведени ръчно)")), key="new_element_drawing")
+        else:
+            target = 0
         new_type = col_new_type.selectbox(t("Какъв елемент да се добави?"), options=list(TYPE_LABELS), index=None,
                                           format_func=lambda code: t(TYPE_LABELS.get(code, code)),
                                           placeholder=t("Изберете тип елемент"), key="new_element_type")
@@ -1326,16 +1460,18 @@ with tab1:
             st.warning(t("Изберете тип елемент и натиснете отново „➕ Добави елемент“."))
         elif add_btn or submit_btn:
             if add_btn:
-                # новият ред - с всички колони на таблицата, иначе празните (дължини, височина ...) изчезват
+                # новият ред - с всички колони на таблицата, иначе празните (дължини, височина ...) изчезват;
+                # в края на избрания чертеж
+                dname, part = edited_groups[target]
                 new_row = pd.DataFrame([{"type": new_type, "name": "", "count": 1, "closed_end_1": True, "closed_end_2": True,
-                                         "closed_end_3": True}], columns=edited_grid.columns)
-                edited_grid = pd.concat([edited_grid, new_row], ignore_index=True)
-                st.session_state.pop("elements_form_editor", None)  # таблицата се показва наново с новия ред
+                                         "closed_end_3": True}], columns=part.columns)
+                edited_groups[target] = (dname, pd.concat([part, new_row], ignore_index=True))
                 st.session_state.pop("new_element_type", None)  # изборът се изчиства за следващия елемент
-            st.session_state["edited_df"] = thickness_to_walls(edited_grid, migrate=False)
+            reset_table_editors()  # таблиците се показват наново с новия ред
+            st.session_state["edited_df"] = thickness_to_walls(join_drawing_groups(edited_groups), migrate=False)
             save_current_project()
             st.session_state.pop("excel_bytes", None)  # старият Excel вече не отговаря на таблицата
-            # Таблицата (num_rows="dynamic") се разпознава по данните си: без презареждане следващата промяна
+            # Таблицата се разпознава по данните си: без презареждане следващата промяна
             # се прави в старата таблица и при следващия запис се губи (връщат се предишните стойности).
             st.session_state["table_saved"] = True
             st.rerun()
@@ -1355,8 +1491,14 @@ with tab1:
                                      st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM))
     if df_preview.empty:
         st.info(t("ℹ️ Няма записани елементи за преглед."))
-    for idx, row in df_preview.iterrows():
-        render_element_preview(idx, row)
+    preview_groups = drawing_groups(df_preview)
+    preview_named = any(name for name, _part in preview_groups)
+    for i, (dname, part) in enumerate(preview_groups):
+        if preview_named:   # по чертежи, както таблиците
+            st.markdown("**" + (t("📄 Чертеж {i}: {name}", i=i + 1, name=dname) if dname
+                                else t("📄 Без чертеж (въведени ръчно)")) + "**")
+        for idx, row in part.iterrows():
+            render_element_preview(idx, row)
 
 # Windows не рисува флагчета-емоджи (показва „DE“) - шрифт само с флагчетата, за падащите менюта; без него
 # (напр. без интернет) остават двете букви
@@ -1501,7 +1643,8 @@ def render_specification_tab(df_calc):
         excel_lang = doc_language_select("doc_lang_excel", on_change=lambda: st.session_state.pop("excel_bytes", None))
         if st.button(t("📊 Създай Excel (КСС и чертежи)"), key="make_excel"):
             with st.spinner(t("Генериране на Excel...")), document_language(excel_lang):
-                st.session_state["excel_bytes"] = generate_excel(build_drawing_elements(df_calc)).getvalue()
+                st.session_state["excel_bytes"] = generate_excel(build_drawing_elements(df_calc),
+                                                                 kss_stock()).getvalue()
         if st.session_state.get("excel_bytes"):
             st.download_button(
                 label=t("📥 Изтегли КСС и чертежи (Excel .xlsx)"),
@@ -1622,17 +1765,28 @@ def render_stock_tab(df_calc):
                      "изтрива се с отметка вляво и кошчето. „💾 Запази наличността“ обновява предупрежденията в "
                      "табовете. Без архив (няма ключ за Google в secrets) наличността се губи при презареждане."))
     with st.form("stock_form"):
-        # Елемент - колкото най-дългото име, Мярка - колкото „комплект“, Остава - както преди (~360 px).
+        # Като „1. Оферта – софтуер.xlsx“: Наличност в склада, Нужно за проекта (отвореният проект) и Остават -
+        # последните две се смятат и не се редактират; недостигът е в червено.
         # Без разтягане на таблицата: при разтягане Streamlit разпределя ширината и не спазва колоните.
+        shown = st.session_state["stock_df"].copy()
+        shown["Нужно"] = pd.Series(stock_need(shown, df_calc), index=shown.index, dtype="float")
+        shown["Остават"] = pd.to_numeric(shown["Остава"], errors="coerce") - shown["Нужно"].fillna(0)
+        red = lambda v: "color: #9C0006; background-color: #FFC7CE" if pd.notna(v) and v < 0 else ""
+        # Styler-ът показва числата по своему (260.000000, nan) - затова и форматът: 260, 16963.55, празно
+        number = lambda v: "" if pd.isna(v) else f"{v:.10g}"
+        styled = shown.style.map(red, subset=["Остават"]).format(number, subset=["Остава", "Нужно", "Остават"])
         edited_stock = st.data_editor(
-            st.session_state["stock_df"], num_rows="dynamic", hide_index=True, width="content",
-            height=35 * (len(st.session_state["stock_df"]) + 2) + 3,
+            styled, num_rows="dynamic", hide_index=True, width="content",
+            height=35 * (len(shown) + 2) + 3,
             column_config={"Елемент": st.column_config.TextColumn(t("Елемент"), width=240),
                            "Мярка": st.column_config.TextColumn(t("Мярка"), width=80),
-                           "Остава": st.column_config.NumberColumn(t("Остава"), width=360, min_value=0, format="%g")},
-            column_order=STOCK_COLUMNS, key="stock_editor")
+                           "Остава": st.column_config.NumberColumn(t("Наличност в склада"), width=140, min_value=0,
+                                                                   format="%g"),
+                           "Нужно": st.column_config.NumberColumn(t("Нужно за проекта"), width=140, format="%g"),
+                           "Остават": st.column_config.NumberColumn(t("Остават"), width=140, format="%g")},
+            column_order=STOCK_COLUMNS + ["Нужно", "Остават"], disabled=["Нужно", "Остават"], key="stock_editor")
         if st.form_submit_button(t("💾 Запази наличността"), type="primary", key="save_stock"):
-            store_stock(edited_stock)
+            store_stock(edited_stock[STOCK_COLUMNS])
             # както в таб 1: таблицата се показва наново от записаните данни, иначе следващата промяна се губи
             st.session_state.pop("stock_editor", None)
             st.rerun()  # цялата страница - предупрежденията в табове 1 и 2 също се обновяват
@@ -1640,14 +1794,15 @@ def render_stock_tab(df_calc):
     st.subheader("Excel")
     stock_lang = doc_language_select("doc_lang_stock")
     with document_language(stock_lang):  # заглавията на файла; имената в склада са данни - както са въведени
-        stock_xlsx = stock_to_excel(st.session_state["stock_df"]).getvalue()
+        stock_xlsx = stock_to_excel(st.session_state["stock_df"],
+                                    stock_need(st.session_state["stock_df"], df_calc)).getvalue()
     st.download_button(t("📤 Изтегли като Excel"), data=stock_xlsx,
                        file_name="Складова_наличност.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                       help=t("Записаната наличност (без незаписаните промени в таблицата), подредена като "
-                              "„1. Наличности.xlsx“."), key="download_stock")
-    uploaded = st.file_uploader(t("Excel с наличност (подреден като „1. Наличности.xlsx“ - колони Елемент, Мярка, "
-                                  "Остава):"), type=["xlsx"], key="stock_upload")
+                       help=t("Записаната наличност (без незаписаните промени в таблицата) и нужното за проекта, "
+                              "подредени като „1. Оферта – софтуер.xlsx“."), key="download_stock")
+    uploaded = st.file_uploader(t("Excel с наличност („1. Оферта – софтуер.xlsx“ или „1. Наличности.xlsx“ - колони "
+                                  "Елемент, Мярка, Наличност в склада):"), type=["xlsx"], key="stock_upload")
     if uploaded is not None and st.button(t("📥 Зареди от Excel"), key="load_stock",
                                           help=t("Заменя цялата таблица с тази от файла и я записва.")):
         try:
