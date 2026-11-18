@@ -8,6 +8,10 @@ from google.genai import types
 TRUNCATED_NOTE = ("Отговорът на Gemini е отрязан - чертежът е твърде голям. Разделете го на части или "
                   "опитайте с по-малко страници.")
 
+# Езикът на бележките ("notes") - езикът на екрана в app.py (потребителят, 18.11.2026); иначе Gemini пише
+# на езика на чертежа (напр. македонски)
+NOTES_LANGUAGES = {"bg": "български", "en": "английски (English)"}   # „на английски (English) език“
+
 
 def _is_max_tokens(response):
     """Gemini е спрял отговора, защото е стигнал ограничението на дължината."""
@@ -50,7 +54,7 @@ def _open_image(image_input):
     return Image.open(image_input)
 
 
-def analyze_blueprint(image_input, api_key, model_choice=None):
+def analyze_blueprint(image_input, api_key, model_choice=None, notes_language="bg"):
     # Едно изображение или списък (всички страници на PDF-а)
     if isinstance(image_input, (list, tuple)):
         images = [_open_image(i) for i in image_input]
@@ -131,6 +135,8 @@ def analyze_blueprint(image_input, api_key, model_choice=None):
     - Ако размерите на един елемент се различават в две таблици или изгледи, вземи тези от подробния чертеж
       на елемента (с размерни линии) и запиши противоречието в "notes".
     """
+    prompt += (f'\n    Пиши всички "notes" на {NOTES_LANGUAGES.get(notes_language, NOTES_LANGUAGES["bg"])} език, '
+               'независимо от езика на чертежа. Имената на елементите ("name") оставяй както са в чертежа.\n')
 
     # Стандартен списък с резервни модели
     fallback_models = [
@@ -211,6 +217,6 @@ def analyze_blueprint(image_input, api_key, model_choice=None):
         parsed_json["notes"] = [TRUNCATED_NOTE] + ([notes] if isinstance(notes, str) else list(notes))
     return parsed_json, used_model
 
-def analyze_blueprint_with_agent2(image_input, api_key, model_choice=None):
-    res, _ = analyze_blueprint(image_input, api_key, model_choice=model_choice)
+def analyze_blueprint_with_agent2(image_input, api_key, model_choice=None, notes_language="bg"):
+    res, _ = analyze_blueprint(image_input, api_key, model_choice=model_choice, notes_language=notes_language)
     return res
