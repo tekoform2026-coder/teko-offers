@@ -333,8 +333,7 @@ def row_to_layout(elem_type, row):
                               l1_cm=_row_float(row, "l1_cm", 200),
                               l2_cm=_row_float(row, "l2_cm", 200),
                               l3_cm=_row_float(row, "l3_cm", 0),  # мястото на реброто; празно = средата
-                              thickness_cm=t_cm, thickness1_cm=arms["thickness1_cm"],
-                              thickness2_cm=arms["thickness2_cm"],
+                              thickness_cm=t_cm, **arms,   # дебелина C - полката вляво от реброто
                               closed_end_3=_closed_end(row, "closed_end_3"), **closed)
     return None
 
@@ -1185,7 +1184,8 @@ def element_column_config():
                                                help=t("При Т-стена: от левия край на полката до лявото лице "
                                                       "на реброто; празно = реброто е в средата")),
         "thickness3_cm": st.column_config.NumberColumn(t("Дебелина стена C (см)"), format="%g", width="auto",
-                                                       help=t("Само за П-стена; празна = като стена A "
+                                                       help=t("П-стена; при Т-стена - полката вляво от реброто "
+                                                              "(дължината „Стена C“); празна = като стена A "
                                                               "(попълва се само когато е различна)")),
         "height_cm": st.column_config.NumberColumn(t("Височина (см)"), format="%g", width="auto"),
         "closed_end_1": st.column_config.CheckboxColumn(t("Затворен край 1"), default=True, width="auto"),
