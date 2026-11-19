@@ -29,13 +29,14 @@ def t(text, **values):
 
 
 # Имената на артикулите от сметката (панели и аксесоари) - само за показване на екрана
-_ITEM_WORDS = [("Вътрешен ъгъл", "Inner corner"), ("Външен ъгъл", "Outer corner"), ("Ръкохватка", "Handle"),
-               ("Ригел", "Waler"), ("Вертикализатор", "Push-pull prop"), ("Шпилка", "Tie rod"), ("Гайка", "Nut"),
-               ("Компенсатор", "Compensator"), ("(полегнал)", "(lying)"), (" см", " cm"), ("бр.", "pcs")]
+_ITEM_WORDS = [("Вътрешен ъгъл", "Internal corner"), ("Външен ъгъл", "External corner"), ("Ръкохватка", "Handle"),
+               ("Ригел", "Alignment waling"), ("Вертикализатор", "Pull push prop"), ("Шпилка", "Tie rod"),
+               ("Гайка", "Nut"),
+               ("Компенсатор", "Compensator"), ("(полегнал)", "(horizontal)"), (" см", " cm"), ("бр.", "pcs")]
 
 
 def t_item(text):
-    """Име на артикул или размери от сметката на избрания език („Ригел AW 200“ -> „Waler AW 200“)."""
+    """Име на артикул или размери от сметката на избрания език („Ригел AW 200“ -> „Alignment waling AW 200“)."""
     text = str(text)
     if lang() == "en":
         for bg, en in _ITEM_WORDS:
@@ -366,8 +367,9 @@ EN = {
     "📊 КСС и чертежи в Excel": "📊 Bill of quantities and drawings in Excel",
     "Лист „Кол. сметка“ - артикулите в реда на офертата; лист за всеки елемент - изглед отгоре и изглед отпред от "
     "клетки (1 клетка = 5 см) за редакция; лист с всички панели за копиране.":
-        "Sheet “Кол. сметка” - the items in offer order; a sheet for each element - top and front view made of "
-        "cells (1 cell = 5 cm) for editing; a sheet with all panels for copying. The file is in Bulgarian.",
+        "Sheet “Bill of quantities” - the items in offer order; a sheet for each element - top and front view made of "
+        "cells (1 cell = 5 cm) for editing; a sheet with all panels for copying. The file is in the document language "
+        "chosen below.",
     "📊 Създай Excel (КСС и чертежи)": "📊 Create Excel (BoQ and drawings)",
     "Генериране на Excel...": "Generating Excel...",
     "📥 Изтегли КСС и чертежи (Excel .xlsx)": "📥 Download BoQ and drawings (Excel .xlsx)",
@@ -451,7 +453,7 @@ MANUAL_HELP_BG = (
     "- За **L-стена**: попълнете **Стена A**, **Стена B** и **Дебелина стена A**.\n"
     "- За **П-стена**: попълнете **Стена A**, **Стена B**, **Стена C** и **Дебелина стена A**.\n"
     "- За **T-стена**: **Стена A** (цялата полка), **Стена B** (реброто, от полката до края му) и **Дебелина стена A**. **Стена C** - мястото на реброто: от левия край на полката до лявото лице на реброто; празно = реброто е в средата на полката. Реброто може да е и до самия край - остава Т-стена. Край 1 е десният край на полката, край 2 - левият, **Затворен край 3** - краят на реброто (само за T-стена).\n"
-    "- **Дебелина стена A** е дебелината на целия елемент. **Дебелина стена B / C** (L-, П- и T-стена) се попълва само когато стената е с различна дебелина; празното поле = като стена A (равна на A се изчиства). При T-стена стена A е полката, стена B - реброто.\n"
+    "- **Дебелина стена A** е дебелината на целия елемент. **Дебелина стена B / C** (L-, П- и T-стена) се попълва само когато стената е с различна дебелина; празното поле = като стена A (равна на A се изчиства). При T-стена стена A е полката, стена B - реброто, а стена C - полката вляво от реброто (дължината „Стена C“; празна = цялата полка е с дебелина A).\n"
     "- **Затворен край 1 / Затворен край 2** (отметки) за стени, L- и П-стени: челните краища, затворени с панел колкото дебелината. Край 1 е краят на стена A (при права стена - десният), край 2 - краят на последната стена (при права стена - левият). **Всички краища са затворени по подразбиране** - за отворен край махнете отметката.\n"
     "- Непотребните полета за съответния тип могат да се оставят празни — системата автоматично игнорира празни клетки без грешки!"
 )
@@ -464,7 +466,7 @@ EN[MANUAL_HELP_BG] = (
     "- **L-wall**: fill in **Wall A**, **Wall B** and **Wall A thickness**.\n"
     "- **U-wall**: fill in **Wall A**, **Wall B**, **Wall C** and **Wall A thickness**.\n"
     "- **T-wall**: **Wall A** (the whole flange), **Wall B** (the stem, from the flange to its end) and **Wall A thickness**. **Wall C** - the stem position: from the left end of the flange to the left face of the stem; empty = the stem is in the middle of the flange. The stem may be right at the end - it is still a T-wall. End 1 is the right end of the flange, end 2 - the left one, **Closed end 3** - the end of the stem (T-wall only).\n"
-    "- **Wall A thickness** is the thickness of the whole element. **Wall B / C thickness** (L-, U- and T-wall) is filled in only when that wall has a different thickness; an empty field = same as wall A (equal to A is cleared). For a T-wall, wall A is the flange and wall B is the stem.\n"
+    "- **Wall A thickness** is the thickness of the whole element. **Wall B / C thickness** (L-, U- and T-wall) is filled in only when that wall has a different thickness; an empty field = same as wall A (equal to A is cleared). For a T-wall, wall A is the flange, wall B is the stem and wall C is the flange left of the stem (the “Wall C” length; empty = the whole flange has the wall A thickness).\n"
     "- **Closed end 1 / Closed end 2** (checkboxes) for walls, L- and U-walls: the ends closed with a panel as wide as the thickness. End 1 is the end of wall A (straight wall - the right one), end 2 - the end of the last wall (straight wall - the left one). **All ends are closed by default** - untick for an open end.\n"
     "- Fields not needed for the type can be left empty — empty cells are ignored without errors!"
 )
