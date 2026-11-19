@@ -228,8 +228,10 @@ EN = {
     "При Т-стена: от левия край на полката до лявото лице на реброто; празно = реброто е в средата":
         "For a T-wall: from the left end of the flange to the left face of the stem; empty = the stem is in the middle",
     "Дебелина стена C (см)": "Wall C thickness (cm)",
-    "Само за П-стена; празна = като стена A (попълва се само когато е различна)":
-        "U-wall only; empty = same as wall A (fill in only when different)",
+    "П-стена; при Т-стена - полката вляво от реброто (дължината „Стена C“); празна = като стена A "
+    "(попълва се само когато е различна)":
+        "U-wall; for a T-wall - the flange left of the stem (the “Wall C” length); empty = same as wall A "
+        "(fill in only when different)",
     "Височина (см)": "Height (cm)",
     "Затворен край 1": "Closed end 1",
     "Затворен край 2": "Closed end 2",
