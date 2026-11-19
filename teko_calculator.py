@@ -317,6 +317,37 @@ def _face_rows(segments, levels, flip=()):
         rows.append(row)
     return rows
 
+def mirror_t_stem(faces, levels):
+    """
+    Реброто на Т-стена с различна дебелина на полката (19.11.2026): по-дългото лице (B или B1) се реди по
+    алгоритъма, а по-късото - огледално на него от края на реброто; горните панели до IN покриват остатъка
+    („60 - разликата“: 50 = 30 + 20, по-големият до IN), без компенсатор TC - шпилките минават през фугите.
+    Пише rows и seg_rows на по-късото лице (face_row_pieces чертае от seg_rows).
+    """
+    by_name = {f["name"]: f for f in faces}
+    b, b1 = by_name.get("B"), by_name.get("B1")
+    if not b or not b1 or b["segments"] == b1["segments"]:
+        return
+    longer, shorter = (b, b1) if b["segments"][0] > b1["segments"][0] else (b1, b)
+    length = _round_down_to_5(shorter["segments"][0])
+    rows, seg_rows = [], []
+    for h, row_long, row_short in zip(levels, longer["rows"], shorter["rows"]):
+        new = row_short
+        if not is_compensator_row(h):
+            for k in range(1, len(row_long) + 1):
+                prefix = row_long[:len(row_long) - k]   # от края на реброто - срещу панелите на другото лице
+                rest = length - sum(prefix)
+                if rest <= 0:
+                    continue
+                top = solve_width_cm(rest, h)
+                if sum(top) == rest and not any(format_panel_code(w, h).startswith("TC") for w in top):
+                    new = prefix + top[::-1]            # по-големият панел до IN
+                    break
+        rows.append(new)
+        seg_rows.append([[] if is_compensator_row(h) else new[::-1]])  # flip=(0,): в реда на solve_width
+    shorter["rows"] = rows
+    shorter["seg_rows"] = seg_rows
+
 def _strip_misses(faces, levels):
     """Брой сегменти, които някой ред легнали 20-60 см не покрива точно (последният панел излиза)."""
     strips = [h for h in levels if h in STRIP_PIECES or isinstance(h, PanelRow) or h == 60]
@@ -467,10 +498,16 @@ def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=2
         # Мястото на реброто p (от левия край на полката до лявото лице на реброто) е l3;
         # празно / 0 - реброто е в средата. Реброто до самия край остава Т-стена (не L-стена).
         # Рамо 1 = полката (дебелина t1), рамо 2 = реброто (дебелина ts).
+        # Дебелина C (19.11.2026): полката вляво от реброто (дължината „Стена C“) е с дебелина tc, вдясно
+        # остава t1; празна = t1. Задното лице A е право, разликата е откъм реброто. l2 се мери от предното
+        # лице на по-тънката част на полката - лицето на реброто там е l2, другото е по-късо с разликата.
         l1, l2 = float(l1_cm), float(l2_cm)
         ts = t2
+        tc = _cm_or_default(thickness3_cm, t1)
         p = _cm_or_default(l3_cm, t_wall_middle_cm(l1, ts))
-        left, right, stem = p - IN_CORNER_CM, l1 - p - ts - IN_CORNER_CM, l2 - IN_CORNER_CM
+        left, right = p - IN_CORNER_CM, l1 - p - ts - IN_CORNER_CM
+        stem = l2 - max(0.0, t1 - tc) - IN_CORNER_CM        # B1 - под дясната част (дебелина t1)
+        stem_left = l2 - max(0.0, tc - t1) - IN_CORNER_CM   # B - под лявата част (дебелина tc)
         closed.append(bool(closed_end_3))
         end_1 = "EX" if closed[0] else None
         end_2 = "EX" if closed[1] else None
@@ -479,18 +516,20 @@ def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=2
             _face("A", [left, ts + 2 * IN_CORNER_CM, right], levels, end_2, end_1, flip=(0,)),
             _face("A1 ляво", [left], levels, end_2, "IN", flip=(0,)),
             _face("A1 дясно", [right], levels, "IN", end_1),
-            _face("B", [stem], levels, end_3, "IN", flip=(0,)),
+            _face("B", [stem_left], levels, end_3, "IN", flip=(0,)),
             _face("B1", [stem], levels, end_3, "IN", flip=(0,)),
         ]
         if closed[0]:
             faces.append(_face("Край 1", [t1], levels, "EX", "EX", boards=False))
         if closed[1]:
-            faces.append(_face("Край 2", [t1], levels, "EX", "EX", boards=False))
+            faces.append(_face("Край 2", [tc], levels, "EX", "EX", boards=False))
         if closed[2]:
             faces.append(_face("Край 3", [ts], levels, "EX", "EX", boards=False))
         ex = 2 * sum(closed)
         inn = 2
         dims = {"l1": l1, "l2": l2, "l3": p, "t": t, "t1": t1, "t2": ts}
+        if tc != t1:
+            dims["t3"] = tc   # надписът „стена C дебелина ...“ - само когато е зададена различна
 
     else:
         raise ValueError(f"Непознат тип елемент: {elem_type}")
@@ -503,6 +542,8 @@ def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=2
         levels = best
         for face in faces:
             face["rows"] = _face_rows(face["segments"], levels, face["flip"])
+    if elem_type == "t_wall":
+        mirror_t_stem(faces, levels)   # реброто при различна дебелина на полката - огледално
 
     return {
         "type": elem_type,
