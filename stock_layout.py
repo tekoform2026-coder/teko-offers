@@ -18,7 +18,7 @@ from collections import Counter
 from itertools import combinations_with_replacement
 
 from teko_calculator import (_face_rows, _remainder_options, _round_up_to_5, _strip_misses,
-                             count_panels, format_panel_code, is_compensator_row, solve_width_cm)
+                             count_panels, format_panel_code, is_compensator_row, mirror_t_stem, solve_width_cm)
 
 MAX_REPLACEMENT_PIECES = 6   # най-много панели на мястото на един
 WIDTHS = range(5, 155, 5)    # възможните ширини на панелите (кои ги има - по склада)
@@ -53,6 +53,8 @@ def _with_levels(layout, levels):
     faces = [dict(face, rows=_face_rows(face["segments"], levels, face["flip"])) for face in layout["faces"]]
     for face in faces:
         face.pop("seg_rows", None)
+    if layout["type"] == "t_wall":
+        mirror_t_stem(faces, levels)   # реброто - огледално, както в layout_element
     return dict(layout, height_levels=list(levels), faces=faces)
 
 
