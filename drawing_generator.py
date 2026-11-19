@@ -186,17 +186,21 @@ def _plan_geometry(layout):
             corners += [("EX", -T, l2), ("EX", t2, l2)]
 
     elif typ == "t_wall":  # полка A отгоре (дебелина t1), ребро B надолу (дебелина ts)
-        l1, s, p = d["l1"], d["l2"], d["l3"]  # s - дължина на реброто под полката
+        l1, p = d["l1"], d["l3"]
         ts = t2
-        poly = [[0, s], [p, s], [p, 0], [p + ts, 0], [p + ts, s], [l1, s], [l1, s + t1], [0, s + t1]]
-        place = {"A": (0, s + t1, 'x'), "A1 ляво": (0, s - T, 'x'), "A1 дясно": (p + ts + T, s - T, 'x'),
+        # полката вляво от реброто - дебелина C (задното лице A е право); l2 е до предното лице на по-тънката
+        # част: s - предното лице вдясно от реброто (дебелина t1), sl - вляво (дебелина C)
+        tc = d.get("t3", t1)
+        s, sl = d["l2"] - max(0, t1 - tc), d["l2"] - max(0, tc - t1)
+        poly = [[0, sl], [p, sl], [p, 0], [p + ts, 0], [p + ts, s], [l1, s], [l1, s + t1], [0, s + t1]]
+        place = {"A": (0, s + t1, 'x'), "A1 ляво": (0, sl - T, 'x'), "A1 дясно": (p + ts + T, s - T, 'x'),
                  "B": (p - T, 0, 'y'), "B1": (p + ts, 0, 'y'),
-                 "Край 1": (l1, s, 'y'), "Край 2": (-T, s, 'y'), "Край 3": (p, -T, 'x')}
-        corners = [("IN", p - T, s - T), ("IN", p + ts, s - T)]
+                 "Край 1": (l1, s, 'y'), "Край 2": (-T, sl, 'y'), "Край 3": (p, -T, 'x')}
+        corners = [("IN", p - T, sl - T), ("IN", p + ts, s - T)]
         if end_1:
             corners += [("EX", l1, s + t1), ("EX", l1, s - T)]
         if end_2:
-            corners += [("EX", -T, s + t1), ("EX", -T, s - T)]
+            corners += [("EX", -T, s + t1), ("EX", -T, sl - T)]
         if layout["closed"][2]:
             corners += [("EX", p - T, -T), ("EX", p + ts, -T)]
 
