@@ -410,11 +410,19 @@ EN = {
         "The Google archive is not available ({error}). The stock is kept only while the page is open.",
     "Имената, мярката и наличността се редактират в таблицата; ред се добавя с „+“ под таблицата, изтрива се с "
     "отметка вляво и кошчето. „💾 Запази наличността“ записва в Google (общо за всички проекти) и обновява "
-    "предупрежденията в табовете. Промяна от друг компютър се вижда след F5.":
+    "предупрежденията в табовете; предишната наличност остава в лист „Наличност - история“. Промяна от друг "
+    "компютър - с „🔄 Обнови от архива“.":
         "Names, units and quantities are edited in the table; add a row with “+” below the table, delete it with "
         "the checkbox on the left and the bin. “💾 Save stock” saves to Google (shared by all projects) and "
-        "updates the warnings in the tabs. A change from another computer is shown after F5.",
-    " Последна промяна: {date}.": " Last modified: {date}.",
+        "updates the warnings in the tabs; the previous stock is kept in the sheet “Наличност - история”. A change "
+        "from another computer - with “🔄 Reload from archive”.",
+    "Последна промяна на наличността: **{date}**": "Stock last modified: **{date}**",
+    "Наличността още не е записана в архива.": "The stock has not been saved to the archive yet.",
+    "🔄 Обнови от архива": "🔄 Reload from archive",
+    "Зарежда наличността наново от Google (промените от други компютри) - без F5. Незаписаните промени в "
+    "таблицата се губят.":
+        "Loads the stock again from Google (changes from other computers) - without F5. Unsaved changes in the "
+        "table are lost.",
     "Имената, мярката и наличността се редактират в таблицата; ред се добавя с „+“ под таблицата, изтрива се с "
     "отметка вляво и кошчето. „💾 Запази наличността“ обновява предупрежденията в табовете. Без архив (няма ключ "
     "за Google в secrets) наличността се губи при презареждане.":
