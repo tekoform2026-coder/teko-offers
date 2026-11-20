@@ -9,6 +9,7 @@ stock_layout (отметката „Редене според складоват
 
 Складовата наличност (таб 5) е обща за всички проекти: load_stock() / save_stock(), в архива - лист „Наличност“;
 при всеки запис предишната наличност се добавя в лист „Наличност - история“ (резервно копие).
+Единичните цени (за „Кол. сметка“ в Excel) са общи: load_prices() / save_prices(), в архива - лист „Цени“.
 """
 import math
 import uuid
@@ -148,6 +149,23 @@ def save_stock(stock_df, now=None):
     return stamp
 
 
+def load_prices():
+    """Единичните цени от архива: (таблица Елемент / Ед. цена, последна промяна); без архив или празен лист -
+    (None, None)."""
+    if _archive is None:
+        return None, None
+    return _archive.load_prices()
+
+
+def save_prices(prices_df, now=None):
+    """Записва единичните цени в архива (целия лист наново); връща времето на записа."""
+    stamp = _now(now)
+    if _archive is not None:
+        rows = [[_cell(rec.get(col)) for col in PRICE_COLUMNS] for rec in prices_df.to_dict("records")]
+        _archive.write_prices([r for r in rows if str(r[0]).strip()], stamp)
+    return stamp
+
+
 def project_rows(store):
     """Редове за таблицата на страницата „Проекти“ (като в другата програма)."""
     return [{"id": p["id"], "Име": p["name"], "Клиент": p["client"],
@@ -228,13 +246,18 @@ STOCK_HEADER = ["Ред №"] + STOCK_COLUMNS + ["Последна промян�
 # Резервно копие (потребителят, 20.11.2026): предишната наличност при всеки запис, с времето на замяната
 STOCK_HISTORY_SHEET = "Наличност - история"
 STOCK_HISTORY_HEADER = ["Заменена на"] + STOCK_HEADER
+# Единичните цени (потребителят, 20.11.2026) - от „💶 Цени от Excel“ в таб 2, не в кода
+PRICES_SHEET = "Цени"
+PRICE_COLUMNS = ["Елемент", "Ед. цена"]
+PRICES_HEADER = ["Ред №"] + PRICE_COLUMNS + ["Последна промяна"]
 
 
 class GoogleSheetsArchive:
     """
-    Таблица „TEKO Проекти“ с четири листа: „Проекти“ (един ред = проект), „Елементи“
-    (един ред = елемент, с project_id), „Наличност“ (складовата наличност, обща за всички проекти) и
-    „Наличност - история“ (предишните наличности - резервно копие при всеки запис).
+    Таблица „TEKO Проекти“ с пет листа: „Проекти“ (един ред = проект), „Елементи“
+    (един ред = елемент, с project_id), „Наличност“ (складовата наличност, обща за всички проекти),
+    „Наличност - история“ (предишните наличности - резервно копие при всеки запис) и „Цени“ (единичните цени
+    за „Кол. сметка“ в Excel).
     Листовете и заглавията се създават при първото пускане.
     spreadsheet е gspread.Spreadsheet (или същият интерфейс в тестовете).
     """
@@ -244,6 +267,7 @@ class GoogleSheetsArchive:
         self.elements = self._sheet(spreadsheet, ELEMENTS_SHEET, ELEMENT_HEADER)
         self.stock = self._sheet(spreadsheet, STOCK_SHEET, STOCK_HEADER)
         self.stock_history = self._sheet(spreadsheet, STOCK_HISTORY_SHEET, STOCK_HISTORY_HEADER)
+        self.prices = self._sheet(spreadsheet, PRICES_SHEET, PRICES_HEADER)
 
     @staticmethod
     def _sheet(spreadsheet, title, header):
@@ -357,6 +381,26 @@ class GoogleSheetsArchive:
                   for i, row in enumerate(rows)]
         if values:
             self.stock.append_rows(values, value_input_option="RAW")
+
+    def load_prices(self):
+        rows = [list(r) + [""] * (len(PRICES_HEADER) - len(r)) for r in self._values(self.prices)]
+        rows = sorted((r for r in rows if str(r[1]).strip()), key=lambda r: r[0])
+        if not rows:
+            return None, None
+        prices_df = pd.DataFrame([{"Елемент": str(r[1]), "Ед. цена": r[2]} for r in rows], columns=PRICE_COLUMNS)
+        prices_df["Ед. цена"] = pd.to_numeric(prices_df["Ед. цена"], errors="coerce")
+        modified = _parse_datetime(rows[0][3]) if rows[0][3] != "" else None
+        return prices_df, modified
+
+    def write_prices(self, rows, modified):
+        """Старите редове се трият, новите се добавят (с „Последна промяна“ на първия)."""
+        count = len(self.prices.col_values(1))
+        if count > 1:
+            self.prices.delete_rows(2, count)
+        values = [[i + 1] + row + [modified.isoformat(timespec="seconds") if i == 0 else ""]
+                  for i, row in enumerate(rows)]
+        if values:
+            self.prices.append_rows(values, value_input_option="RAW")
 
 
 def connect_google_sheets(service_account_info, sheet_id):
