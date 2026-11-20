@@ -100,6 +100,27 @@ EN = {
     "🔑 Въведете парола за достъп:": "🔑 Enter the access password:",
     "Вход": "Sign in",
     "❌ Грешна парола! Опитайте отново.": "❌ Wrong password! Please try again.",
+    "Запомни този компютър ({d} дни)": "Remember this computer ({d} days)",
+    "Следващия път влизате направо, без парола. Не отмятайте на чужд компютър. Изход - с бутона „🚪 Изход“ в "
+    "страничното меню; при смяна на паролата всички запомнени компютри се изписват сами.":
+        "Next time you go straight in, without a password. Do not tick it on someone else's computer. Sign out "
+        "with the “🚪 Sign out” button in the sidebar; changing the password signs out all remembered computers.",
+    "🚪 Изход": "🚪 Sign out",
+    "💶 Цени в Excel: {n} артикула": "💶 Prices in Excel: {n} items",
+    " (заредени на {d})": " (loaded on {d})",
+    "💶 Няма заредени цени - колоната „Ед. Цена“ в Excel е празна (попълва се на ръка).":
+        "💶 No prices loaded - the “Unit price” column in Excel is empty (filled in by hand).",
+    "⚠️ Цените не са записани в архива: {error}": "⚠️ The prices were not saved to the archive: {error}",
+    "💶 Цени от Excel": "💶 Prices from Excel",
+    "Excel с цени („1. Оферта – софтуер.xlsx“ - колони Елемент и Ед. Цена):":
+        "Excel with prices (“1. Оферта – софтуер.xlsx” - columns Item and Unit price):",
+    "📥 Зареди цените": "📥 Load the prices",
+    "Заменя всички цени с тези от файла и ги записва - важат за всички проекти.":
+        "Replaces all prices with those from the file and saves them - they apply to all projects.",
+    "Във файла няма цени под „Ед. Цена“.": "The file has no prices under “Unit price”.",
+    "✅ Заредени {n} цени от Excel. Създайте Excel наново.": "✅ Loaded {n} prices from Excel. Create the Excel again.",
+    "Изход от приложението; ако компютърът е запомнен - забравя го.":
+        "Sign out of the app; if this computer is remembered, it is forgotten.",
     "TEKO — Оптимизация на панели": "TEKO — Panel Optimization",
     "AI система за кофражно планиране": "AI system for formwork planning",
     "ТЕКО България ООД": "TEKO Bulgaria Ltd.",
@@ -164,6 +185,37 @@ EN = {
     "Чертеж „{name}“: {n} елемента - записани в проекта.": "Drawing “{name}”: {n} elements - saved in the project.",
     "📄 Чертеж {i}: {name}": "📄 Drawing {i}: {name}",
     "⚠️ Забележки на AI - Чертеж {i}: {name}": "⚠️ AI notes - Drawing {i}: {name}",
+    "📍 Откъде е всеки елемент - Чертеж {i}: {name} ({n})": "📍 Where each element is from - Drawing {i}: {name} ({n})",
+    "Изпратен като PDF (с текста в него).": "Sent as a PDF (with its text).",
+    "Изпратен като изображения на страниците.": "Sent as page images.",
+    "Качен през File API (голям файл) и изтрит след разчитането.":
+        "Uploaded via the File API (large file) and deleted after reading.",
+    "Как да се разчете чертежът:": "How to read the drawing:",
+    "Автоматично": "Automatic",
+    "Като текст (PDF)": "As text (PDF)",
+    "Като картина": "As an image",
+    "Автоматично: плотиран PDF (с текст вътре) - като PDF, кóтите се четат от текста; сканиран или принтиран PDF "
+    "(без текст) - като картини на страниците. Изберете на ръка, ако автоматичният избор не е подходящ (напр. "
+    "кóтите са линии, а не текст).":
+        "Automatic: a plotted PDF (with text inside) is sent as a PDF and the dimensions are read from the text; a "
+        "scanned or printed PDF (no text) is sent as page images. Choose manually if the automatic choice does not "
+        "fit (e.g. the dimensions are lines, not text).",
+    "🔁 Двойна проверка (разчита чертежа два пъти и сравнява)": "🔁 Double check (reads the drawing twice and compares)",
+    "Разликите между двете разчитания излизат в забележките на AI - там проверете таблицата. Отнема двойно време и "
+    "изразходва двойно от безплатното ограничение на ключа.":
+        "The differences between the two readings appear in the AI notes - check the table there. Takes twice as "
+        "long and uses twice as much of the key's free quota.",
+    "да": "yes",
+    "не": "no",
+    "Затворен край 3": "Closed end 3",
+    "🔁 Двойна проверка: двете разчитания съвпадат.": "🔁 Double check: both readings match.",
+    "🔁 Двойната проверка не мина: {error}": "🔁 The double check failed: {error}",
+    "🔁 Двойна проверка: {name} е само в първото разчитане (в таблицата е) - проверете го.":
+        "🔁 Double check: {name} is only in the first reading (it is in the table) - check it.",
+    "🔁 Двойна проверка: {name} е само във второто разчитане (не е в таблицата) - проверете чертежа.":
+        "🔁 Double check: {name} is only in the second reading (not in the table) - check the drawing.",
+    "🔁 Двойна проверка: {name} - {field}: {first} (в таблицата) / {second} (второ разчитане).":
+        "🔁 Double check: {name} - {field}: {first} (in the table) / {second} (second reading).",
     # gemini_agent2.TRUNCATED_NOTE - бележките на Gemini са на езика на екрана, а тази я добавя програмата
     "Отговорът на Gemini е отрязан - чертежът е твърде голям. Разделете го на части или опитайте с по-малко "
     "страници.":
@@ -317,6 +369,18 @@ EN = {
     "• **{name}**: {small} - размерите са в **сантиметри**; въведени ли са в метри? (напр. 2.5 м = 250 см)":
         "• **{name}**: {small} - dimensions are in **centimetres**; were they entered in metres? "
         "(e.g. 2.5 m = 250 cm)",
+    "Дебелина стена B": "Wall B thickness",
+    "Дебелина стена C": "Wall C thickness",
+    "• **{name}**: {label} {value} cm е необичайна (обикновено 10-100 cm) - проверете размера.":
+        "• **{name}**: {label} {value} cm is unusual (normally 10-100 cm) - check the dimension.",
+    "• **{name}**: Височина {h} cm е необичайна (обикновено 20-1200 cm) - проверете размера.":
+        "• **{name}**: Height {h} cm is unusual (normally 20-1200 cm) - check the dimension.",
+    "• **{name}**: Дължината ({l} cm) е по-малка от дебелината ({t} cm) - разменени ли са?":
+        "• **{name}**: The length ({l} cm) is less than the thickness ({t} cm) - are they swapped?",
+    "• **{name}**: {label} ({l} cm) е твърде къса - до ъглите са нужни {k} cm и поне 5 cm панел. Проверете "
+    "размерите.":
+        "• **{name}**: {label} ({l} cm) is too short - the corners need {k} cm plus at least a 5 cm panel. "
+        "Check the dimensions.",
 
     # Склад - предупреждения
     "⚠️ Не стигат в склада (таб „Складова наличност“):": "⚠️ Not enough in stock (tab “Stock”):",
