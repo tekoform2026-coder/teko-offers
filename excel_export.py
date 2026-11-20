@@ -553,18 +553,20 @@ def _element_sheet(wb, index, element):
 # ==========================================
 # КОЛИЧЕСТВЕНА СМЕТКА
 # ==========================================
-def _kss_sheet(ws, names, quantity, stock=None):
+def _kss_sheet(ws, names, quantity, stock=None, prices=None):
     """
     „Кол. сметка“ като „Цена BG“ в „1. Оферта – софтуер.xlsx“ (потребителят, 18.11.2026): заглавия на ред 3,
     артикулите от ред 4, после ОБЩО / ОТСТЪПКА. quantity(name) - количеството (формула към елементите или число);
-    stock - {наименование: наличност} от таб 5 (колона „Наличност в склада“).
-    Цената се попълва на ръка (жълта клетка) - в програмата няма цени; отстъпката % е формулата от файла.
+    stock - {наименование: наличност} от таб 5 (колона „Наличност в склада“); prices - {наименование: ед. цена}
+    от „💶 Цени от Excel“ в таб 2 (20.11.2026; в кода няма цени). Без цена клетката остава празна (жълта) - на
+    ръка; отстъпката % е формулата от файла.
     """
     first = 4
     last = first + len(names) - 1
     total = last + 1
     discount = f"$F${total + 1}"   # ОТСТЪПКА %
     stock = stock or {}
+    prices = prices or {}
     for col, width in KSS_WIDTHS.items():
         ws.column_dimensions[col].width = width
     ws.row_dimensions[2].height = 23.25
@@ -583,7 +585,7 @@ def _kss_sheet(ws, names, quantity, stock=None):
         weight = KSS_WEIGHTS.get(name)
         qty = stock.get(name)
         values = {
-            "B": dt_item(name), "C": dt("бр"), "D": quantity(name),
+            "B": dt_item(name), "C": dt("бр"), "D": quantity(name), "E": prices.get(name),
             "F": f'=IF(E{r}="","",N(D{r})*E{r})',
             "G": f'=IF(E{r}="","",ROUND(E{r}*(100-{discount})/100,2))',
             "H": f'=IF(E{r}="","",N(D{r})*G{r})',
@@ -605,7 +607,7 @@ def _kss_sheet(ws, names, quantity, stock=None):
             elif col in "DPQ":
                 cell.number_format = HIDE_ZERO
             if col == "E":
-                cell.fill = PatternFill("solid", fgColor=FILL_COUNT)   # цената - на ръка
+                cell.fill = PatternFill("solid", fgColor=FILL_COUNT)   # цената - от таб 2 или на ръка
             elif col in "GH":
                 cell.fill = PatternFill("solid", fgColor=FILL_DISCOUNT)
             elif name == "Ръкохватка H8":
@@ -690,10 +692,11 @@ def _palette_sheet(wb):
 # ==========================================
 # ГЛАВНА ФУНКЦИЯ
 # ==========================================
-def generate_excel(elements, stock=None):
+def generate_excel(elements, stock=None, prices=None):
     """
     elements: [{"name", "count", "layout", "bom"}] - bom е сметката на елемента, умножена по броя.
     stock: {наименование в КСС: наличност} от таб 5 - колона „Наличност в склада“ (без него - празна).
+    prices: {наименование в КСС: ед. цена} - колона „Ед. Цена“ (без него - празна, на ръка).
     Връща BytesIO с .xlsx.
     """
     wb = Workbook()
@@ -710,7 +713,7 @@ def generate_excel(elements, stock=None):
         sources = [f"'{sheet}'!{refs[name]}" for sheet, refs in element_refs if name in refs]
         return f"=SUM({','.join(sources)})" if sources else None
 
-    _kss_sheet(kss, [name for name, _codes in KSS_ITEMS] + extra, formula, stock)
+    _kss_sheet(kss, [name for name, _codes in KSS_ITEMS] + extra, formula, stock, prices)
     _palette_sheet(wb)
     wb.calculation.fullCalcOnLoad = True
 
@@ -785,7 +788,8 @@ def stock_from_excel(file):
     Наличността от Excel: първият лист, редът със заглавие „Елемент“ (на всеки ред и колона), под него колоните
     „Елемент“, „Мярка“ и наличността („Остава“ или „Наличност в склада“; липсващата - празна). Чете и
     „1. Наличности.xlsx“, и „1. Оферта – софтуер.xlsx“ (лист „Цена BG“, колона P) - спира на „ОБЩО“.
-    Двойните интервали в имената се махат, редовете без име се пропускат, дробната наличност се закръгля надолу.
+    Двойните интервали в имената се махат, редовете без име се пропускат, дробната наличност се закръгля до цяло
+    число, както я показва Excel.
     """
     from openpyxl import load_workbook
     ws = load_workbook(file, data_only=True, read_only=True).worksheets[0]
@@ -817,6 +821,51 @@ def stock_from_excel(file):
                         "Остава": value("Остава")})
     import pandas as pd
     stock_df = pd.DataFrame(records, columns=STOCK_HEADERS)
+    # дробната - до цяло число, както я показва Excel (формат „0“: AW 100 63,68 -> 64); преди беше надолу (63) и
+    # таблицата се разминаваше с файла (потребителят, 20.11.2026)
     stock_df["Остава"] = pd.to_numeric(stock_df["Остава"], errors="coerce").apply(
-        lambda q: q if pd.isna(q) else float(math.floor(q + 1e-9)))
+        lambda q: q if pd.isna(q) else float(math.floor(q + 0.5 + 1e-9)))
     return stock_df
+
+
+# Единичните цени (потребителят, 20.11.2026): само от Excel, пазят се в архива (лист „Цени“) - не в кода
+PRICE_HEADER = "Ед. Цена"
+PRICE_COLUMNS = ["Елемент", "Ед. цена"]
+
+
+def prices_from_excel(file):
+    """
+    Единичните цени от Excel: първият лист, редът със заглавие „Елемент“, колоната „Ед. Цена“ (като
+    „1. Оферта – софтуер.xlsx“, лист „Цена BG“, колона E; и на езиците на документите) - спира на „ОБЩО“.
+    Таблица Елемент / Ед. цена; двойните интервали в имената се махат, празна или 0 цена се пропуска.
+    """
+    from openpyxl import load_workbook
+    ws = load_workbook(file, data_only=True, read_only=True).worksheets[0]
+    rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    names_h = {h.lower() for h in ("Елемент", *TR["Елемент"])}
+    price_h = {h.lower() for h in (PRICE_HEADER, *TR[PRICE_HEADER])}
+    stop = {"ОБЩО", *TR["ОБЩО"]}
+    for i, row in enumerate(rows):
+        cells = [" ".join(str(v).split()).lower() if v is not None else "" for v in row]
+        name_col = next((j for j, c in enumerate(cells) if c in names_h), None)
+        price_col = next((j for j, c in enumerate(cells) if c in price_h), None)
+        if name_col is not None:
+            break
+    else:
+        raise ValueError("Няма колона „Елемент“ в първия лист.")
+    if price_col is None:
+        raise ValueError("Няма колона „Ед. Цена“ в първия лист.")
+    records = []
+    for row in rows[i + 1:]:
+        name = " ".join(str(row[name_col] if name_col < len(row) and row[name_col] is not None else "").split())
+        if name in stop:
+            break
+        price = row[price_col] if price_col < len(row) else None
+        try:
+            price = round(float(price), 4)
+        except (TypeError, ValueError):
+            continue
+        if name and price > 0:
+            records.append({"Елемент": name, "Ед. цена": price})
+    import pandas as pd
+    return pd.DataFrame(records, columns=PRICE_COLUMNS)
