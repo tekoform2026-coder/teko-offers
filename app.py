@@ -415,6 +415,13 @@ def load_stock_once():
     st.session_state["stock_df"] = stock_df if stock_df is not None else default_stock_df()
     st.session_state["stock_modified"] = modified
 
+def reload_stock():
+    """„🔄 Обнови от архива“ (потребителят, 20.11.2026): наличността наново от Google, без F5 - незаписаните
+    промени в таблицата се губят."""
+    for key in ("stock_df", "stock_error", "stock_modified", "stock_editor", "excel_bytes"):
+        st.session_state.pop(key, None)
+    load_stock_once()
+
 def store_stock(stock_df):
     """Записва наличността в сесията и в архива; при грешка в архива - съобщение в таб 5."""
     st.session_state["stock_df"] = stock_df.reset_index(drop=True)
@@ -1755,10 +1762,20 @@ def render_stock_tab(df_calc):
                    "отворена.", error=st.session_state["stock_error"]))
     if projects_store.has_archive():
         modified = st.session_state.get("stock_modified")
+        # Последната промяна - на отделен ред, видимо над таблицата (потребителят, 20.11.2026)
+        col_date, col_reload = st.columns([3, 1], vertical_alignment="center")
+        col_date.markdown("🕒 " + (t("Последна промяна на наличността: **{date}**",
+                                     date=modified.strftime('%d.%m.%Y %H:%M')) if modified
+                                   else t("Наличността още не е записана в архива.")))
+        if col_reload.button(t("🔄 Обнови от архива"), key="reload_stock",
+                             help=t("Зарежда наличността наново от Google (промените от други компютри) - без F5. "
+                                    "Незаписаните промени в таблицата се губят.")):
+            reload_stock()
+            st.rerun()  # цялата страница - предупрежденията и реденето по склада също
         st.caption(t("Имената, мярката и наличността се редактират в таблицата; ред се добавя с „+“ под таблицата, "
                      "изтрива се с отметка вляво и кошчето. „💾 Запази наличността“ записва в Google (общо за всички "
-                     "проекти) и обновява предупрежденията в табовете. Промяна от друг компютър се вижда след F5.")
-                   + (t(" Последна промяна: {date}.", date=modified.strftime('%d.%m.%Y %H:%M')) if modified else ""))
+                     "проекти) и обновява предупрежденията в табовете; предишната наличност остава в лист "
+                     "„Наличност - история“. Промяна от друг компютър - с „🔄 Обнови от архива“."))
     else:
         st.caption(t("Имената, мярката и наличността се редактират в таблицата; ред се добавя с „+“ под таблицата, "
                      "изтрива се с отметка вляво и кошчето. „💾 Запази наличността“ обновява предупрежденията в "
