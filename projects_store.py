@@ -7,7 +7,8 @@ use_archive) всяка промяна се записва и в таблица�
 Проект: id, name, client, date, created, modified, elements (таблицата с елементите), std_height_cm,
 stock_layout (отметката „Редене според складовата наличност“).
 
-Складовата наличност (таб 5) е обща за всички проекти: load_stock() / save_stock(), в архива - лист „Наличност“.
+Складовата наличност (таб 5) е обща за всички проекти: load_stock() / save_stock(), в архива - лист „Наличност“;
+при всеки запис предишната наличност се добавя в лист „Наличност - история“ (резервно копие).
 """
 import math
 import uuid
@@ -224,12 +225,16 @@ STOCK_SHEET = "Наличност"
 STOCK_COLUMNS = ["Елемент", "Мярка", "Остава"]
 # „Последна промяна“ е само на първия ред с данни
 STOCK_HEADER = ["Ред №"] + STOCK_COLUMNS + ["Последна промяна"]
+# Резервно копие (потребителят, 20.11.2026): предишната наличност при всеки запис, с времето на замяната
+STOCK_HISTORY_SHEET = "Наличност - история"
+STOCK_HISTORY_HEADER = ["Заменена на"] + STOCK_HEADER
 
 
 class GoogleSheetsArchive:
     """
-    Таблица „TEKO Проекти“ с три листа: „Проекти“ (един ред = проект), „Елементи“
-    (един ред = елемент, с project_id) и „Наличност“ (складовата наличност, обща за всички проекти).
+    Таблица „TEKO Проекти“ с четири листа: „Проекти“ (един ред = проект), „Елементи“
+    (един ред = елемент, с project_id), „Наличност“ (складовата наличност, обща за всички проекти) и
+    „Наличност - история“ (предишните наличности - резервно копие при всеки запис).
     Листовете и заглавията се създават при първото пускане.
     spreadsheet е gspread.Spreadsheet (или същият интерфейс в тестовете).
     """
@@ -238,6 +243,7 @@ class GoogleSheetsArchive:
         self.projects = self._sheet(spreadsheet, PROJECTS_SHEET, PROJECT_HEADER)
         self.elements = self._sheet(spreadsheet, ELEMENTS_SHEET, ELEMENT_HEADER)
         self.stock = self._sheet(spreadsheet, STOCK_SHEET, STOCK_HEADER)
+        self.stock_history = self._sheet(spreadsheet, STOCK_HISTORY_SHEET, STOCK_HISTORY_HEADER)
 
     @staticmethod
     def _sheet(spreadsheet, title, header):
@@ -337,7 +343,13 @@ class GoogleSheetsArchive:
         return stock_df, modified
 
     def write_stock(self, rows, modified):
-        """Старите редове се трият, новите се добавят (с „Последна промяна“ на първия)."""
+        """Старите редове отиват в „Наличност - история“ и се трият, новите се добавят (с „Последна промяна“
+        на първия)."""
+        old = [list(r) + [""] * (len(STOCK_HEADER) - len(r)) for r in self._values(self.stock)]
+        old = [r[:len(STOCK_HEADER)] for r in old if str(r[1]).strip()]
+        if old:
+            stamp = modified.isoformat(timespec="seconds")
+            self.stock_history.append_rows([[stamp] + r for r in old], value_input_option="RAW")
         count = len(self.stock.col_values(1))
         if count > 1:
             self.stock.delete_rows(2, count)
