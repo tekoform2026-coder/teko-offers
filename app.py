@@ -2,6 +2,7 @@ import io
 import math
 import re
 import hmac
+import hashlib
 import fitz  # PyMuPDF
 import pandas as pd
 from PIL import Image
@@ -14,7 +15,8 @@ from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 from gemini_agent2 import analyze_blueprint
 from drawing_generator import generate_pdf_drawings, generate_top_view_buf, generate_front_view_buf
-from excel_export import KSS_EXTRA, KSS_ITEMS, generate_excel, stock_to_excel, stock_from_excel
+from excel_export import (KSS_EXTRA, KSS_ITEMS, generate_excel, stock_to_excel, stock_from_excel,
+                          prices_from_excel)
 import projects_store
 from accessories_calculator import calculate_accessories
 from teko_calculator import (solve_height_cm, layout_element, count_panels, is_compensator_row, thickness_label,
@@ -33,27 +35,64 @@ st.set_page_config(
 )
 
 # === СИСТЕМА ЗА ЗАЩИТА С ПАРОЛА ===
-def check_password():
-    """Вход с парола от secrets (password); без парола в secrets (локално, на компютъра) - без вход."""
+LOGIN_COOKIE = "teko_login"   # „Запомни този компютър“ (потребителят, 20.11.2026)
+LOGIN_REMEMBER_DAYS = 90
+
+def app_password():
+    """Паролата от secrets (password); празна - без вход (локално, на компютъра)."""
     try:
-        secret_pass = str(st.secrets.get("password", ""))
+        return str(st.secrets.get("password", ""))
     except FileNotFoundError:
-        secret_pass = ""
+        return ""
+
+def login_token(secret_pass):
+    """Знакът в бисквитката „Запомни този компютър“ - изчислен от паролата (самата парола не се пази);
+    при смяна на паролата старите бисквитки спират да важат."""
+    return hmac.new(secret_pass.encode("utf-8"), b"teko-login-remember", hashlib.sha256).hexdigest()
+
+def set_login_cookie(value, days):
+    """Бисквитката в браузъра (days = 0 - изтрива я)."""
+    st.html(f"<script>document.cookie = '{LOGIN_COOKIE}={value}; max-age={days * 86400}; path=/; "
+            f"SameSite=Lax';</script>", unsafe_allow_javascript=True)
+
+def check_password():
+    """Вход с парола от secrets (password); без парола в secrets (локално, на компютъра) - без вход.
+    Запомнен компютър (бисквитка с login_token) - направо, без парола, до изхода или смяната на паролата."""
+    secret_pass = app_password()
     if not secret_pass or st.session_state.get("password_correct"):
         return True
+    if not st.session_state.get("logged_out"):   # след „Изход“ бисквитката на тази сесия не важи
+        try:
+            saved = str(st.context.cookies.get(LOGIN_COOKIE) or "")
+        except Exception:
+            saved = ""
+        if saved and hmac.compare_digest(saved.encode("utf-8"), login_token(secret_pass).encode("utf-8")):
+            st.session_state["password_correct"] = True
+            return True
+    if st.session_state.pop("clear_login_cookie", False):
+        set_login_cookie("", 0)
     st.title(t("🔒 Вход в системата TEKO"))
     with st.form("login"):
         user_pass = st.text_input(t("🔑 Въведете парола за достъп:"), type="password")
+        remember = st.checkbox(t("Запомни този компютър ({d} дни)", d=LOGIN_REMEMBER_DAYS),
+                               help=t("Следващия път влизате направо, без парола. Не отмятайте на чужд компютър. "
+                                      "Изход - с бутона „🚪 Изход“ в страничното меню; при смяна на паролата всички "
+                                      "запомнени компютри се изписват сами."))
         if st.form_submit_button(t("Вход")):
             # като байтове - с текст compare_digest приема само латиница (парола на кирилица дава грешка)
             if hmac.compare_digest(user_pass.encode("utf-8"), secret_pass.encode("utf-8")):
                 st.session_state["password_correct"] = True
+                st.session_state.pop("logged_out", None)
+                if remember:   # записва се при следващото показване (след st.rerun)
+                    st.session_state["login_cookie"] = login_token(secret_pass)
                 st.rerun()
             st.error(t("❌ Грешна парола! Опитайте отново."))
     return False
 
 if not check_password():
     st.stop()
+if st.session_state.get("login_cookie"):
+    set_login_cookie(st.session_state.pop("login_cookie"), LOGIN_REMEMBER_DAYS)
 # ==================================
 
 def set_cell_background(cell, hex_color):
@@ -145,6 +184,40 @@ def check_element_dimensions(row):
         if (not l3_cm and (l1_cm - t_cm) / 2 <= 10) or l2_cm <= 10:
             warnings.append(t("• **{name}**: Страна A ({l1} cm) или B ({l2} cm) е твърде къса за T-стена с дебелина "
                               "{t} cm - проверете Стена A и Стена B.", name=name, l1=l1_cm, l2=l2_cm, t=t_cm))
+
+    # Правдоподобност (потребителят, 20.11.2026) - само предупреждение, размерите не се сменят:
+    # необичайна дебелина или височина, права стена по-къса от дебелината, стена без място за панела до EX
+    if elem_type in WALL_THICKNESS_COLUMNS and elem_type != "column":
+        n_walls = 3 if elem_type == "t_wall" else WALL_THICKNESS_COLUMNS[elem_type]
+        for col, label in list(zip(("thickness_cm", "thickness2_cm", "thickness3_cm"),
+                                   ("Дебелина стена A", "Дебелина стена B", "Дебелина стена C")))[:n_walls]:
+            value = _row_float(row, col, None)
+            if value and not 10 <= value <= 100:
+                warnings.append(t("• **{name}**: {label} {value} cm е необичайна (обикновено 10-100 cm) - проверете "
+                                  "размера.", name=name, label=t(label), value=f"{value:g}"))
+    h_raw = _row_float(row, "height_cm", None)
+    if h_raw and not 20 <= h_raw <= 1200:
+        warnings.append(t("• **{name}**: Височина {h} cm е необичайна (обикновено 20-1200 cm) - проверете размера.",
+                          name=name, h=f"{h_raw:g}"))
+    t1 = _row_float(row, "thickness_cm", None) or _row_float(row, "thickness1_cm", None)
+    if elem_type == "wall" and t1:
+        length = _row_float(row, "l1_cm", 0)
+        if 0 < length < t1:
+            warnings.append(t("• **{name}**: Дължината ({l} cm) е по-малка от дебелината ({t} cm) - разменени ли са?",
+                              name=name, l=f"{length:g}", t=f"{t1:g}"))
+    if elem_type in ("l_wall", "u_wall") and t1:
+        t2 = _row_float(row, "thickness2_cm", None) or t1
+        t3 = _row_float(row, "thickness3_cm", None) or t1
+        if elem_type == "l_wall":   # до EX: дебелината на перпендикулярната стена + 10 (ъгъл IN)
+            arms = [("Стена A", "l1_cm", t2 + 10), ("Стена B", "l2_cm", t1 + 10)]
+        else:                       # гърбът B - между двата ъгъла
+            arms = [("Стена A", "l1_cm", t2 + 10), ("Стена B", "l2_cm", t1 + t3 + 20), ("Стена C", "l3_cm", t2 + 10)]
+        for label, col, need in arms:
+            length = _row_float(row, col, 0)
+            if 0 < length < need + 5:
+                warnings.append(t("• **{name}**: {label} ({l} cm) е твърде къса - до ъглите са нужни {k} cm и поне "
+                                  "5 cm панел. Проверете размерите.", name=name, label=t(label), l=f"{length:g}",
+                                  k=f"{need:g}"))
 
     # Размерите са в см - стойност под 10 най-вероятно е въведена в метри (напр. 2.5 вместо 250)
     small = [f"{col} = {row.get(col):g}" for col in LENGTH_COLUMNS
@@ -555,6 +628,82 @@ def show_stock_layout_notes(df_calc):
     else:
         st.info(t("✅ Редене според складовата наличност: всички панели по алгоритъма са налични."))
 
+def load_prices_once():
+    """Единичните цени (потребителят, 20.11.2026) от архива - веднъж за сесията; без архив - само в сесията."""
+    if "prices_df" in st.session_state:
+        return
+    prices_df, modified = None, None
+    try:
+        prices_df, modified = projects_store.load_prices()
+    except Exception as exc:  # noqa: BLE001 - архивът не е достъпен, Excel е без цени
+        st.session_state["prices_error"] = f"{type(exc).__name__}: {exc}"
+    st.session_state["prices_df"] = prices_df
+    st.session_state["prices_modified"] = modified
+
+def store_prices(prices_df):
+    """Записва цените в сесията и в архива (лист „Цени“); готовият Excel се прави наново."""
+    st.session_state["prices_df"] = prices_df.reset_index(drop=True)
+    st.session_state.pop("prices_error", None)
+    st.session_state.pop("excel_bytes", None)
+    try:
+        st.session_state["prices_modified"] = projects_store.save_prices(st.session_state["prices_df"])
+    except Exception as exc:  # noqa: BLE001
+        st.session_state["prices_error"] = f"{type(exc).__name__}: {exc}"
+
+def kss_prices():
+    """
+    Цените за колоната „Ед. Цена“ в „Кол. сметка“ (Excel): {наименование в КСС: цена}. По името, иначе по
+    stock_key (първата цена с този код); FP, AC, Тапа нямат код - само по името.
+    """
+    prices_df = st.session_state.get("prices_df")
+    if prices_df is None:
+        return {}
+    by_name, by_key = {}, {}
+    for _, row in prices_df.iterrows():
+        price = pd.to_numeric(row.get("Ед. цена"), errors="coerce")
+        if pd.notna(price) and price > 0:
+            name = " ".join(str(row.get("Елемент", "")).split())
+            by_name.setdefault(name, float(price))
+            if stock_key(name):
+                by_key.setdefault(stock_key(name), float(price))
+    result = {}
+    for name in [n for n, _codes in KSS_ITEMS] + [n for n, *_rest in KSS_EXTRA]:
+        if name in by_name:
+            result[name] = by_name[name]
+        elif stock_key(name) in by_key:
+            result[name] = by_key[stock_key(name)]
+    return result
+
+def render_prices_box():
+    """„💶 Цени от Excel“ в таб 2 (вариант А, 20.11.2026): цените влизат в колона „Ед. Цена“ на „Кол. сметка“."""
+    load_prices_once()
+    prices_df = st.session_state.get("prices_df")
+    count = 0 if prices_df is None else len(prices_df)
+    modified = st.session_state.get("prices_modified")
+    if count:
+        st.caption(t("💶 Цени в Excel: {n} артикула", n=count) +
+                   (t(" (заредени на {d})", d=modified.strftime("%d.%m.%Y %H:%M")) if modified else ""))
+    else:
+        st.caption(t("💶 Няма заредени цени - колоната „Ед. Цена“ в Excel е празна (попълва се на ръка)."))
+    if st.session_state.get("prices_error"):
+        st.warning(t("⚠️ Цените не са записани в архива: {error}", error=st.session_state["prices_error"]))
+    with st.expander(t("💶 Цени от Excel")):
+        uploaded = st.file_uploader(t("Excel с цени („1. Оферта – софтуер.xlsx“ - колони Елемент и Ед. Цена):"),
+                                    type=["xlsx"], key="prices_upload")
+        if uploaded is not None and st.button(t("📥 Зареди цените"), key="load_prices",
+                                              help=t("Заменя всички цени с тези от файла и ги записва - важат за "
+                                                     "всички проекти.")):
+            try:
+                loaded = prices_from_excel(uploaded)
+            except Exception as exc:  # noqa: BLE001 - грешен файл
+                st.error(t("Файлът не може да се прочете: {error}", error=exc))
+            else:
+                if loaded.empty:
+                    st.error(t("Във файла няма цени под „Ед. Цена“."))
+                else:
+                    store_prices(loaded)
+                    st.success(t("✅ Заредени {n} цени от Excel. Създайте Excel наново.", n=len(loaded)))
+
 def kss_stock():
     """
     Наличността за колоната „Наличност в склада“ в „Кол. сметка“ (Excel): {наименование в КСС: наличност}.
@@ -776,6 +925,31 @@ def process_uploaded_file(uploaded_file):
     else:
         return [Image.open(uploaded_file)]
 
+PDF_DIRECT_MAX_MB = 50      # Gemini приема PDF до 50 MB (над ~18 MB - през File API, в gemini_agent2.py)
+PDF_DIRECT_MIN_NUMBERS = 20  # най-малко толкова числа в текстовия слой - иначе е сканиран / кóтите са линии
+# Как да се разчете PDF (потребителят, 20.11.2026): автоматично - по текстовия слой; или избрано на ръка
+READ_MODES = ["Автоматично", "Като текст (PDF)", "Като картина"]
+
+def pdf_for_gemini(uploaded_file, mode="Автоматично"):
+    """PDF-ът направо към Gemini (потребителят, 20.11.2026): кóтите от текстовия слой се четат като текст, без
+    смаляване на голямата картина. Автоматично - само при текстов слой с числа (плотиран PDF); „Като текст“ -
+    винаги; „Като картина“ - никога. Над 50 MB или не PDF - None: страниците като изображения, както преди
+    (сканиран / принтиран чертеж, кóти като линии)."""
+    if (mode == "Като картина" or uploaded_file.type != "application/pdf"
+            or uploaded_file.size > PDF_DIRECT_MAX_MB * 1024 * 1024):
+        return None
+    uploaded_file.seek(0)
+    data = uploaded_file.read()
+    if mode == "Като текст (PDF)":
+        return data
+    numbers = 0
+    with fitz.open(stream=data, filetype="pdf") as doc:
+        for page in doc:
+            numbers += sum(any(ch.isdigit() for ch in word[4]) for word in page.get_text("words"))
+            if numbers >= PDF_DIRECT_MIN_NUMBERS:
+                return data
+    return None
+
 def uploaded_preview(uploaded_file):
     """Първата страница за екрана (смалена до ширината на показване) и броят страници. Прави се веднъж
     за качения файл и се пази, докато е качен - кликовете в таба не рисуват чертежа наново.
@@ -961,6 +1135,10 @@ with st.sidebar:
         api_key = st.text_input(t("Въведете Gemini API Key:"), type="password", key="api_key_input")
     else:
         st.success(t("🔑 API Ключът е зареден!"))
+    if app_password() and st.button(t("🚪 Изход"), key="logout",
+                                    help=t("Изход от приложението; ако компютърът е запомнен - забравя го.")):
+        st.session_state.update(password_correct=False, logged_out=True, clear_login_cookie=True)
+        st.rerun()
 
 # === ГОРНА ЛЕНТА И ВИД НА СТРАНИЦАТА „ПРОЕКТИ“ (по снимка 19 в reference/screenshots) ===
 language_switch()  # езикът - горе вдясно, над лентата
@@ -1200,6 +1378,40 @@ def element_column_config():
         "closed_end_3": st.column_config.CheckboxColumn(t("Затворен край 3 (само T-стена)"), default=True, width="auto")
     }
 
+SOURCE_NOTE_PREFIX = "📍 "   # бележка „откъде е елементът“ (source от Gemini) - отделно от забележките
+
+# Двойна проверка (потребителят, 20.11.2026): полетата от сравнението - с имената на колоните в таблицата
+DOUBLE_CHECK_LABELS = {"count": "Брой", "l1_cm": "Стена A", "thickness_cm": "Дебелина стена A",
+                       "l2_cm": "Стена B", "thickness2_cm": "Дебелина стена B", "l3_cm": "Стена C",
+                       "thickness3_cm": "Дебелина стена C", "height_cm": "Височина",
+                       "closed_end_1": "Затворен край 1", "closed_end_2": "Затворен край 2",
+                       "closed_end_3": "Затворен край 3"}
+
+def double_check_notes(differences):
+    """Разликите между двете разчитания (gemini_agent2._compare_readings) - като забележки на AI."""
+    def show(value):
+        if isinstance(value, bool):
+            return t("да") if value else t("не")
+        return "-" if value is None else f"{value:g}" if isinstance(value, (int, float)) else str(value)
+
+    if not differences:
+        return [t("🔁 Двойна проверка: двете разчитания съвпадат.")]
+    notes = []
+    for d in differences:
+        if d["kind"] == "failed":
+            notes.append(t("🔁 Двойната проверка не мина: {error}", error=d.get("error", "")))
+        elif d["kind"] == "only_first":
+            notes.append(t("🔁 Двойна проверка: {name} е само в първото разчитане (в таблицата е) - проверете го.",
+                           name=d["name"]))
+        elif d["kind"] == "only_second":
+            notes.append(t("🔁 Двойна проверка: {name} е само във второто разчитане (не е в таблицата) - проверете "
+                           "чертежа.", name=d["name"]))
+        else:
+            notes.append(t("🔁 Двойна проверка: {name} - {field}: {first} (в таблицата) / {second} (второ "
+                           "разчитане).", name=d["name"], field=t(DOUBLE_CHECK_LABELS.get(d["field"], d["field"])),
+                           first=show(d["first"]), second=show(d["second"])))
+    return notes
+
 def render_drawing_notes():
     """
     Забележките на AI (противоречия и несигурности в чертежа) - точно над таблица 1, по чертежи, с по-малък шрифт.
@@ -1215,8 +1427,15 @@ def render_drawing_notes():
                     ".st-key-drawing_notes_box [data-testid='stAlert'] li {font-size: 13px; line-height: 1.35;}</style>",
                     unsafe_allow_html=True)
         for name, items in shown:
-            st.warning("**" + t("⚠️ Забележки на AI - Чертеж {i}: {name}", i=numbers[name], name=name) + "**\n"
-                       + "\n".join(f"- {t(note)}" for note in items))   # t() - само TRUNCATED_NOTE
+            remarks = [note for note in items if not str(note).startswith(SOURCE_NOTE_PREFIX)]
+            sources = [note[len(SOURCE_NOTE_PREFIX):] for note in items if str(note).startswith(SOURCE_NOTE_PREFIX)]
+            if remarks:
+                st.warning("**" + t("⚠️ Забележки на AI - Чертеж {i}: {name}", i=numbers[name], name=name) + "**\n"
+                           + "\n".join(f"- {t(note)}" for note in remarks))   # t() - само TRUNCATED_NOTE
+            if sources:   # откъде е всеки елемент (страница, оси) - сгънато, може да са много
+                with st.expander(t("📍 Откъде е всеки елемент - Чертеж {i}: {name} ({n})", i=numbers[name],
+                                   name=name, n=len(sources))):
+                    st.markdown("\n".join(f"- {s}" for s in sources))
 
 def render_drawing_manager(groups):
     """Чертежите в проекта: преименуване и изтриване (с потвърждение). Незаписаните промени в таблиците се губят."""
@@ -1303,6 +1522,18 @@ with tab1:
                     help=t("Изберете кой модел на Gemini да анализира чертежа."),
                     key="ai_model"
                 )
+                read_mode = "Като картина"
+                if uploaded_file.type == "application/pdf":
+                    read_mode = st.radio(
+                        t("Как да се разчете чертежът:"), READ_MODES, format_func=t, horizontal=True,
+                        key="read_mode",
+                        help=t("Автоматично: плотиран PDF (с текст вътре) - като PDF, кóтите се четат от текста; "
+                               "сканиран или принтиран PDF (без текст) - като картини на страниците. Изберете "
+                               "на ръка, ако автоматичният избор не е подходящ (напр. кóтите са линии, а не текст)."))
+                double_check = st.checkbox(
+                    t("🔁 Двойна проверка (разчита чертежа два пъти и сравнява)"), value=False, key="double_check",
+                    help=t("Разликите между двете разчитания излизат в забележките на AI - там проверете таблицата. "
+                           "Отнема двойно време и изразходва двойно от безплатното ограничение на ключа."))
 
                 # Чертежът се добавя в отделна таблица под таблиците на вече разчетените (18.11.2026);
                 # повторно разчитане на същия файл - замяна на елементите му или нов чертеж
@@ -1326,17 +1557,21 @@ with tab1:
                     if st.button(t("🔍 Разчети чертежа с Vision AI"), type="primary", use_container_width=True,
                                  key="read_blueprint"):
                         # пълните страници за Gemini се рисуват само тук, не при всеки клик
-                        processed_img = None
+                        processed_img = pdf_bytes = None
                         if file_ok:
                             try:
-                                processed_img = process_uploaded_file(uploaded_file)
+                                # PDF с текстов слой - направо; иначе страниците като изображения
+                                pdf_bytes = pdf_for_gemini(uploaded_file, read_mode)
+                                if not pdf_bytes:
+                                    processed_img = process_uploaded_file(uploaded_file)
                             except Exception as e:
                                 st.error(t("Грешка при зареждането: {error}", error=e))
-                        if processed_img:
+                        if processed_img or pdf_bytes:
                             with st.spinner(t("Извличане на вертикални кофражни елементи...")):
                                 try:
                                     res = analyze_blueprint(processed_img, api_key, model_choice=selected_model,
-                                                            notes_language=st.session_state.get("lang", "bg"))
+                                                            notes_language=st.session_state.get("lang", "bg"),
+                                                            pdf_bytes=pdf_bytes, double_check=double_check)
                                     if isinstance(res, tuple):
                                         blueprint_data, used_model = res
                                     else:
@@ -1345,11 +1580,21 @@ with tab1:
                                     st.session_state["blueprint_data"] = blueprint_data
                                     st.session_state["used_model"] = used_model
                                     elements_list = blueprint_data.get("elements", [])
-                                    
+                                    # откъде е всеки елемент - само бележка, не колона (потребителят, 20.11.2026)
+                                    sources = [SOURCE_NOTE_PREFIX + f"{e.get('name') or '?'}: {e.pop('source')}"
+                                               for e in elements_list if isinstance(e, dict) and e.get("source")]
+                                    for e in elements_list:
+                                        if isinstance(e, dict):
+                                            e.pop("source", None)
+
                                     df_ai = columns_to_cm(pd.DataFrame(elements_list))
                                     for col in DATA_COLUMNS:
                                         if col not in df_ai.columns:
                                             df_ai[col] = True if col in CLOSED_END_COLUMNS else None
+                                    # затворени краища от Gemini: false - краят опира в друг елемент (отворен);
+                                    # true и null (не се вижда) - затворен, както по подразбиране
+                                    for col in CLOSED_END_COLUMNS:
+                                        df_ai[col] = [str(v).lower() != "false" for v in df_ai[col]]
                                     df_ai["drawing"] = drawing
                                     groups = drawing_groups(st.session_state["edited_df"])
                                     new_part = thickness_to_walls(df_ai)
@@ -1363,11 +1608,17 @@ with tab1:
                                     st.session_state.pop("excel_bytes", None)
                                     st.success(t("✅ Готово! Разчетено с: **{model}**", model=used_model) + " " +
                                                t("Чертеж „{name}“: {n} елемента - записани в проекта.",
-                                                 name=drawing, n=len(new_part)))
+                                                 name=drawing, n=len(new_part)) + " " +
+                                               (t("Изпратен като PDF (с текста в него).") if pdf_bytes else
+                                                t("Изпратен като изображения на страниците.")) +
+                                               (" " + t("Качен през File API (голям файл) и изтрит след "
+                                                        "разчитането.") if blueprint_data.get("file_api") else ""))
                                     # противоречия и несигурности в чертежа - потребителят проверява таблицата;
                                     # показват се точно над таблица 1 (render_drawing_notes)
                                     notes = list(blueprint_data.get("notes") or [])
-                                    st.session_state.setdefault("drawing_notes", {})[drawing] = notes
+                                    if double_check:
+                                        notes += double_check_notes(blueprint_data.get("double_check") or [])
+                                    st.session_state.setdefault("drawing_notes", {})[drawing] = notes + sources
                                 except Exception as e:
                                     st.error(t("Грешка при анализа: {error}", error=e))
     else:
@@ -1646,11 +1897,12 @@ def render_specification_tab(df_calc):
         st.caption(t("Лист „Кол. сметка“ - артикулите в реда на офертата; лист за всеки елемент - изглед отгоре и "
                      "изглед отпред от клетки (1 клетка = 5 см) за редакция; лист с всички панели за копиране."))
         # смяна на езика - готовият файл вече не отговаря, създава се наново
+        render_prices_box()
         excel_lang = doc_language_select("doc_lang_excel", on_change=lambda: st.session_state.pop("excel_bytes", None))
         if st.button(t("📊 Създай Excel (КСС и чертежи)"), key="make_excel"):
             with st.spinner(t("Генериране на Excel...")), document_language(excel_lang):
                 st.session_state["excel_bytes"] = generate_excel(build_drawing_elements(df_calc),
-                                                                 kss_stock()).getvalue()
+                                                                 kss_stock(), kss_prices()).getvalue()
         if st.session_state.get("excel_bytes"):
             st.download_button(
                 label=t("📥 Изтегли КСС и чертежи (Excel .xlsx)"),
