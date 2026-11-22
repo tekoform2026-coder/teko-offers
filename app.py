@@ -26,6 +26,7 @@ from stock_layout import plan_project
 from weights_db import get_item_weight
 from i18n import t, t_item, init_language, language_switch, MANUAL_HELP_BG
 from doc_lang import DOC_FLAGS, DOC_LANGUAGES, document_language, dt
+from floor_plan import ROW_WIDTH_CM, default_positions, floor_component, generate_floor_pdf, piece_boxes, piece_plan
 
 init_language()
 st.set_page_config(
@@ -288,6 +289,27 @@ def join_drawing_groups(groups):
         parts.append(part)
     parts = [p for p in parts if len(p)]
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=DATA_COLUMNS)
+
+def drawing_file_key(drawing):
+    return (st.session_state.get("current_project"), drawing)
+
+def keep_drawing_file(drawing, uploaded_file):
+    """Файлът на разчетения чертеж - в сесията (не в архива), за фона в таб 6 „3D план на етажа“."""
+    st.session_state.setdefault("drawing_files", {})[drawing_file_key(drawing)] = {
+        "name": uploaded_file.name, "type": uploaded_file.type, "data": uploaded_file.getvalue()}
+
+def drawing_file(drawing):
+    """
+    Файлът на чертежа за фона: разчетеният в таб 1 (пази се, докато страницата е отворена) или качения в
+    момента в таб 1 със същото име. None - няма го (напр. проектът е отворен наново след F5).
+    """
+    saved = st.session_state.get("drawing_files", {}).get(drawing_file_key(drawing))
+    if saved:
+        return saved
+    current_upload = st.session_state.get("blueprint_upload")
+    if drawing and current_upload is not None and current_upload.name == drawing:
+        return {"name": current_upload.name, "type": current_upload.type, "data": current_upload.getvalue()}
+    return None
 
 def unique_drawing_name(name, existing):
     """„план.pdf“, а ако го има - „план.pdf (2)“, „план.pdf (3)“ ..."""
@@ -1343,12 +1365,13 @@ col_back.button(t("← Проекти"), on_click=close_project, use_container_w
                 help=t("Записва таблицата и се връща към списъка с проекти."))
 
 load_stock_once()  # преди табовете - предупрежденията за наличността са и в табове 1 и 2
-tab1, tab2, tab3, tab4, tab5 = st.tabs([t(label) for label in (
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([t(label) for label in (
     "📐 Чертеж и Редактиране",
     "🧱 Кофражни Елементи и Панели TEKO",
     "📄 PDF Чертежи",
     "📄 Оферта",
-    "📦 Складова наличност"
+    "📦 Складова наличност",
+    "🏗️ 3D план на етажа"
 )])
 
 def element_column_config():
@@ -1458,6 +1481,9 @@ def render_drawing_manager(groups):
                     notes = st.session_state.get("drawing_notes", {})
                     if dname in notes:
                         notes[new_name] = notes.pop(dname)
+                    files = st.session_state.get("drawing_files", {})
+                    if drawing_file_key(dname) in files:
+                        files[drawing_file_key(new_name)] = files.pop(drawing_file_key(dname))
                     reset_table_editors()
                     save_current_project()
                     st.rerun()
@@ -1468,6 +1494,7 @@ def render_drawing_manager(groups):
                 if st.button(t("🗑 Да, изтрий чертежа"), key=f"confirm_delete_drawing_{i}", type="primary"):
                     st.session_state["edited_df"] = join_drawing_groups([g for g in groups if g[0] != dname])
                     st.session_state.get("drawing_notes", {}).pop(dname, None)
+                    st.session_state.get("drawing_files", {}).pop(drawing_file_key(dname), None)
                     st.session_state.pop("delete_drawing", None)
                     reset_table_editors()
                     save_current_project()
@@ -1619,6 +1646,8 @@ with tab1:
                                     if double_check:
                                         notes += double_check_notes(blueprint_data.get("double_check") or [])
                                     st.session_state.setdefault("drawing_notes", {})[drawing] = notes + sources
+                                    # самият чертеж - за фона в „3D план на етажа“ (без ново качване в таб 6)
+                                    keep_drawing_file(drawing, uploaded_file)
                                 except Exception as e:
                                     st.error(t("Грешка при анализа: {error}", error=e))
     else:
@@ -2089,6 +2118,211 @@ def render_stock_tab(df_calc):
         st.success(t("✅ Заредени {n} реда от Excel.", n=st.session_state.pop("stock_loaded")))
 
 
+# === 3D план на етажа (таб 6, потребителят 22.11.2026) ===
+# Елементите на един чертеж се подреждат с мишката в изглед отгоре (приблизително) и се чертаят заедно в 3D -
+# отделен PDF. Местата се пазят само докато страницата е отворена (не се записват в архива).
+FLOOR_BG_MAX_PX = 2400  # чертежът като фон - най-много толкова пиксела по дългата страна
+FLOOR_BG_WIDTH_CM = 3000  # картина без мащаб - приема се толкова широка, докато не се зададе мащаб по кота
+
+
+def floor_pieces(df_part):
+    """
+    Елементите на един чертеж за 3D плана - по един за всеки брой. id - от типа, името и размерите
+    (остава същото при промяна на други редове в таблицата).
+    """
+    pieces, seen = [], {}
+    for _, row in df_part.iterrows():
+        elem_type = str(row.get("type", "wall"))
+        layout = element_layout(elem_type, row)
+        if layout is None:
+            continue
+        name = "" if pd.isna(row.get("name")) else str(row.get("name"))
+        base = "|".join([elem_type, name] + [str(_row_float(row, col, "")) for col in
+                                             ("l1_cm", "l2_cm", "l3_cm", "thickness_cm", "height_cm")])
+        seen[base] = seen.get(base, 0) + 1
+        plan, boxes = piece_plan(layout), piece_boxes(layout)
+        label = format_element_label(elem_type, name)
+        cnt = int(_row_float(row, "count", 1))
+        for k in range(cnt):
+            pieces.append({**plan, "boxes": boxes, "id": f"{base}|{seen[base]}|{k}",
+                           "label": label + (f" ({k + 1})" if cnt > 1 else "")})
+    return pieces
+
+
+def floor_background(file, page):
+    """
+    Чертежът като фон: сива JPEG картина (data URL и байтовете), размерите в пиксели и точки на PDF на пиксел.
+    file: {"name", "type", "data"} (drawing_file) или качен файл.
+    """
+    import base64
+    if not isinstance(file, dict):
+        file = {"name": file.name, "type": file.type, "data": file.getvalue()}
+    data = file["data"]
+    pt_per_px = None
+    if file["type"] == "application/pdf":
+        with fitz.open(stream=data, filetype="pdf") as doc:
+            pg = doc.load_page(page - 1)
+            zoom = FLOOR_BG_MAX_PX / max(pg.rect.width, pg.rect.height)
+            pix = pg.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
+            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            pt_per_px = 1 / zoom
+    else:
+        img = Image.open(io.BytesIO(data))
+        img.thumbnail((FLOOR_BG_MAX_PX, FLOOR_BG_MAX_PX))
+    buf = io.BytesIO()
+    img.convert("L").save(buf, format="JPEG", quality=60)
+    return {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(), "jpeg": buf.getvalue(),
+            "w_px": img.width, "h_px": img.height, "pt_per_px": pt_per_px,
+            "cm_per_px": FLOOR_BG_WIDTH_CM / img.width}
+
+
+def floor_scale_changed(store, key):
+    """Мащаб 1:N на PDF чертежа -> см на пиксел (1 pt = 2,54 / 72 см на хартията)."""
+    bg = store["bg"]
+    bg["cm_per_px"] = bg["pt_per_px"] * 2.54 / 72 * st.session_state[key]
+
+
+@st.fragment
+def render_floor_tab(df_calc, current):
+    st.header(t("6. 3D план на етажа"))
+    groups = [(name, part) for name, part in drawing_groups(df_calc) if len(part)]
+    if not groups:
+        st.info(t("ℹ️ Въведете елементи в Таб 1 и натиснете 'Запази и Изчисли'."))
+        return
+    choice = 0
+    if len(groups) > 1:
+        choice = st.selectbox(t("Чертеж (етаж):"), range(len(groups)), key="floor_drawing",
+                              format_func=lambda i: (t("Чертеж {i}: {name}", i=i + 1, name=groups[i][0])
+                                                     if groups[i][0] else t("Без чертеж (въведени ръчно)")))
+    drawing, part = groups[choice]
+    fkey = hashlib.md5(f"{current['id']}|{drawing}".encode()).hexdigest()[:10]
+    store = st.session_state.setdefault("floor_plans", {}).setdefault(fkey, {"positions": {}, "bg": None, "reset": 0})
+    pieces = floor_pieces(part)
+
+    with st.expander(t("🖼️ Чертежът като фон"), expanded=True):
+        # фонът - сам от разчетения в таб 1 чертеж; друг файл - само ако няма или трябва друг
+        own = drawing_file(drawing)
+        other = st.file_uploader(t("Друг файл за фон (PDF или картина) - само ако не е разчетеният в таб 1:")
+                                 if own else t("Чертеж (PDF или картина):"),
+                                 type=["pdf", "png", "jpg", "jpeg"], key=f"floor_bg_file_{fkey}")
+        file = None
+        if store.get("bg_off"):   # скрит с „Скрий фона“
+            if st.button(t("🖼️ Покажи фона"), key=f"floor_bg_on_{fkey}"):
+                store["bg_off"] = False
+                st.rerun(scope="fragment")
+        elif other is not None:
+            file = {"name": other.name, "type": other.type, "data": other.getvalue()}
+        elif own:
+            file = own
+            st.caption(t("Фонът е чертежът от таб 1: „{name}“.", name=own["name"]))
+        elif drawing:
+            st.caption(t("Файлът на „{name}“ не е зареден (пази се само докато страницата е отворена) - качете го "
+                         "тук или в таб 1.", name=drawing))
+        if file is not None:
+            page = 1
+            if file["type"] == "application/pdf":
+                with fitz.open(stream=file["data"], filetype="pdf") as doc:
+                    n_pages = doc.page_count
+                if n_pages > 1:
+                    page = st.number_input(t("Страница:"), min_value=1, max_value=n_pages, value=1, step=1,
+                                           key=f"floor_bg_page_{fkey}")
+            src = (file["name"], len(file["data"]), page)
+            if store["bg"] is None or store["bg"].get("src") != src:
+                store["bg"] = floor_background(file, page)
+                store["bg"]["src"] = src
+                scale_key = f"floor_bg_scale_{fkey}"
+                if store["bg"]["pt_per_px"]:  # PDF - по мащаба 1:N (по подразбиране 1:50)
+                    st.session_state.setdefault(scale_key, 50)
+                    floor_scale_changed(store, scale_key)
+        if file is None:
+            store["bg"] = None
+        bg = store["bg"]
+        if bg:
+            col_scale, col_known, col_op = st.columns(3)
+            if bg["pt_per_px"]:
+                scale_key = f"floor_bg_scale_{fkey}"
+                col_scale.number_input(t("Мащаб на чертежа 1:"), min_value=1, step=1, key=scale_key,
+                                       on_change=floor_scale_changed, args=(store, scale_key),
+                                       help=t("Мащабът, в който е начертан листът (напр. 1:50). Сканиран лист "
+                                              "може да е с друг размер - тогава задайте мащаба по кота."))
+            col_known.number_input(t("Известна кота (см):"), min_value=1.0, value=1000.0, step=5.0,
+                                   key=f"floor_known_{fkey}",
+                                   help=t("За „📏 Мащаб по кота“: кликнете двата края на тази кота върху чертежа."))
+            bg["opacity"] = col_op.slider(t("Видимост на фона"), 0.1, 1.0, 0.45, 0.05, key=f"floor_bg_op_{fkey}")
+            if st.button(t("🙈 Скрий фона"), key=f"floor_bg_del_{fkey}"):
+                store["bg"], store["bg_off"] = None, True
+                st.rerun(scope="fragment")
+            st.checkbox(t("Фонът в PDF-а (бледо, под елементите)"), value=True, key=f"floor_bg_pdf_{fkey}")
+            st.caption(t("Ако елементите не съвпадат по размер с чертежа, натиснете „📏 Мащаб по кота“ в лентата над "
+                         "плана и кликнете двата края на известна кота."))
+
+    bg = store["bg"]
+    bg_data = None
+    if bg:
+        bg_data = {"url": bg["url"], "w": bg["w_px"] * bg["cm_per_px"], "h": bg["h_px"] * bg["cm_per_px"],
+                   "opacity": bg.get("opacity", 0.45)}
+    ids = {p["id"] for p in pieces}
+    known = {pid: pos for pid, pos in store["positions"].items() if pid in ids}
+    # новите елементи - на редове под чертежа (фонът е от y = 0 нагоре), оттам се влачат до мястото си
+    store["positions"] = default_positions(pieces, known,
+                                           row_width_cm=bg_data["w"] if bg_data else ROW_WIDTH_CM)
+
+    st.caption(t("Влачете елементите с мишката до мястото им (приблизително е достатъчно). Клик върху елемент го "
+                 "избира: кръгчето над него го върти под всякакъв ъгъл (през 5°, със Shift - през 1°), „Ъгъл“ - "
+                 "точен ъгъл, „↺ 90°“ / „↻ 90°“ (или клавиш R) - на 90°, „⇋ Огледално“ (или M) го обръща. Колелцето "
+                 "приближава, влачене на празно място мести изгледа. Местата се пазят, докато страницата е отворена "
+                 "(не се записват в архива)."))
+    ckey = f"floor_{fkey}_{store['reset']}"
+    data = {
+        "pieces": [{k: p[k] for k in ("id", "label", "poly", "forms", "cx", "cy", "w", "h")} for p in pieces],
+        "positions": store["positions"],
+        "bg": bg_data,
+        "token": f"{ckey}|{bg_data['w'] if bg_data else 0}",
+        "texts": {"rotl": t("↺ 90°"), "rotr": t("↻ 90°"), "angle": t("Ъгъл:"), "mir": t("⇋ Огледално"),
+                  "fit": t("⤢ Целият план"),
+                  "calib": t("📏 Мащаб по кота"),
+                  "calib1": t("Кликнете в единия край на известната кота."),
+                  "calib2": t("Кликнете в другия край на котата."),
+                  "hint": t("Влачете елементите; клик върху елемент го избира."),
+                  "selected": t("Избран: {name} - кръгчето го върти.", name="{name}")},
+    }
+    result = floor_component()(data=data, key=ckey, on_positions_change=lambda: None,
+                               on_calib_change=lambda: None)
+    moved = getattr(result, "positions", None)
+    if moved:
+        moved = {pid: pos for pid, pos in moved.items() if pid in ids}
+        if any(store["positions"].get(pid) != pos for pid, pos in moved.items()):
+            store["positions"].update(moved)
+            store.pop("pdf", None)  # готовият PDF е със старите места
+    measured = getattr(result, "calib", None)
+    if measured and bg:
+        bg["cm_per_px"] *= st.session_state.get(f"floor_known_{fkey}", 1000.0) / measured
+        st.rerun(scope="fragment")
+
+    col_reset, col_lang, col_pdf = st.columns([1, 1, 1], vertical_alignment="bottom")
+    if col_reset.button(t("↺ Подреди наново"), key=f"floor_reset_{fkey}",
+                        help=t("Връща всички елементи един до друг (местата се губят).")):
+        store["positions"] = {}
+        store["reset"] += 1
+        store.pop("pdf", None)
+        st.rerun(scope="fragment")
+    with col_lang:
+        floor_lang = doc_language_select("doc_lang_floor")
+    if col_pdf.button(t("📄 Генерирай 3D PDF"), type="primary", key="make_floor_pdf", use_container_width=True):
+        with st.spinner(t("Чертане на 3D плана...")), document_language(floor_lang):
+            doc_pieces = floor_pieces(part)  # имената - на езика на документа
+            info = {"project": current["name"], "client": current["client"] or dt("Няма посочен клиент"),
+                    "drawing": drawing,
+                    "date": current["date"].strftime("%d.%m.%Y") if hasattr(current["date"], "strftime") else ""}
+            background = None
+            if bg and st.session_state.get(f"floor_bg_pdf_{fkey}", True):
+                background = {"image": Image.open(io.BytesIO(bg["jpeg"])), "cm_per_px": bg["cm_per_px"]}
+            store["pdf"] = generate_floor_pdf(doc_pieces, store["positions"], info, background)
+    if store.get("pdf"):
+        st.download_button(t("📥 Изтегли 3D плана (PDF)"), data=store["pdf"],
+                           file_name="Teko_3D_Floor_Plan.pdf", mime="application/pdf", use_container_width=True)
+
+
 df_calc = fill_default_height(st.session_state["edited_df"],
                               st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM))
 update_stock_plan(df_calc)
@@ -2100,3 +2334,5 @@ with tab4:
     render_offer_tab(df_calc, current)
 with tab5:
     render_stock_tab(df_calc)
+with tab6:
+    render_floor_tab(df_calc, current)
