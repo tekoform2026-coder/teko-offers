@@ -170,6 +170,59 @@ EN = {
     "📄 PDF Чертежи": "📄 PDF Drawings",
     "📄 Оферта": "📄 Offer",
     "📦 Складова наличност": "📦 Stock",
+    "🏗️ 3D план на етажа": "🏗️ 3D Floor Plan",
+
+    # Таб 6 - 3D план на етажа (22.11.2026)
+    "6. 3D план на етажа": "6. 3D floor plan",
+    "Чертеж (етаж):": "Drawing (floor):",
+    "🖼️ Чертежът като фон": "🖼️ The drawing as a background",
+    "Друг файл за фон (PDF или картина) - само ако не е разчетеният в таб 1:":
+        "Another file for the background (PDF or image) - only if it is not the one read in tab 1:",
+    "Фонът е чертежът от таб 1: „{name}“.": "The background is the drawing from tab 1: “{name}”.",
+    "Файлът на „{name}“ не е зареден (пази се само докато страницата е отворена) - качете го тук или в таб 1.":
+        "The file of “{name}” is not loaded (it is kept only while the page is open) - upload it here or in tab 1.",
+    "Чертеж (PDF или картина):": "Drawing (PDF or image):",
+    "Страница:": "Page:",
+    "Мащаб на чертежа 1:": "Drawing scale 1:",
+    "Мащабът, в който е начертан листът (напр. 1:50). Сканиран лист може да е с друг размер - тогава задайте "
+    "мащаба по кота.": "The scale of the sheet (e.g. 1:50). A scanned sheet may have a different size - then set "
+                       "the scale by a dimension.",
+    "Известна кота (см):": "Known dimension (cm):",
+    "За „📏 Мащаб по кота“: кликнете двата края на тази кота върху чертежа.":
+        "For “📏 Scale by dimension”: click both ends of this dimension on the drawing.",
+    "Видимост на фона": "Background visibility",
+    "🙈 Скрий фона": "🙈 Hide the background",
+    "🖼️ Покажи фона": "🖼️ Show the background",
+    "Фонът в PDF-а (бледо, под елементите)": "The background in the PDF (faint, under the elements)",
+    "Ако елементите не съвпадат по размер с чертежа, натиснете „📏 Мащаб по кота“ в лентата над плана и кликнете "
+    "двата края на известна кота.":
+        "If the elements do not match the drawing in size, press “📏 Scale by dimension” in the bar above the plan "
+        "and click both ends of a known dimension.",
+    "Влачете елементите с мишката до мястото им (приблизително е достатъчно). Клик върху елемент го избира: "
+    "кръгчето над него го върти под всякакъв ъгъл (през 5°, със Shift - през 1°), „Ъгъл“ - точен ъгъл, "
+    "„↺ 90°“ / „↻ 90°“ (или клавиш R) - на 90°, „⇋ Огледално“ (или M) го обръща. Колелцето приближава, влачене на "
+    "празно място мести изгледа. Местата се пазят, докато страницата е отворена (не се записват в архива).":
+        "Drag the elements with the mouse to their place (approximately is enough). A click on an element selects "
+        "it: the circle above it rotates it to any angle (in 5° steps, with Shift - 1°), “Angle” - an exact angle, "
+        "“↺ 90°” / “↻ 90°” (or the R key) - by 90°, “⇋ Mirror” (or M) flips it. The mouse wheel zooms, dragging an "
+        "empty spot moves the view. The positions are kept while the page is open (they are not saved in the "
+        "archive).",
+    "↺ 90°": "↺ 90°",
+    "↻ 90°": "↻ 90°",
+    "Ъгъл:": "Angle:",
+    "⇋ Огледално": "⇋ Mirror",
+    "⤢ Целият план": "⤢ Whole plan",
+    "📏 Мащаб по кота": "📏 Scale by dimension",
+    "Кликнете в единия край на известната кота.": "Click one end of the known dimension.",
+    "Кликнете в другия край на котата.": "Click the other end of the dimension.",
+    "Влачете елементите; клик върху елемент го избира.": "Drag the elements; a click on an element selects it.",
+    "Избран: {name} - кръгчето го върти.": "Selected: {name} - the circle rotates it.",
+    "↺ Подреди наново": "↺ Arrange again",
+    "Връща всички елементи един до друг (местата се губят).":
+        "Puts all elements side by side again (the positions are lost).",
+    "📄 Генерирай 3D PDF": "📄 Generate 3D PDF",
+    "Чертане на 3D плана...": "Drawing the 3D plan...",
+    "📥 Изтегли 3D плана (PDF)": "📥 Download the 3D plan (PDF)",
 
     # Таб 1
     "1. Избор на начин за въвеждане на елементи": "1. How to enter the elements",
