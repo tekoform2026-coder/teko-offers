@@ -1,0 +1,737 @@
+"""
+3D план на етажа (потребителят, 22.11.2026): елементите от един чертеж се подреждат с мишката в изглед отгоре
+(приблизително - без точност) и се чертаят заедно в 3D - отделен PDF файл (А3, хоризонтално).
+
+Мястото на всеки брой елемент: {"x", "y", "rot", "mir"} - центърът в см (y нагоре), завъртане в градуси обратно
+на часовника (всякакъв ъгъл - и по диагонал), огледално (по x, преди завъртането). Реденето на панелите и сметките не се пипат - чертае се
+разположението от layout_element() (или плана според склада).
+"""
+import heapq
+import io
+
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.collections import PolyCollection
+from matplotlib.path import Path
+from matplotlib.transforms import Affine2D
+
+from drawing_generator import (_plan_geometry, _face_strips, PANEL_T, COLOR_3D_PANEL, COLOR_3D_COMPENSATOR,
+                               COLOR_3D_CORNER, COLOR_3D_CORNER_IN, COLOR_3D_CONCRETE, COLOR_3D_EDGE, COLOR_BOARD,
+                               TOP_PANEL, TOP_PANEL_BORDER, TOP_EX, TOP_IN, TOP_CONCRETE_BORDER)
+from teko_calculator import face_row_pieces, is_compensator_row
+from doc_lang import dt
+
+SNAP_CM = 5          # местата прилепват през 5 см
+ROW_WIDTH_CM = 3000  # подреждане по подразбиране - редове до 30 м
+GAP_CM = 150         # разстояние между елементите при подреждането по подразбиране
+VIEW_MAIN = (30, -60)     # 3D изглед: височина и посока на гледане (отпред вляво)
+COLOR_CONCRETE_EDGE = '#6E6E70'
+PLAN_CONCRETE = '#C9CDD2'
+BG_ALPHA = 0.35       # чертежът (фонът) в PDF-а - бледо
+BG_MARGIN_CM = 300    # от фона се взима частта около елементите и още толкова
+
+
+# ---------- Геометрия на един елемент (локално, см) ----------
+
+def _concrete_rects(poly):
+    """Бетонът като правоъгълници (ивици по y): [(x0, y0, x1, y1)]."""
+    core = Path(poly)
+    ys = sorted({p[1] for p in poly})
+    xs = sorted({p[0] for p in poly})
+    rects = []
+    for y0, y1 in zip(ys, ys[1:]):
+        run = None
+        for x0, x1 in zip(xs, xs[1:]):
+            if core.contains_point(((x0 + x1) / 2, (y0 + y1) / 2)):
+                run = (run[0], x1) if run else (x0, x1)
+            elif run:
+                rects.append((run[0], y0, run[1], y1))
+                run = None
+        if run:
+            rects.append((run[0], y0, run[1], y1))
+    return rects
+
+
+def piece_plan(layout):
+    """
+    Изгледът отгоре за подреждането: бетонът (многоъгълник), кофражът ([x0, y0, x1, y1, вид] - "P" панели,
+    "EX" / "IN" ъгли), центърът и размерите на целия елемент с кофража.
+    """
+    T = PANEL_T
+    poly, place, corners = _plan_geometry(layout)
+    forms = []
+    for axis, a0, a1, c_lo, c_hi, _normal in _face_strips(layout, place, poly).values():
+        forms.append([a0, c_lo, a1, c_hi, "P"] if axis == 'x' else [c_lo, a0, c_hi, a1, "P"])
+    for kind, x, y in corners:
+        forms.append([x, y, x + T, y + T, kind])
+    xs = [p[0] for p in poly] + [f[0] for f in forms] + [f[2] for f in forms]
+    ys = [p[1] for p in poly] + [f[1] for f in forms] + [f[3] for f in forms]
+    return {"poly": [[float(x), float(y)] for x, y in poly],
+            "forms": [[float(v) for v in f[:4]] + [f[4]] for f in forms],
+            "cx": (min(xs) + max(xs)) / 2, "cy": (min(ys) + max(ys)) / 2,
+            "w": max(xs) - min(xs), "h": max(ys) - min(ys)}
+
+
+def piece_boxes(layout):
+    """
+    Кутиите за 3D (локално, см): (x0, y0, z0, x1, y1, z1, цвят, ос на парчетата, [(начало, край, цвят)]).
+    Всеки ред панели на страна е една кутия, панелите в нея - парчета по оста (рисуват се с фугите).
+    """
+    T = PANEL_T
+    poly, place, corners = _plan_geometry(layout)
+    top = sum(layout["height_levels"])  # горен край на панелите
+    boxes = []
+    for face in layout["faces"]:
+        x0, y0, axis, *rev = place[face["name"]]
+        a0 = x0 if axis == 'x' else y0
+        z = 0
+        for h_val, row in zip(layout["height_levels"], face["rows"]):
+            col = COLOR_3D_COMPENSATOR if is_compensator_row(h_val) else COLOR_3D_PANEL
+            pieces = face_row_pieces(face, h_val, row)
+            if rev and rev[0]:
+                pieces = pieces[::-1]
+            s, parts = 0, []
+            for w_val, is_board, _panel_w in pieces:
+                parts.append((a0 + s, a0 + s + w_val, COLOR_BOARD if is_board else col))
+                s += w_val
+            if axis == 'x':
+                boxes.append((x0, y0, z, x0 + s, y0 + T, z + h_val, col, 'x', parts))
+            else:
+                boxes.append((x0, y0, z, x0 + T, y0 + s, z + h_val, col, 'y', parts))
+            z += h_val
+    for kind, x, y in corners:
+        boxes.append((x, y, 0, x + T, y + T, top, COLOR_3D_CORNER if kind == "EX" else COLOR_3D_CORNER_IN, None, []))
+    for x0, y0, x1, y1 in _concrete_rects(poly):
+        boxes.append((x0, y0, 0, x1, y1, layout["height_cm"], COLOR_3D_CONCRETE, None, []))
+    return boxes
+
+
+# ---------- Място на етажа ----------
+
+def _transform(piece, pos):
+    """Матрицата 2x2 и преместването: локално (x, y) -> на етажа (огледално, завъртане около центъра)."""
+    a = np.radians(float(pos.get("rot", 0) or 0))
+    c, s = np.cos(a), np.sin(a)
+    m = -1.0 if pos.get("mir") else 1.0
+    M = np.array([[c * m, -s], [s * m, c]])
+    return M, np.array([pos["x"], pos["y"]], float) - M @ np.array([piece["cx"], piece["cy"]], float)
+
+
+def to_world(x, y, piece, pos):
+    """Точка от елемента (локално) -> на етажа."""
+    M, t = _transform(piece, pos)
+    wx, wy = M @ np.array([x, y], float) + t
+    return float(wx), float(wy)
+
+
+def world_size(piece, pos):
+    """Размерите на обхващащия правоъгълник на елемента на етажа (при завъртане под ъгъл - по-голям)."""
+    a = np.radians(float(pos.get("rot", 0) or 0))
+    c, s = abs(np.cos(a)), abs(np.sin(a))
+    return round(c * piece["w"] + s * piece["h"], 6), round(s * piece["w"] + c * piece["h"], 6)
+
+
+def default_positions(pieces, positions=None, top_cm=0.0, row_width_cm=ROW_WIDTH_CM):
+    """
+    Местата по подразбиране за елементите без място: един до друг на редове надолу от top_cm
+    (под вече подредените, за да не се застъпват).
+    """
+    positions = dict(positions or {})
+    placed = [p for p in pieces if p["id"] in positions]
+    if placed:
+        top_cm = min(top_cm, min(positions[p["id"]]["y"] - world_size(p, positions[p["id"]])[1] / 2
+                                 for p in placed) - GAP_CM)
+    x, y, row_h = 0.0, top_cm, 0.0
+    for p in pieces:
+        if p["id"] in positions:
+            continue
+        if x > 0 and x + p["w"] > row_width_cm:
+            x, y, row_h = 0.0, y - row_h - GAP_CM, 0.0
+        positions[p["id"]] = {"x": _snap(x + p["w"] / 2), "y": _snap(y - p["h"] / 2), "rot": 0, "mir": False}
+        x += p["w"] + GAP_CM
+        row_h = max(row_h, p["h"])
+    return positions
+
+
+def _snap(v):
+    return round(v / SNAP_CM) * SNAP_CM
+
+
+# ---------- 3D изглед на етажа ----------
+
+def _world_boxes(pieces, positions):
+    """
+    Кутиите на всички елементи на етажа. Елемент, завъртян под ъгъл, има кутии под ъгъл - затова всяка кутия
+    е с правоъгълника си в елемента (локално), основата си на етажа (4 ъгъла) и преобразуването M, t.
+    """
+    out = []
+    for p in pieces:
+        M, t = _transform(p, positions[p["id"]])
+        for x0, y0, z0, x1, y1, z1, col, axis, parts in p["boxes"]:
+            foot = (M @ np.array([[x0, x1, x1, x0], [y0, y0, y1, y1]], float)).T + t
+            out.append({"rect": (x0, y0, x1, y1), "z": (z0, z1), "col": col, "axis": axis, "parts": parts,
+                        "M": M, "t": t, "foot": foot})
+    return out
+
+
+def _draw_order(boxes, eye, right, up):
+    """
+    Ред на рисуване отзад напред. Кутиите са изправени призми с правоъгълна основа (под всякакъв ъгъл) и не
+    се пресичат - две, които се застъпват на екрана, се разделят от равнина: хоризонтална (едната е над
+    другата) или вертикална по страна на някоя от основите. Кутията от страната към гледащия се рисува после.
+    """
+    n = len(boxes)
+    foot = np.array([b["foot"] for b in boxes])                       # (n, 4, 2)
+    z0 = np.array([b["z"][0] for b in boxes], float)
+    z1 = np.array([b["z"][1] for b in boxes], float)
+    pts = np.concatenate([np.concatenate([foot, np.repeat(z0[:, None, None], 4, 1)], 2),
+                          np.concatenate([foot, np.repeat(z1[:, None, None], 4, 1)], 2)], 1)   # (n, 8, 3)
+    u, v = pts @ right, pts @ up
+    umin, umax, vmin, vmax = u.min(1), u.max(1), v.min(1), v.max(1)
+    overlap = ((umin[:, None] < umax[None, :] - 1e-6) & (umin[None, :] < umax[:, None] - 1e-6)
+               & (vmin[:, None] < vmax[None, :] - 1e-6) & (vmin[None, :] < vmax[:, None] - 1e-6))
+    ii, jj = np.nonzero(np.triu(overlap, 1))
+    edges = np.zeros((n, n), bool)
+    if len(ii):
+        axes = np.array([b["M"].T for b in boxes])                    # (n, 2, 2): двете оси на основата
+        A = np.concatenate([axes[ii], axes[jj]], 1)                   # (P, 4, 2)
+        pi = np.einsum('pkd,pcd->pkc', A, foot[ii])
+        pj = np.einsum('pkd,pcd->pkc', A, foot[jj])
+        neg = pi.max(2) <= pj.min(2) + 1e-6       # i е от отрицателната страна на оста
+        pos = pj.max(2) <= pi.min(2) + 1e-6
+        ne = A @ eye[:2]                          # (P, 4): накъде е гледащият по оста
+        i_behind = ((neg & (ne > 1e-9)) | (pos & (ne < -1e-9))).any(1)
+        j_behind = ((neg & (ne < -1e-9)) | (pos & (ne > 1e-9))).any(1)
+        if eye[2] > 0:
+            i_behind |= z1[ii] <= z0[jj] + 1e-6
+            j_behind |= z1[jj] <= z0[ii] + 1e-6
+        edges[ii[i_behind & ~j_behind], jj[i_behind & ~j_behind]] = True
+        edges[jj[j_behind & ~i_behind], ii[j_behind & ~i_behind]] = True
+    centers = np.column_stack([foot.mean(1), (z0 + z1) / 2])
+    depth = centers @ eye
+    indeg = edges.sum(0)
+    ready = [(depth[i], i) for i in range(n) if indeg[i] == 0]
+    heapq.heapify(ready)
+    order, done = [], np.zeros(n, bool)
+    while ready:
+        _d, i = heapq.heappop(ready)
+        order.append(i)
+        done[i] = True
+        for j in np.nonzero(edges[i])[0]:
+            indeg[j] -= 1
+            if indeg[j] == 0:
+                heapq.heappush(ready, (depth[j], j))
+    order += sorted(np.nonzero(~done)[0].tolist(), key=lambda i: depth[i])  # при цикъл - по дълбочина
+    return order
+
+
+def _box_quads(b, eye):
+    """Видимите стени на кутията (четириъгълници на етажа, с цвета): страните към гледащия и горната."""
+    M, t = b["M"], b["t"]
+    x0, y0, x1, y1 = b["rect"]
+    z0, z1 = b["z"]
+    parts = b["parts"] if b["axis"] else []
+
+    def w(x, y, z):
+        xy = M @ np.array([x, y], float) + t
+        return [xy[0], xy[1], z]
+
+    quads = []
+    sides = [((x0, y0), (x1, y0), (0, -1), 'x'), ((x1, y0), (x1, y1), (1, 0), 'y'),
+             ((x1, y1), (x0, y1), (0, 1), 'x'), ((x0, y1), (x0, y0), (-1, 0), 'y')]
+    for a, c, normal, along in sides:
+        if (M @ np.array(normal, float)) @ eye[:2] <= 1e-9:
+            continue
+        if parts and b["axis"] == along:   # панелите по стената - с фугите и своя цвят
+            for s0, s1, col in parts:
+                pa, pc = ((s0, a[1]), (s1, a[1])) if along == 'x' else ((a[0], s0), (a[0], s1))
+                quads.append(([w(*pa, z0), w(*pc, z0), w(*pc, z1), w(*pa, z1)], col))
+        else:
+            quads.append(([w(*a, z0), w(*c, z0), w(*c, z1), w(*a, z1)], b["col"]))
+    if eye[2] > 0:
+        rects = ([(s0, y0, s1, y1, col) if b["axis"] == 'x' else (x0, s0, x1, s1, col) for s0, s1, col in parts]
+                 if parts else [(x0, y0, x1, y1, b["col"])])
+        for rx0, ry0, rx1, ry1, col in rects:
+            quads.append(([w(rx0, ry0, z1), w(rx1, ry0, z1), w(rx1, ry1, z1), w(rx0, ry1, z1)], col))
+    return quads
+
+
+def _background_crop(background, pieces, positions, margin_cm=BG_MARGIN_CM):
+    """
+    Частта от чертежа (фона) около елементите: (масив на картината, (x0, x1, y0, y1) в см на етажа) или None.
+    Фонът е от (0, 0) до (ширина, височина) в см - както в подреждането.
+    """
+    if not background or not pieces:
+        return None
+    img, k = background["image"], background["cm_per_px"]
+    xs, ys = [], []
+    for p in pieces:
+        M, t = _transform(p, positions[p["id"]])
+        pts = (M @ np.array(p["poly"], float).T).T + t
+        xs += [pts[:, 0].min(), pts[:, 0].max()]
+        ys += [pts[:, 1].min(), pts[:, 1].max()]
+    h_cm = img.height * k
+    c0 = max(0, int((min(xs) - margin_cm) / k))
+    c1 = min(img.width, int(np.ceil((max(xs) + margin_cm) / k)))
+    r0 = max(0, int((h_cm - max(ys) - margin_cm) / k))
+    r1 = min(img.height, int(np.ceil((h_cm - min(ys) + margin_cm) / k)))
+    if c1 - c0 < 2 or r1 - r0 < 2:
+        return None
+    crop = np.asarray(img.convert("L").crop((c0, r0, c1, r1)))
+    return crop, (c0 * k, c1 * k, h_cm - r1 * k, h_cm - r0 * k)
+
+
+def draw_floor_3d(ax, pieces, positions, view=VIEW_MAIN, labels=True, label_size=7, background=None):
+    """3D изглед на етажа в 2D оста ax (успоредна проекция, рисуване отзад напред); фонът - бледо на пода."""
+    elev, azim = np.radians(view[0]), np.radians(view[1])
+    eye = np.array([np.cos(elev) * np.cos(azim), np.cos(elev) * np.sin(azim), np.sin(elev)])
+    right = np.array([-np.sin(azim), np.cos(azim), 0.0])
+    up = np.cross(eye, right)
+    boxes = _world_boxes(pieces, positions)
+    if not boxes:
+        ax.axis('off')
+        return
+    polys, faces, edges, widths = [], [], [], []
+    for i in _draw_order(boxes, eye, right, up):
+        for quad, col in _box_quads(boxes[i], eye):
+            pts = np.array(quad)
+            polys.append(np.column_stack([pts @ right, pts @ up]))
+            faces.append(col)
+            concrete = col == COLOR_3D_CONCRETE
+            edges.append(COLOR_CONCRETE_EDGE if concrete else COLOR_3D_EDGE)
+            widths.append(0.15 if concrete else 0.25)
+    ax.add_collection(PolyCollection(polys, facecolors=faces, edgecolors=edges, linewidths=widths, zorder=2))
+    allp = np.vstack(polys)
+
+    crop = _background_crop(background, pieces, positions)
+    if crop is not None:  # чертежът на пода (z = 0): (x, y) -> (x, y, 0) @ (right, up)
+        arr, (bx0, bx1, by0, by1) = crop
+        im = ax.imshow(arr, cmap='gray', vmin=0, vmax=255, extent=(bx0, bx1, by0, by1), origin='upper',
+                       alpha=BG_ALPHA, interpolation='bilinear', zorder=1)
+        im.set_transform(Affine2D.from_values(right[0], up[0], right[1], up[1], 0, 0) + ax.transData)
+        corners = np.array([[bx0, by0, 0], [bx1, by0, 0], [bx1, by1, 0], [bx0, by1, 0]])
+        allp = np.vstack([allp, np.column_stack([corners @ right, corners @ up])])
+
+    pad = 0.03 * max(np.ptp(allp[:, 0]), np.ptp(allp[:, 1]), 1)
+    ax.set_xlim(allp[:, 0].min() - pad, allp[:, 0].max() + pad)
+    ax.set_ylim(allp[:, 1].min() - pad, allp[:, 1].max() + pad)
+    ax.set_aspect('equal')
+    ax.axis('off')
+    if labels:
+        for p in pieces:
+            pos = positions[p["id"]]
+            top = max(b[5] for b in p["boxes"])
+            pt = np.array([pos["x"], pos["y"], top + 40])
+            ax.text(pt @ right, pt @ up, p["label"], ha='center', va='bottom', fontsize=label_size,
+                    fontweight='bold', color='#111111', zorder=5,
+                    bbox=dict(boxstyle='round,pad=0.15', fc='white', ec='none', alpha=0.75))
+
+
+def draw_floor_plan(ax, pieces, positions, label_size=6, background=None):
+    """Изгледът отгоре на етажа: бетонът и кофражът на местата им, имената в средата; фонът - бледо отдолу."""
+    colors = {"P": (TOP_PANEL, TOP_PANEL_BORDER), "EX": (TOP_EX, TOP_PANEL_BORDER), "IN": (TOP_IN, TOP_PANEL_BORDER)}
+    xs, ys = [], []
+    for p in pieces:
+        pos = positions[p["id"]]
+        M, t = _transform(p, pos)
+        pts = (M @ np.array(p["poly"], float).T).T + t
+        ax.add_patch(plt.Polygon(pts, closed=True, fc=PLAN_CONCRETE, ec=TOP_CONCRETE_BORDER, lw=0.4, zorder=2))
+        for x0, y0, x1, y1, kind in p["forms"]:
+            quad = (M @ np.array([[x0, x1, x1, x0], [y0, y0, y1, y1]], float)).T + t
+            fc, ec = colors.get(kind, colors["P"])
+            ax.add_patch(plt.Polygon(quad, closed=True, fc=fc, ec=ec, lw=0.2, zorder=2))
+            xs += list(quad[:, 0])
+            ys += list(quad[:, 1])
+        ax.text(pos["x"], pos["y"], p["label"], ha='center', va='center', fontsize=label_size, color='#111111',
+                zorder=5, bbox=dict(boxstyle='round,pad=0.1', fc='white', ec='none', alpha=0.7))
+    crop = _background_crop(background, pieces, positions)
+    if crop is not None:
+        arr, extent = crop
+        ax.imshow(arr, cmap='gray', vmin=0, vmax=255, extent=extent, origin='upper', alpha=BG_ALPHA,
+                  interpolation='bilinear', zorder=1)
+        xs += [extent[0], extent[1]]
+        ys += [extent[2], extent[3]]
+    if xs:
+        pad = 0.04 * max(max(xs) - min(xs), max(ys) - min(ys), 1)
+        ax.set_xlim(min(xs) - pad, max(xs) + pad)
+        ax.set_ylim(min(ys) - pad, max(ys) + pad)
+    ax.set_aspect('equal')
+    ax.axis('off')
+
+
+def generate_floor_pdf(pieces, positions, info, background=None):
+    """
+    PDF (А3, хоризонтално): 3D изглед и изглед отгоре.
+    info: {"project", "client", "drawing", "date"}; текстовете - на езика на документа (dt).
+    background: {"image": PIL картина, "cm_per_px"} - чертежът, бледо под елементите (по желание).
+    """
+    fig = plt.figure(figsize=(16.54, 11.69))
+    head = dt("3D план на етажа")
+    if info.get("drawing"):
+        head += " - " + dt("Чертеж: {name}", name=info["drawing"])
+    fig.text(0.02, 0.965, head, fontsize=18, fontweight='bold', va='top')
+    sub = [dt("Обект:") + " " + str(info.get("project", "")), dt("Клиент:") + " " + str(info.get("client", ""))]
+    if info.get("date"):
+        sub.append(dt("Дата: ") + str(info["date"]))
+    fig.text(0.02, 0.925, "     ".join(sub), fontsize=10, va='top', color='#333333')
+    fig.text(0.98, 0.965, dt("КОФРАЖНА СИСТЕМА TEKO / TEKO FORMWORK SYSTEM"), fontsize=10, ha='right', va='top',
+             color='#555555')
+
+    # един 3D изглед и изгледът отгоре (вторият 3D изглед от другия ъгъл - махнат, потребителят 22.11.2026)
+    ax_main = fig.add_axes([0.02, 0.03, 0.64, 0.86])
+    draw_floor_3d(ax_main, pieces, positions, VIEW_MAIN, label_size=7, background=background)
+    ax_main.set_title(dt("3D VIEW / 3D ИЗГЛЕД"), fontsize=10, loc='left')
+
+    ax_top = fig.add_axes([0.68, 0.03, 0.30, 0.86])
+    draw_floor_plan(ax_top, pieces, positions, label_size=6, background=background)
+    ax_top.set_title(dt("TOP VIEW / ИЗГЛЕД ОТГОРЕ"), fontsize=10, loc='left')
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format='pdf', dpi=200)
+    plt.close(fig)
+    return buf.getvalue()
+
+
+# ---------- Подреждане с мишката (компонент на Streamlit) ----------
+
+FLOOR_CSS = """
+.fp-root { font-family: var(--st-font, sans-serif); outline: none; }
+.fp-wrap { position: relative; }
+.fp-bar { position: absolute; top: 8px; left: 8px; right: 8px; z-index: 2; display: flex; flex-wrap: wrap; gap: 6px;
+          align-items: center; padding: 6px 8px; background: rgba(255, 255, 255, 0.92);
+          border: 1px solid #dde1e6; border-radius: 8px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08); }
+.fp-bar button { border: 1px solid #c9ccd1; background: #fff; border-radius: 6px; padding: 4px 10px;
+                 cursor: pointer; font-size: 13px; }
+.fp-bar button:hover { border-color: #ff4b4b; }
+.fp-bar button.on { background: #ffe9a8; border-color: #e0a800; }
+.fp-bar button:disabled { opacity: 0.45; cursor: default; }
+.fp-bar label { font-size: 13px; display: flex; align-items: center; gap: 4px; }
+.fp-bar input { width: 70px; padding: 3px 6px; border: 1px solid #c9ccd1; border-radius: 6px; font-size: 13px; }
+.fp-hint { font-size: 12px; color: #555; margin-left: 4px; }
+.fp-svg { width: 100%; height: 680px; background: #fbfcfd; border: 1px solid #dde1e6; border-radius: 6px;
+          touch-action: none; user-select: none; display: block; }
+.fp-piece { cursor: grab; }
+.fp-piece .c { fill: #c9cdd2; stroke: #2c3e50; }
+.fp-piece .P { fill: #e5bec0; stroke: #3a2e36; }
+.fp-piece .EX { fill: #a0d784; stroke: #3a2e36; }
+.fp-piece .IN { fill: #4a8f42; stroke: #3a2e36; }
+.fp-piece.sel .c { fill: #9fc3f0; stroke: #1565c0; }
+.fp-label { fill: #111; font-weight: bold; paint-order: stroke; stroke: #fff; stroke-width: 3px;
+            stroke-linejoin: round; pointer-events: none; }
+.fp-handle-line { stroke: #1565c0; stroke-dasharray: 4 3; pointer-events: none; }
+.fp-handle { fill: #fff; stroke: #1565c0; cursor: grab; }
+.fp-handle:hover { fill: #ffe9a8; }
+.fp-calib { stroke: #e53935; fill: #e53935; }
+"""
+
+FLOOR_JS = r"""
+const NS = "http://www.w3.org/2000/svg";
+const SNAP = 5;        // местата - през 5 см
+const SNAP_DEG = 5;    // завъртане с дръжката - през 5° (със Shift - през 1°)
+
+function el(tag, attrs) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+function norm(a) {
+  a = Math.round(a * 10) / 10 % 360;
+  return a < 0 ? a + 360 : a;
+}
+
+function pieceTransform(p, pos) {
+  return `translate(${pos.x},${-pos.y}) scale(1,-1) rotate(${pos.rot || 0}) scale(${pos.mir ? -1 : 1},1) ` +
+         `translate(${-p.cx},${-p.cy})`;
+}
+
+function worldSize(p, pos) {
+  const a = (pos.rot || 0) * Math.PI / 180, c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a));
+  return [c * p.w + s * p.h, s * p.w + c * p.h];
+}
+
+// дръжката за завъртане: над елемента по посоката на завъртането (на етажа, y нагоре)
+function handlePoint(S, id) {
+  const p = S.byId[id], pos = S.pos[id];
+  const r = Math.max(p.w, p.h) / 2 + S.fs * 1.6;
+  const a = (pos.rot || 0) * Math.PI / 180;
+  return [pos.x - r * Math.sin(a), pos.y + r * Math.cos(a)];
+}
+
+function build(parent) {
+  const root = document.createElement("div");
+  root.className = "fp-root";
+  root.tabIndex = 0;
+  root.innerHTML = `<div class="fp-wrap"><div class="fp-bar">
+      <button data-a="rotl"></button><button data-a="rotr"></button>
+      <label><span class="fp-angle-label"></span><input class="fp-angle" type="text" inputmode="decimal">°</label>
+      <button data-a="mir"></button><button data-a="fit"></button>
+      <button data-a="calib"></button><span class="fp-hint"></span></div></div>`;
+  const svg = el("svg", { class: "fp-svg" });
+  root.querySelector(".fp-wrap").appendChild(svg);
+  parent.appendChild(root);
+  const S = { pos: {}, token: null, sel: null, view: null, drag: null, pan: null, turn: null, calib: null, fs: 20 };
+  root.__s = S;
+
+  const pt = (evt) => {
+    const p = svg.createSVGPoint();
+    p.x = evt.clientX; p.y = evt.clientY;
+    return p.matrixTransform(svg.getScreenCTM().inverse());
+  };
+  const commit = () => S.api.setStateValue("positions", JSON.parse(JSON.stringify(S.pos)));
+  root.__commit = commit;
+
+  root.querySelector(".fp-bar").addEventListener("click", (evt) => {
+    const a = evt.target.closest("button")?.dataset.a;
+    if (a === "rotl" || a === "rotr" || a === "mir") act(root, a);
+    else if (a === "fit") { S.view = null; draw(root); }
+    else if (a === "calib") { S.calib = S.calib ? null : []; draw(root); }
+  });
+  const angle = root.querySelector(".fp-angle");
+  angle.addEventListener("change", () => {
+    const v = parseFloat(angle.value.replace(",", "."));
+    if (!S.sel || !isFinite(v)) { updateBar(root); return; }
+    S.pos[S.sel].rot = norm(v);
+    place(root, S.sel);
+    commit();
+  });
+  angle.addEventListener("keydown", (evt) => { if (evt.key === "Enter") angle.blur(); });
+  root.addEventListener("keydown", (evt) => {
+    if (evt.target.tagName === "INPUT") return;
+    if (evt.key === "r" || evt.key === "R") act(root, evt.shiftKey ? "rotr" : "rotl");
+    if (evt.key === "m" || evt.key === "M") act(root, "mir");
+  });
+  svg.addEventListener("pointerdown", (evt) => {
+    root.focus();
+    const p = pt(evt);
+    if (S.calib) {
+      S.calib.push([p.x, -p.y]);
+      if (S.calib.length === 2) {
+        const [a, b] = S.calib;
+        const d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+        S.calib = null;
+        if (d > 0) S.api.setTriggerValue("calib", d);
+      }
+      draw(root);
+      return;
+    }
+    svg.setPointerCapture(evt.pointerId);
+    if (evt.target.classList.contains("fp-handle") && S.sel) {
+      S.turn = { id: S.sel, moved: false };
+      return;
+    }
+    const g = evt.target.closest(".fp-piece");
+    if (g) {
+      const id = g.dataset.id;
+      S.sel = id;
+      S.drag = { id, p0: p, x: S.pos[id].x, y: S.pos[id].y, moved: false };
+      svg.querySelectorAll(".fp-piece").forEach((n) => n.classList.toggle("sel", n.dataset.id === id));
+      place(root, id);
+      updateBar(root);
+    } else {
+      S.pan = { cx: evt.clientX, cy: evt.clientY, v: { ...S.view }, k: svg.getScreenCTM().a };
+    }
+  });
+  svg.addEventListener("pointermove", (evt) => {
+    if (S.turn) {
+      const p = pt(evt), pos = S.pos[S.turn.id];
+      const deg = Math.atan2(-p.y - pos.y, p.x - pos.x) * 180 / Math.PI - 90;
+      const step = evt.shiftKey ? 1 : SNAP_DEG;
+      pos.rot = norm(Math.round(deg / step) * step);
+      S.turn.moved = true;
+      place(root, S.turn.id);
+    } else if (S.drag) {
+      const p = pt(evt);
+      const pos = S.pos[S.drag.id];
+      pos.x = S.drag.x + (p.x - S.drag.p0.x);
+      pos.y = S.drag.y - (p.y - S.drag.p0.y);
+      S.drag.moved = true;
+      place(root, S.drag.id);
+    } else if (S.pan) {
+      S.view.x = S.pan.v.x - (evt.clientX - S.pan.cx) / S.pan.k;
+      S.view.y = S.pan.v.y - (evt.clientY - S.pan.cy) / S.pan.k;
+      svg.setAttribute("viewBox", `${S.view.x} ${S.view.y} ${S.view.w} ${S.view.h}`);
+    }
+  });
+  const up = () => {
+    if (S.turn && S.turn.moved) commit();
+    if (S.drag && S.drag.moved) {
+      const pos = S.pos[S.drag.id];
+      pos.x = Math.round(pos.x / SNAP) * SNAP;
+      pos.y = Math.round(pos.y / SNAP) * SNAP;
+      place(root, S.drag.id);
+      commit();
+    }
+    S.drag = null; S.pan = null; S.turn = null;
+  };
+  svg.addEventListener("pointerup", up);
+  svg.addEventListener("pointercancel", up);
+  svg.addEventListener("wheel", (evt) => {
+    evt.preventDefault();
+    const p = pt(evt);
+    const f = evt.deltaY > 0 ? 1.15 : 1 / 1.15;
+    const v = S.view;
+    v.x = p.x - (p.x - v.x) * f; v.y = p.y - (p.y - v.y) * f; v.w *= f; v.h *= f;
+    svg.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
+  }, { passive: false });
+  return root;
+}
+
+function act(root, a) {
+  const S = root.__s;
+  if (!S.sel || !S.pos[S.sel]) return;
+  const pos = S.pos[S.sel];
+  if (a === "rotl") pos.rot = norm((pos.rot || 0) + 90);
+  else if (a === "rotr") pos.rot = norm((pos.rot || 0) - 90);
+  else pos.mir = !pos.mir;
+  place(root, S.sel);
+  root.__commit();
+}
+
+function place(root, id) {
+  const S = root.__s;
+  const p = S.byId[id], pos = S.pos[id];
+  const svg = root.querySelector("svg");
+  const g = svg.querySelector(`.fp-piece[data-id="${CSS.escape(id)}"]`);
+  const t = svg.querySelector(`.fp-label[data-id="${CSS.escape(id)}"]`);
+  if (g) g.setAttribute("transform", pieceTransform(p, pos));
+  if (t) { t.setAttribute("x", pos.x); t.setAttribute("y", -pos.y); }
+  if (id === S.sel) {
+    const [hx, hy] = handlePoint(S, id);
+    const line = svg.querySelector(".fp-handle-line"), h = svg.querySelector(".fp-handle");
+    line.setAttribute("x1", pos.x); line.setAttribute("y1", -pos.y);
+    line.setAttribute("x2", hx); line.setAttribute("y2", -hy);
+    h.setAttribute("cx", hx); h.setAttribute("cy", -hy);
+    line.style.display = h.style.display = "";
+    const angle = root.querySelector(".fp-angle");
+    if (root.getRootNode().activeElement !== angle) angle.value = String(pos.rot || 0).replace(".", ",");
+  }
+}
+
+function updateBar(root) {
+  const S = root.__s, T = S.data.texts;
+  const b = (a) => root.querySelector(`button[data-a="${a}"]`);
+  for (const a of ["rotl", "rotr", "mir", "fit", "calib"]) b(a).textContent = T[a];
+  root.querySelector(".fp-angle-label").textContent = T.angle;
+  const angle = root.querySelector(".fp-angle");
+  b("rotl").disabled = b("rotr").disabled = b("mir").disabled = angle.disabled = !S.sel;
+  if (!S.sel) angle.value = "";
+  b("calib").style.display = S.data.bg ? "" : "none";
+  b("calib").classList.toggle("on", !!S.calib);
+  root.querySelector(".fp-hint").textContent = S.calib
+    ? (S.calib.length ? T.calib2 : T.calib1)
+    : (S.sel ? T.selected.replace("{name}", S.byId[S.sel]?.label || "") : T.hint);
+  if (!S.sel) {
+    const svg = root.querySelector("svg");
+    svg.querySelectorAll(".fp-handle, .fp-handle-line").forEach((n) => (n.style.display = "none"));
+  }
+}
+
+function fitView(S) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of S.data.pieces) {
+    const pos = S.pos[p.id];
+    const [w, h] = worldSize(p, pos);
+    x0 = Math.min(x0, pos.x - w / 2); x1 = Math.max(x1, pos.x + w / 2);
+    y0 = Math.min(y0, -pos.y - h / 2); y1 = Math.max(y1, -pos.y + h / 2);
+  }
+  const bg = S.data.bg;
+  if (bg) { x0 = Math.min(x0, 0); x1 = Math.max(x1, bg.w); y0 = Math.min(y0, -bg.h); y1 = Math.max(y1, 0); }
+  if (!isFinite(x0)) { x0 = 0; y0 = -1000; x1 = 1000; y1 = 0; }
+  const pad = 0.05 * Math.max(x1 - x0, y1 - y0, 100);
+  // отгоре - място за лентата с бутоните
+  return { x: x0 - pad, y: y0 - 3 * pad, w: x1 - x0 + 2 * pad, h: y1 - y0 + 4 * pad };
+}
+
+function draw(root) {
+  const S = root.__s, D = S.data;
+  const svg = root.querySelector("svg");
+  S.byId = {};
+  D.pieces.forEach((p) => (S.byId[p.id] = p));
+  if (S.sel && !S.byId[S.sel]) S.sel = null;
+  if (!S.view) S.view = fitView(S);
+  svg.setAttribute("viewBox", `${S.view.x} ${S.view.y} ${S.view.w} ${S.view.h}`);
+  svg.replaceChildren();
+  const span = Math.max(S.view.w, S.view.h);
+  S.fs = Math.max(20, span / 70);
+
+  const gid = "fpgrid" + Math.random().toString(36).slice(2, 8);
+  const defs = el("defs", {});
+  const pat = el("pattern", { id: gid, width: 100, height: 100, patternUnits: "userSpaceOnUse" });
+  pat.appendChild(el("path", { d: "M 100 0 L 0 0 0 100", fill: "none", stroke: "#e3e7ec",
+                               "stroke-width": 1, "vector-effect": "non-scaling-stroke" }));
+  defs.appendChild(pat);
+  svg.appendChild(defs);
+  svg.appendChild(el("rect", { x: S.view.x - 20 * span, y: S.view.y - 20 * span, width: 41 * span,
+                               height: 41 * span, fill: `url(#${gid})` }));
+  if (D.bg) {
+    const img = el("image", { x: 0, y: -D.bg.h, width: D.bg.w, height: D.bg.h, opacity: D.bg.opacity,
+                              preserveAspectRatio: "none" });
+    img.setAttribute("href", D.bg.url);
+    svg.appendChild(img);
+  }
+  const gp = el("g", {}), gl = el("g", {});
+  for (const p of D.pieces) {
+    const g = el("g", { class: "fp-piece" + (p.id === S.sel ? " sel" : "") });
+    g.dataset.id = p.id;
+    g.appendChild(el("polygon", { class: "c", points: p.poly.map((q) => q.join(",")).join(" "),
+                                  "vector-effect": "non-scaling-stroke", "stroke-width": 1 }));
+    for (const f of p.forms) {
+      g.appendChild(el("rect", { class: f[4], x: f[0], y: f[1], width: f[2] - f[0], height: f[3] - f[1],
+                                 "vector-effect": "non-scaling-stroke", "stroke-width": 0.5 }));
+    }
+    gp.appendChild(g);
+    const t = el("text", { class: "fp-label", "text-anchor": "middle", "dominant-baseline": "middle",
+                           "font-size": S.fs });
+    t.dataset.id = p.id;
+    t.textContent = p.label;
+    gl.appendChild(t);
+  }
+  svg.appendChild(gp);
+  svg.appendChild(gl);
+  svg.appendChild(el("line", { class: "fp-handle-line", "vector-effect": "non-scaling-stroke", "stroke-width": 1.5 }));
+  svg.appendChild(el("circle", { class: "fp-handle", r: S.fs * 0.55, "vector-effect": "non-scaling-stroke",
+                                 "stroke-width": 2 }));
+  if (S.calib && S.calib.length) {
+    const [a] = S.calib;
+    svg.appendChild(el("circle", { class: "fp-calib", cx: a[0], cy: -a[1], r: S.fs / 3 }));
+  }
+  D.pieces.forEach((p) => place(root, p.id));
+  updateBar(root);
+}
+
+export default function (component) {
+  const { data, parentElement, setStateValue, setTriggerValue } = component;
+  if (!data) return;
+  let root = parentElement.querySelector(".fp-root");
+  if (!root) root = build(parentElement);
+  const S = root.__s;
+  S.api = { setStateValue, setTriggerValue };
+  if (S.token !== data.token) {
+    S.pos = JSON.parse(JSON.stringify(data.positions || {}));
+    S.token = data.token;
+    S.view = null;
+  } else {
+    for (const id in data.positions) if (!(id in S.pos)) S.pos[id] = { ...data.positions[id] };
+  }
+  S.data = data;
+  draw(root);
+}
+"""
+
+_component = None
+
+
+def floor_component():
+    """
+    Компонентът за подреждане. Регистрира се веднъж за runtime-а на Streamlit (модулът не се презарежда с
+    app.py, а повторна регистрация пише предупреждение); нов runtime (тестовете) - регистрира се наново.
+    """
+    global _component
+    import streamlit as st
+    from streamlit.runtime import Runtime
+    if _component is None or Runtime.instance().bidi_component_registry.get("teko_floor_plan") is None:
+        _component = st.components.v2.component("teko_floor_plan", css=FLOOR_CSS, js=FLOOR_JS)
+    return _component
