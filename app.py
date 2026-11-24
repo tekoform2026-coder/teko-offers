@@ -1167,13 +1167,12 @@ with st.sidebar:
 language_switch()  # езикът - горе вдясно, над лентата
 st.markdown("""
     <style>
-    .teko-header {display: flex; align-items: center; gap: 14px; background: #0f1b2d; color: #fff;
+    .teko-header {display: flex; align-items: center; gap: 14px; background: #14532d; color: #fff;
                   padding: 14px 22px; border-radius: 10px; margin-bottom: 18px;}
-    .teko-logo {background: #0ea5e9; color: #fff; font-weight: 800; font-size: 20px; width: 42px;
+    .teko-logo {background: #16a34a; color: #fff; font-weight: 800; font-size: 20px; width: 42px;
                 height: 42px; border-radius: 8px; display: flex; align-items: center; justify-content: center;}
     .teko-title {font-weight: 800; font-size: 19px; line-height: 1.2;}
-    .teko-sub {color: #9fb3c8; font-size: 13px;}
-    .teko-right {margin-left: auto; color: #9fb3c8; font-size: 13px;}
+    .teko-right {margin-left: auto; color: #a7c9b3; font-size: 13px;}
     .teko-projects-title {font-size: 26px !important; font-weight: 700; color: #0f172a; margin: 0;}
     .teko-right-head {text-align: right;}
     .st-key-new_project button {background: #0b84d8; color: #fff; border: none; font-weight: 600;}
@@ -1193,8 +1192,7 @@ st.markdown("""
     </style>
     <div class="teko-header">
       <div class="teko-logo">TK</div>
-      <div><div class="teko-title">""" + t("TEKO — Оптимизация на панели") + """</div>
-           <div class="teko-sub">""" + t("AI система за кофражно планиране") + """</div></div>
+      <div class="teko-title">""" + t("ТЕКО система за кофражно планиране") + """</div>
       <div class="teko-right">""" + t("ТЕКО България ООД") + """</div>
     </div>
 """, unsafe_allow_html=True)
