@@ -159,6 +159,76 @@ def _snap(v):
     return round(v / SNAP_CM) * SNAP_CM
 
 
+# ---------- Промени от плана (потребителят, 24.11.2026) ----------
+# Изтриване, копиране, добавяне и промяна на елементи в таб 6 - направо в таблицата (вариант А). Всеки брой е
+# (ред, k) - редът по позиция в таблицата, k - поредният брой (както floor_pieces() в app.py). Копие със същото име
+# и размери е още един брой на реда; променен брой - нов ред (или към ред, с който вече е еднакъв).
+def apply_floor_edit(df, action, signature):
+    """
+    Една промяна от плана върху таблицата. action: {"a": "delete" | "copy" | "edit" | "add", ...}:
+    delete / copy - "row", "k"; edit - "row", "k", "values", "all" (за всички бройки на реда); add - "values"
+    (с "drawing"), "count". signature(ред като dict) - еднакви елементи: (чертеж, тип, име, размери ...),
+    чертежът е първи.
+    Връща (новата таблица, {(стар ред, k): (нов ред, k)}, [(нов ред, k) на новите бройки]).
+    """
+    import pandas as pd
+    df = df.reset_index(drop=True)
+    rows = []
+    for r, row in enumerate(df.to_dict("records")):
+        n = pd.to_numeric(row.get("count"), errors="coerce")
+        rows.append({"data": row, "tokens": [(r, k) for k in range(int(n) if pd.notna(n) else 1)]})
+
+    def same_as(data, skip):
+        key = signature(data)
+        return next((x for x in rows if x is not skip and signature(x["data"]) == key), None)
+
+    a = action["a"]
+    if a in ("delete", "copy", "edit"):
+        own = rows[action["row"]]
+        token = (action["row"], action.get("k", 0))
+    if a == "delete":
+        own["tokens"].remove(token)
+    elif a == "copy":
+        own["tokens"].append("new")
+    elif a == "edit":
+        if action.get("all") or len(own["tokens"]) == 1:   # целият ред
+            own["data"] = {**own["data"], **action["values"]}
+            other = same_as(own["data"], own)
+            if other is not None:
+                other["tokens"] += own["tokens"]
+                own["tokens"] = []
+        else:   # само тази бройка - нов ред до стария (или към еднакъв ред)
+            own["tokens"].remove(token)
+            data = {**own["data"], **action["values"]}
+            other = same_as(data, own)
+            if other is not None:
+                other["tokens"].append(token)
+            else:
+                rows.insert(rows.index(own) + 1, {"data": data, "tokens": [token]})
+    elif a == "add":
+        data = {**{col: None for col in df.columns}, **action["values"]}
+        other = same_as(data, None)
+        new = ["new"] * int(action.get("count", 1) or 1)
+        if other is not None:
+            other["tokens"] += new
+        else:   # в края на своя чертеж (чертежите са един след друг)
+            drawing = signature(data)[0]
+            last = max((i for i, x in enumerate(rows) if signature(x["data"])[0] == drawing), default=len(rows) - 1)
+            rows.insert(last + 1, {"data": data, "tokens": new})
+    rows = [x for x in rows if x["tokens"]]
+    moves, added = {}, []
+    for i, x in enumerate(rows):
+        x["data"]["count"] = len(x["tokens"])
+        for k, tok in enumerate(x["tokens"]):
+            if tok == "new":
+                added.append((i, k))
+            else:
+                moves[tok] = (i, k)
+    columns = list(df.columns) + [c for x in rows for c in x["data"] if c not in df.columns]
+    new_df = pd.DataFrame([x["data"] for x in rows], columns=list(dict.fromkeys(columns)))
+    return new_df, moves, added
+
+
 # ---------- Местата от чертежа (потребителят, 24.11.2026) ----------
 # Вариант 3: контурът на всеки брой от Gemini ("places", приблизително) и контурите на бетона от векторния PDF
 # (точно); контур от PDF-а се взима, когато е до контура от Gemini или до надпис с името на елемента.
@@ -675,6 +745,7 @@ FLOOR_CSS = """
 .fp-bar label { font-size: 13px; display: flex; align-items: center; gap: 4px; }
 .fp-bar input { width: 70px; padding: 3px 6px; border: 1px solid #c9ccd1; border-radius: 6px; font-size: 13px; }
 .fp-hint { font-size: 12px; color: #555; margin-left: 4px; }
+.fp-sep { width: 1px; align-self: stretch; background: #c9ccd1; margin: 0 2px; }
 .fp-svg { width: 100%; height: 680px; background: #fbfcfd; border: 1px solid #dde1e6; border-radius: 6px;
           touch-action: none; user-select: none; display: block; }
 .fp-piece { cursor: grab; }
@@ -733,11 +804,14 @@ function build(parent) {
       <button data-a="rotl"></button><button data-a="rotr"></button>
       <label><span class="fp-angle-label"></span><input class="fp-angle" type="text" inputmode="decimal">°</label>
       <button data-a="mir"></button><button data-a="fit"></button>
-      <button data-a="calib"></button><span class="fp-hint"></span></div></div>`;
+      <button data-a="calib"></button><span class="fp-sep"></span>
+      <button data-a="add"></button><button data-a="copy"></button><button data-a="paste"></button>
+      <button data-a="del"></button><span class="fp-hint"></span></div></div>`;
   const svg = el("svg", { class: "fp-svg" });
   root.querySelector(".fp-wrap").appendChild(svg);
   parent.appendChild(root);
-  const S = { pos: {}, token: null, sel: null, view: null, drag: null, pan: null, turn: null, calib: null, fs: 20 };
+  const S = { pos: {}, token: null, sel: null, view: null, drag: null, pan: null, turn: null, calib: null, fs: 20,
+              mouse: null, inside: false };
   root.__s = S;
 
   const pt = (evt) => {
@@ -751,7 +825,8 @@ function build(parent) {
   root.querySelector(".fp-bar").addEventListener("click", (evt) => {
     const a = evt.target.closest("button")?.dataset.a;
     if (a === "rotl" || a === "rotr" || a === "mir") act(root, a);
-    else if (a === "fit") { S.view = null; draw(root); }
+    else if (a === "add" || a === "copy" || a === "paste" || a === "del") edit(root, a, false);
+    else if (a === "fit") { S.view = null; keep(S).view = null; draw(root); }
     else if (a === "calib") { S.calib = S.calib ? null : []; draw(root); }
   });
   const angle = root.querySelector(".fp-angle");
@@ -765,9 +840,20 @@ function build(parent) {
   angle.addEventListener("keydown", (evt) => { if (evt.key === "Enter") angle.blur(); });
   root.addEventListener("keydown", (evt) => {
     if (evt.target.tagName === "INPUT") return;
-    if (evt.key === "r" || evt.key === "R") act(root, evt.shiftKey ? "rotr" : "rotl");
-    if (evt.key === "m" || evt.key === "M") act(root, "mir");
+    // Ctrl+C / Ctrl+V по клавиша (evt.code) - и на кирилица; Delete - изтриване, Esc - без избор
+    if ((evt.ctrlKey || evt.metaKey) && (evt.code === "KeyC" || evt.code === "KeyV")) {
+      evt.preventDefault();
+      edit(root, evt.code === "KeyC" ? "copy" : "paste", true);
+      return;
+    }
+    if (evt.ctrlKey || evt.metaKey || evt.altKey) return;
+    if (evt.key === "Delete") edit(root, "del", true);
+    else if (evt.key === "Escape") select(root, null);
+    else if (evt.key === "r" || evt.key === "R") act(root, evt.shiftKey ? "rotr" : "rotl");
+    else if (evt.key === "m" || evt.key === "M") act(root, "mir");
   });
+  svg.addEventListener("pointerenter", () => (S.inside = true));
+  svg.addEventListener("pointerleave", () => (S.inside = false));
   svg.addEventListener("pointerdown", (evt) => {
     root.focus();
     const p = pt(evt);
@@ -790,16 +876,15 @@ function build(parent) {
     const g = evt.target.closest(".fp-piece");
     if (g) {
       const id = g.dataset.id;
-      S.sel = id;
-      S.drag = { id, p0: p, x: S.pos[id].x, y: S.pos[id].y, moved: false };
-      svg.querySelectorAll(".fp-piece").forEach((n) => n.classList.toggle("sel", n.dataset.id === id));
-      place(root, id);
-      updateBar(root);
+      S.drag = { id, p0: p, x: S.pos[id].x, y: S.pos[id].y, moved: false, sel: S.sel !== id };
+      select(root, id, false);
     } else {
       S.pan = { cx: evt.clientX, cy: evt.clientY, v: { ...S.view }, k: svg.getScreenCTM().a };
     }
   });
   svg.addEventListener("pointermove", (evt) => {
+    const m = pt(evt);
+    S.mouse = [m.x, -m.y];
     if (S.turn) {
       const p = pt(evt), pos = S.pos[S.turn.id];
       const deg = Math.atan2(-p.y - pos.y, p.x - pos.x) * 180 / Math.PI - 90;
@@ -829,6 +914,8 @@ function build(parent) {
       place(root, S.drag.id);
       commit();
     }
+    // изборът - към Python (полетата на избрания елемент под плана), след пускането - не по време на влаченето
+    if (S.drag && S.drag.sel) S.api.setStateValue("sel", S.sel || "");
     S.drag = null; S.pan = null; S.turn = null;
   };
   svg.addEventListener("pointerup", up);
@@ -842,6 +929,45 @@ function build(parent) {
     svg.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
   }, { passive: false });
   return root;
+}
+
+// изборът и копираното, и изгледът - за чертежа (view_key); остават при нов компонент след промяна в таблицата
+function keep(S) {
+  const all = (globalThis.__tekoFloor = globalThis.__tekoFloor || {});
+  return (all[S.data.view_key] = all[S.data.view_key] || {});
+}
+
+function select(root, id, send = true) {
+  const S = root.__s;
+  S.sel = id;
+  const svg = root.querySelector("svg");
+  svg.querySelectorAll(".fp-piece").forEach((n) => n.classList.toggle("sel", n.dataset.id === id));
+  if (id) place(root, id);
+  updateBar(root);
+  if (send) S.api.setStateValue("sel", id || "");
+}
+
+// промени в таблицата (потребителят, 24.11.2026): нов елемент, копирай / постави, изтрий - към Python
+function edit(root, a, key) {
+  const S = root.__s, K = keep(S);
+  if (a === "add") { S.api.setTriggerValue("action", { a: "add" }); return; }
+  if (a === "copy") {
+    if (!S.sel) return;
+    K.clip = S.sel;
+    updateBar(root);
+    return;
+  }
+  if (a === "del") {
+    if (S.sel) S.api.setTriggerValue("action", { a: "delete", id: S.sel });
+    return;
+  }
+  const id = K.clip;   // постави: при Ctrl+V - там, където е мишката, от бутона - до копирания
+  if (!id || !S.byId[id]) return;
+  const src = S.pos[id];
+  let [x, y] = key && S.inside && S.mouse ? S.mouse : [src.x + 50, src.y - 50];
+  x = Math.round(x / SNAP) * SNAP;
+  y = Math.round(y / SNAP) * SNAP;
+  S.api.setTriggerValue("action", { a: "paste", id, x, y, rot: src.rot || 0, mir: !!src.mir });
 }
 
 function act(root, a) {
@@ -878,7 +1004,11 @@ function place(root, id) {
 function updateBar(root) {
   const S = root.__s, T = S.data.texts;
   const b = (a) => root.querySelector(`button[data-a="${a}"]`);
-  for (const a of ["rotl", "rotr", "mir", "fit", "calib"]) b(a).textContent = T[a];
+  for (const a of ["rotl", "rotr", "mir", "fit", "calib", "add", "copy", "paste", "del"]) b(a).textContent = T[a];
+  const K = keep(S);
+  if (K.clip && !S.byId[K.clip]) K.clip = null;
+  b("copy").disabled = b("del").disabled = !S.sel;
+  b("paste").disabled = !K.clip;
   root.querySelector(".fp-angle-label").textContent = T.angle;
   const angle = root.querySelector(".fp-angle");
   b("rotl").disabled = b("rotr").disabled = b("mir").disabled = angle.disabled = !S.sel;
@@ -887,6 +1017,7 @@ function updateBar(root) {
   b("calib").classList.toggle("on", !!S.calib);
   root.querySelector(".fp-hint").textContent = S.calib
     ? (S.calib.length ? T.calib2 : T.calib1)
+    : K.clip ? T.copied.replace("{name}", S.byId[K.clip]?.label || "")
     : (S.sel ? T.selected.replace("{name}", S.byId[S.sel]?.label || "") : T.hint);
   if (!S.sel) {
     const svg = root.querySelector("svg");
@@ -917,6 +1048,7 @@ function draw(root) {
   D.pieces.forEach((p) => (S.byId[p.id] = p));
   if (S.sel && !S.byId[S.sel]) S.sel = null;
   if (!S.view) S.view = fitView(S);
+  keep(S).view = S.view;
   svg.setAttribute("viewBox", `${S.view.x} ${S.view.y} ${S.view.w} ${S.view.h}`);
   svg.replaceChildren();
   const span = Math.max(S.view.w, S.view.h);
@@ -977,7 +1109,10 @@ export default function (component) {
   if (S.token !== data.token) {
     S.pos = JSON.parse(JSON.stringify(data.positions || {}));
     S.token = data.token;
-    S.view = null;
+    S.data = data;
+    // след промяна в таблицата - същият изглед и изборът (новият или копираният елемент)
+    S.view = data.keep_view && keep(S).view ? { ...keep(S).view } : null;
+    S.sel = data.select || null;
   } else {
     for (const id in data.positions) if (!(id in S.pos)) S.pos[id] = { ...data.positions[id] };
   }
