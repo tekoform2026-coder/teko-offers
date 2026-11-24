@@ -159,6 +159,265 @@ def _snap(v):
     return round(v / SNAP_CM) * SNAP_CM
 
 
+# ---------- Местата от чертежа (потребителят, 24.11.2026) ----------
+# Вариант 3: контурът на всеки брой от Gemini ("places", приблизително) и контурите на бетона от векторния PDF
+# (точно); контур от PDF-а се взима, когато е до контура от Gemini или до надпис с името на елемента.
+# Елементът се напасва върху контура (завъртане, огледално) - реденето на панелите не се пипа.
+FIT_MIN_IOU = 0.5     # контур от PDF-а: елементът трябва да пасва по форма (застъпване поне толкова)
+SNAP_ANGLE_DEG = 3    # до толкова от 0 / 90 / 180 / 270° - точно на правия ъгъл
+_LOOKALIKE = str.maketrans("ABCEHKMOPTXY", "АВСЕНКМОРТХУ")
+
+
+def name_key(name):
+    """Името за сравнение с надписите на чертежа: главни, латиница -> кирилица (K / К), без интервали и точки."""
+    text = str(name or "").upper().translate(_LOOKALIKE)
+    return "".join(ch for ch in text if ch not in " .-_")
+
+
+def _area(poly):
+    x, y = np.asarray(poly, float).T
+    return 0.5 * abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
+
+
+def _centroid(poly):
+    """Центърът на тежестта на многоъгълника (при нулева площ - средното на точките)."""
+    x, y = np.asarray(poly, float).T
+    cross = x * np.roll(y, -1) - np.roll(x, -1) * y
+    a = cross.sum() / 2
+    if abs(a) < 1e-9:
+        return np.array([x.mean(), y.mean()])
+    return np.array([((x + np.roll(x, -1)) * cross).sum(), ((y + np.roll(y, -1)) * cross).sum()]) / (6 * a)
+
+
+def _iou(a, b, n=48):
+    """Застъпването на два многоъгълника (сечение / обединение) - по мрежа от точки."""
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    lo, hi = np.minimum(a.min(0), b.min(0)), np.maximum(a.max(0), b.max(0))
+    if np.any(hi - lo <= 0):
+        return 0.0
+    # точките - вътре в клетките (не по ръбовете: точка точно на ръба зависи от посоката на обхождане)
+    k = (np.arange(n) + 0.4137) / n
+    gx, gy = np.meshgrid(lo[0] + k * (hi[0] - lo[0]), lo[1] + k * (hi[1] - lo[1]))
+    pts = np.column_stack([gx.ravel(), gy.ravel()])
+    ina, inb = Path(a).contains_points(pts), Path(b).contains_points(pts)
+    union = np.count_nonzero(ina | inb)
+    return np.count_nonzero(ina & inb) / union if union else 0.0
+
+
+def _main_angle(poly):
+    """Посоката на най-дългата страна на контура, 0-90°."""
+    p = np.asarray(poly, float)
+    d = np.roll(p, -1, axis=0) - p
+    i = int(np.argmax(np.hypot(d[:, 0], d[:, 1])))
+    return float(np.degrees(np.arctan2(d[i, 1], d[i, 0]))) % 90
+
+
+def fit_piece(piece, outline):
+    """
+    Мястото, на което бетонът на елемента пасва най-добре върху контура (см на етажа): завъртане по
+    най-дългата страна на контура (+ 0 / 90 / 180 / 270°) и огледално; центърът на тежестта - върху центъра
+    на контура. (място, застъпване 0-1).
+    """
+    P, T = np.array(piece["poly"], float), np.asarray(outline, float)
+    cP, cT = _centroid(P), _centroid(T)
+    c = np.array([piece["cx"], piece["cy"]], float)
+    base, best = _main_angle(T), None
+    for k in range(4):
+        rot = (base + 90 * k) % 360
+        near = round(rot / 90) * 90
+        rot = float(near % 360) if abs(rot - near) <= SNAP_ANGLE_DEG else float(round(rot) % 360)
+        for mir in (False, True):
+            pos = {"x": 0.0, "y": 0.0, "rot": rot, "mir": mir}
+            M, _t = _transform(piece, pos)
+            iou = _iou((M @ (P - cP).T).T + cT, T)
+            if best is None or iou > best[1] + 0.02:   # при равенство (симетрична форма) - без огледално, по-малък ъгъл
+                x, y = cT + M @ (c - cP)
+                best = ({"x": round(float(x), 1), "y": round(float(y), 1), "rot": rot, "mir": mir}, iou)
+    return best
+
+
+def pdf_shapes(page, pt_per_px):
+    """
+    Векторен PDF: затворените контури (бетонът на чертежа) и надписите - в пиксели на фона (страницата,
+    завъртяна както се показва). Контур = правоъгълник / четириъгълник в PDF-а или затворена верига от линии с
+    една дебелина, в която всяка точка е край на точно две линии (щриховката е с друга дебелина, а кóтите не
+    образуват затворени вериги). (контури [[x, y], ...], надписи [(текст, x, y)]).
+    """
+    import fitz
+    R = page.rotation_matrix
+
+    def px(p):
+        q = p * R
+        return q.x / pt_per_px, q.y / pt_per_px
+
+    rings, edges = [], {}   # edges - линиите по дебелина
+    for g in page.get_drawings():
+        for item in g["items"]:
+            if item[0] == "l":
+                edges.setdefault(round(g.get("width") or 0, 2), []).append((item[1], item[2]))
+            elif item[0] in ("re", "qu"):
+                q = item[1].quad if item[0] == "re" else item[1]
+                rings.append([q.ul, q.ur, q.lr, q.ll])
+    node = lambda p: (round(p.x * 2), round(p.y * 2))   # точките до 0,5 pt са една
+    for lines in edges.values():
+        adj, where, done = {}, {}, set()
+        for a, b in lines:
+            na, nb = node(a), node(b)
+            if na == nb:
+                continue
+            adj.setdefault(na, set()).add(nb)
+            adj.setdefault(nb, set()).add(na)
+            where.setdefault(na, a)
+            where.setdefault(nb, b)
+        for start in adj:
+            if start in done:
+                continue
+            comp, stack = [], [start]   # свързаната част
+            done.add(start)
+            while stack:
+                n = stack.pop()
+                comp.append(n)
+                for m in adj[n]:
+                    if m not in done:
+                        done.add(m)
+                        stack.append(m)
+            if len(comp) < 3 or any(len(adj[n]) != 2 for n in comp):
+                continue
+            ring, prev, cur = [start], None, start   # обхождане на веригата
+            while True:
+                nxt = next(m for m in adj[cur] if m != prev) if prev is not None else next(iter(adj[cur]))
+                if nxt == start:
+                    break
+                ring.append(nxt)
+                prev, cur = cur, nxt
+            rings.append([where[n] for n in ring])
+
+    shapes, seen = [], set()
+    w_px, h_px = page.rect.width / pt_per_px, page.rect.height / pt_per_px
+    for ring in rings:
+        pts = np.array([px(p) for p in ring])
+        u, v = pts - np.roll(pts, 1, axis=0), np.roll(pts, -1, axis=0) - pts
+        turn = np.abs(u[:, 0] * v[:, 1] - u[:, 1] * v[:, 0])
+        keep = np.flatnonzero(turn > 1e-6 * max(1.0, np.ptp(pts[:, 0]) * np.ptp(pts[:, 1])))   # без точките по права
+        pts = pts[keep] if len(keep) >= 3 else pts
+        size = np.ptp(pts, axis=0)
+        if (len(pts) > 12 or size.min() < 1.5 or size[0] > w_px / 2 or size[1] > h_px / 2
+                or _area(pts) < 0.5 * size.prod() * (len(pts) <= 4)):
+            continue   # кръгчета, рамки на листа и таблици, изкривени четириъгълници
+        sig = (tuple(np.round(pts.min(0))), tuple(np.round(pts.max(0))), round(_area(pts)))
+        if sig not in seen:   # един контур, начертан два пъти
+            seen.add(sig)
+            shapes.append(pts.tolist())
+    labels = []
+    for x0, y0, x1, y1, text, *_ in page.get_text("words"):
+        if any(ch.isalpha() for ch in text) and len(text) <= 15:
+            cx, cy = px(fitz.Point((x0 + x1) / 2, (y0 + y1) / 2))
+            labels.append((text, cx, cy))
+    return shapes, labels
+
+
+def gemini_outlines(elements, page, w_px, h_px):
+    """
+    Контурите от Gemini ("places") на страницата - в пиксели на фона, по (тип, име): {(тип, name_key): [контур]}.
+    elements: [{"type", "name", "places"}] - в реда на разчитането.
+    """
+    out = {}
+    for e in elements or []:
+        for place in e.get("places") or []:
+            try:
+                if int(place.get("page") or 1) != page:
+                    continue
+                pts = [(float(x) / 1000 * w_px, float(y) / 1000 * h_px) for x, y in place["outline"]]
+            except (TypeError, ValueError, KeyError, AttributeError):
+                continue
+            if len(pts) >= 3 and _area(pts) > 0:
+                out.setdefault((e.get("type"), name_key(e.get("name"))), []).append(pts)
+    return out
+
+
+def _bbox_dist(pt, poly):
+    lo, hi = np.min(poly, 0), np.max(poly, 0)
+    d = np.maximum(np.maximum(lo - pt, pt - hi), 0)
+    return float(np.hypot(*d))
+
+
+def drawing_places(pieces, w_px, h_px, cm_per_px, gemini=None, shapes=(), labels=()):
+    """
+    Местата на елементите по чертежа (фонът: w_px x h_px пиксела, cm_per_px см на пиксел).
+    1. Контур от Gemini -> най-близкият контур от PDF-а със сходна големина (или с надписа на елемента до него);
+       няма такъв - контурът от Gemini.
+    2. Без контур от Gemini - контурът от PDF-а до надпис с името на елемента.
+    Контурът от PDF-а важи само ако елементът пасва в него по форма (FIT_MIN_IOU).
+    (места {id: място}, откъде {id: "pdf" / "gemini"}, мащаб по контурите от PDF-а - см на пиксел или None).
+    """
+    gemini = gemini or {}
+    shapes = [np.asarray(s, float) for s in shapes]
+    cents = [_centroid(s) for s in shapes]
+    areas = [_area(s) for s in shapes]
+    diag = float(np.hypot(w_px, h_px))
+    by_key = {}
+    for p in pieces:
+        by_key.setdefault((p.get("type"), name_key(p.get("name"))), []).append(p)
+    names = {}   # надписите по име
+    for text, x, y in labels:
+        names.setdefault(name_key(text), []).append(np.array([x, y]))
+
+    def labelled(shape_i, key):
+        lim = 1.2 * float(np.ptp(shapes[shape_i], axis=0).max()) + 0.012 * diag
+        return any(_bbox_dist(pt, shapes[shape_i]) <= lim for pt in names.get(key[1], []))
+
+    pairs, approx = [], {}   # (оценка, id, контур от PDF-а)
+    for key, outs in gemini.items():
+        for p, g in zip(by_key.get(key, []), outs):
+            g = np.asarray(g, float)
+            approx[p["id"]] = g
+            cg, ag = _centroid(g), _area(g)
+            reach = max(float(np.hypot(*np.ptp(g, axis=0))), 0.03 * diag)
+            for i, (cs, a) in enumerate(zip(cents, areas)):
+                d = float(np.hypot(*(cs - cg)))
+                if d <= reach and 0.2 <= a / ag <= 5:
+                    pairs.append((_iou(g, shapes[i]) + 0.5 * (1 - d / reach) + (0.5 if labelled(i, key) else 0),
+                                  p["id"], i))
+    for key, group in by_key.items():   # без Gemini - по надписа
+        free = [p for p in group if p["id"] not in approx]
+        if not free or not key[1]:
+            continue
+        for i, s in enumerate(shapes):
+            pts = names.get(key[1], [])
+            if not pts:
+                break
+            lim = 1.2 * float(np.ptp(s, axis=0).max()) + 0.012 * diag
+            d = min(_bbox_dist(pt, s) for pt in pts)
+            if d <= lim:
+                for p in free:
+                    pairs.append((1 - d / lim, p["id"], i))
+    pairs.sort(key=lambda x: -x[0])
+    chosen, used = {}, set()
+    for _score, pid, i in pairs:
+        if pid not in chosen and i not in used:
+            chosen[pid], used = i, used | {i}
+
+    by_id = {p["id"]: p for p in pieces}
+    ratios = [np.sqrt(_area(by_id[pid]["poly"]) / areas[i]) for pid, i in chosen.items() if areas[i] > 0]
+    scale = float(np.median(ratios)) if ratios else None
+    if scale is None and approx:   # само Gemini - приблизително
+        ratios = [np.sqrt(_area(by_id[pid]["poly"]) / _area(g)) for pid, g in approx.items() if _area(g) > 0]
+        scale = float(np.median(ratios)) if ratios else None
+
+    to_cm = lambda poly: np.column_stack([poly[:, 0] * cm_per_px, (h_px - poly[:, 1]) * cm_per_px])
+    positions, how = {}, {}
+    for p in pieces:
+        pid = p["id"]
+        if pid in chosen:
+            pos, iou = fit_piece(p, to_cm(shapes[chosen[pid]]))
+            if iou >= FIT_MIN_IOU:
+                positions[pid], how[pid] = pos, "pdf"
+                continue
+        if pid in approx:
+            positions[pid], how[pid] = fit_piece(p, to_cm(approx[pid]))[0], "gemini"
+    return positions, how, scale
+
+
 # ---------- 3D изглед на етажа ----------
 
 def _world_boxes(pieces, positions):
@@ -379,14 +638,20 @@ def generate_floor_pdf(pieces, positions, info, background=None):
     fig.text(0.98, 0.965, dt("КОФРАЖНА СИСТЕМА TEKO / TEKO FORMWORK SYSTEM"), fontsize=10, ha='right', va='top',
              color='#555555')
 
-    # един 3D изглед и изгледът отгоре (вторият 3D изглед от другия ъгъл - махнат, потребителят 22.11.2026)
-    ax_main = fig.add_axes([0.02, 0.03, 0.64, 0.86])
-    draw_floor_3d(ax_main, pieces, positions, VIEW_MAIN, label_size=7, background=background)
-    ax_main.set_title(dt("3D VIEW / 3D ИЗГЛЕД"), fontsize=10, loc='left')
-
-    ax_top = fig.add_axes([0.68, 0.03, 0.30, 0.86])
+    # един 3D изглед и изгледът отгоре (вторият 3D изглед от другия ъгъл - махнат, потребителят 22.11.2026);
+    # потребителят, 24.11.2026 (`reference/screenshots/32. Разпределение 3Д.png`): изгледът отгоре - горе вдясно,
+    # 3D изгледът - на целия лист под заглавието (ъгълът - VIEW_MAIN, без промяна)
+    ax_top = fig.add_axes([0.61, 0.59, 0.38, 0.31])
     draw_floor_plan(ax_top, pieces, positions, label_size=6, background=background)
-    ax_top.set_title(dt("TOP VIEW / ИЗГЛЕД ОТГОРЕ"), fontsize=10, loc='left')
+    ax_top.set_title(dt("TOP VIEW / ИЗГЛЕД ОТГОРЕ"), fontsize=9, loc='left')
+    ax_top.set_anchor('NE')
+
+    ax_main = fig.add_axes([0.01, 0.01, 0.98, 0.86])
+    draw_floor_3d(ax_main, pieces, positions, VIEW_MAIN, label_size=8, background=background)
+    ax_main.set_anchor('SW')   # излишната ширина - вдясно, под изгледа отгоре
+    ax_main.text(0.01, 0.99, dt("3D VIEW / 3D ИЗГЛЕД"), transform=ax_main.transAxes, fontsize=10, va='top')
+    ax_main.set_zorder(0)
+    ax_top.set_zorder(1)   # изгледът отгоре - над 3D изгледа
 
     buf = io.BytesIO()
     fig.savefig(buf, format='pdf', dpi=200)
