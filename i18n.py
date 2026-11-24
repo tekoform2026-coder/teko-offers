@@ -217,14 +217,23 @@ EN = {
     "Влачете елементите; клик върху елемент го избира.": "Drag the elements; a click on an element selects it.",
     "Избран: {name} - кръгчето го върти.": "Selected: {name} - the circle rotates it.",
     "✅ Таблица 1 е обновена и проектът е записан.": "✅ Table 1 is updated and the project is saved.",
-    "„➕ Нов елемент“ - полета за размерите под плана, елементът се появява под чертежа и се влачи до мястото си. "
-    "Избран елемент: полетата под плана сменят името и размерите, „⧉ Копирай“ (Ctrl+C) и „📋 Постави“ (Ctrl+V - "
-    "там, където е мишката) - още един брой, „🗑 Изтрий“ (Delete). Промените отиват направо в таблица 1 и се "
-    "записват - незаписаните промени в таблица 1 се губят.":
-        "“➕ New element” - fields for the dimensions below the plan, the element appears below the drawing and is "
-        "dragged to its place. Selected element: the fields below the plan change the name and the dimensions, "
-        "“⧉ Copy” (Ctrl+C) and “📋 Paste” (Ctrl+V - where the mouse is) - one more piece, “🗑 Delete” (Delete). The "
-        "changes go straight into table 1 and are saved - unsaved changes in table 1 are lost.",
+    "„➕ Нов елемент“ (вдясно от плана) и „✏️ Размери“ на избрания елемент (или двоен клик върху него) отварят "
+    "прозорец с полетата. В лентата: „⧉ Копирай“ (Ctrl+C) и „📋 Постави“ (Ctrl+V - там, където е мишката) - още "
+    "един брой, „🗑 Изтрий“ (Delete). Промените отиват направо в таблица 1 и се записват - незаписаните промени в "
+    "таблица 1 се губят.":
+        "“➕ New element” (to the right of the plan) and “✏️ Dimensions” of the selected element (or a double click "
+        "on it) open a window with the fields. In the bar: “⧉ Copy” (Ctrl+C) and “📋 Paste” (Ctrl+V - where the mouse "
+        "is) - one more piece, “🗑 Delete” (Delete). The changes go straight into table 1 and are saved - unsaved "
+        "changes in table 1 are lost.",
+    "✏️ Размери на елемента": "✏️ Element dimensions",
+    "✏️ Размери": "✏️ Dimensions",
+    "🗑 Изтриване": "🗑 Deleting",
+    "Името и размерите на избрания елемент (или двоен клик върху него).":
+        "The name and the dimensions of the selected element (or a double click on it).",
+    "Избран: {name}": "Selected: {name}",
+    "Кликнете елемент в плана, за да го изберете.": "Click an element in the plan to select it.",
+    "ℹ️ Няма елементи - добавете ги с „➕ Нов елемент“ вдясно от плана или в таблица 1.":
+        "ℹ️ No elements - add them with “➕ New element” to the right of the plan or in table 1.",
     "➕ Нов елемент": "➕ New element",
     "⧉ Копирай": "⧉ Copy",
     "📋 Постави": "📋 Paste",
@@ -235,7 +244,6 @@ EN = {
     "🗑 Да, изтрий": "🗑 Yes, delete",
     "📍 Постави под чертежа": "📍 Place below the drawing",
     "Попълнете: {missing}.": "Fill in: {missing}.",
-    "✏️ Избран: {name} ({type})": "✏️ Selected: {name} ({type})",
     "Важи за всички {n} бр. от реда": "Applies to all {n} pcs. of the row",
     "Без отметка - само този брой: той става нов ред в таблицата.":
         "Unticked - only this piece: it becomes a new row in the table.",
