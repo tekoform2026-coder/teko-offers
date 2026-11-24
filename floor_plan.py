@@ -805,7 +805,7 @@ function build(parent) {
       <label><span class="fp-angle-label"></span><input class="fp-angle" type="text" inputmode="decimal">°</label>
       <button data-a="mir"></button><button data-a="fit"></button>
       <button data-a="calib"></button><span class="fp-sep"></span>
-      <button data-a="add"></button><button data-a="copy"></button><button data-a="paste"></button>
+      <button data-a="copy"></button><button data-a="paste"></button>
       <button data-a="del"></button><span class="fp-hint"></span></div></div>`;
   const svg = el("svg", { class: "fp-svg" });
   root.querySelector(".fp-wrap").appendChild(svg);
@@ -825,7 +825,7 @@ function build(parent) {
   root.querySelector(".fp-bar").addEventListener("click", (evt) => {
     const a = evt.target.closest("button")?.dataset.a;
     if (a === "rotl" || a === "rotr" || a === "mir") act(root, a);
-    else if (a === "add" || a === "copy" || a === "paste" || a === "del") edit(root, a, false);
+    else if (a === "copy" || a === "paste" || a === "del") edit(root, a, false);
     else if (a === "fit") { S.view = null; keep(S).view = null; draw(root); }
     else if (a === "calib") { S.calib = S.calib ? null : []; draw(root); }
   });
@@ -856,6 +856,7 @@ function build(parent) {
   svg.addEventListener("pointerleave", () => (S.inside = false));
   svg.addEventListener("pointerdown", (evt) => {
     root.focus();
+    S.down = null;
     const p = pt(evt);
     if (S.calib) {
       S.calib.push([p.x, -p.y]);
@@ -876,6 +877,7 @@ function build(parent) {
     const g = evt.target.closest(".fp-piece");
     if (g) {
       const id = g.dataset.id;
+      S.down = id;
       S.drag = { id, p0: p, x: S.pos[id].x, y: S.pos[id].y, moved: false, sel: S.sel !== id };
       select(root, id, false);
     } else {
@@ -919,6 +921,10 @@ function build(parent) {
     S.drag = null; S.pan = null; S.turn = null;
   };
   svg.addEventListener("pointerup", up);
+  // двоен клик върху елемент - прозорецът с името и размерите (в Python)
+  svg.addEventListener("dblclick", () => {
+    if (S.down && S.byId[S.down]) S.api.setTriggerValue("action", { a: "edit", id: S.down });
+  });
   svg.addEventListener("pointercancel", up);
   svg.addEventListener("wheel", (evt) => {
     evt.preventDefault();
@@ -947,10 +953,9 @@ function select(root, id, send = true) {
   if (send) S.api.setStateValue("sel", id || "");
 }
 
-// промени в таблицата (потребителят, 24.11.2026): нов елемент, копирай / постави, изтрий - към Python
+// промени в таблицата (потребителят, 24.11.2026): копирай / постави, изтрий - към Python („Нов елемент“ - вдясно)
 function edit(root, a, key) {
   const S = root.__s, K = keep(S);
-  if (a === "add") { S.api.setTriggerValue("action", { a: "add" }); return; }
   if (a === "copy") {
     if (!S.sel) return;
     K.clip = S.sel;
@@ -1004,7 +1009,7 @@ function place(root, id) {
 function updateBar(root) {
   const S = root.__s, T = S.data.texts;
   const b = (a) => root.querySelector(`button[data-a="${a}"]`);
-  for (const a of ["rotl", "rotr", "mir", "fit", "calib", "add", "copy", "paste", "del"]) b(a).textContent = T[a];
+  for (const a of ["rotl", "rotr", "mir", "fit", "calib", "copy", "paste", "del"]) b(a).textContent = T[a];
   const K = keep(S);
   if (K.clip && !S.byId[K.clip]) K.clip = null;
   b("copy").disabled = b("del").disabled = !S.sel;
