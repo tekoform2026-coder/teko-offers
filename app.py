@@ -2271,7 +2271,7 @@ def floor_apply(store, pieces, drawing, action, place=None, row_width_cm=ROW_WID
     store["sel"] = added_ids[0] if added_ids else old_to_new.get(edited) if action["a"] == "edit" else None
     store["keep_view"] = True
     store["edit_n"] = store.get("edit_n", 0) + 1
-    for key in ("pdf", "adding", "confirm_delete"):
+    for key in ("pdf", "dialog"):
         store.pop(key, None)
     if part.empty:   # изтрит е последният елемент на чертежа
         st.session_state.pop("floor_drawing", None)
@@ -2359,76 +2359,120 @@ def floor_auto_scale(store, scale_key, pieces, places):
         bg["auto_scale"] = True
 
 
-def render_floor_edit(store, pieces, drawing, fkey, result, row_width_cm):
+def floor_add_dialog(store, pieces, drawing, fkey, row_width_cm, pid=None):
+    """Нов елемент - тип и полетата като в таблица 1; „Постави под чертежа“ -> в края на таблицата на чертежа."""
+    prefix = f"floor_{fkey}_{store.get('edit_n', 0)}"
+    new_type = st.selectbox(t("Какъв елемент да се добави?"), options=list(TYPE_LABELS),
+                            format_func=lambda code: t(TYPE_LABELS.get(code, code)), key=f"floor_add_type_{fkey}")
+    with st.form(f"{prefix}_add_form", border=False):
+        values = floor_element_fields(f"{prefix}_add_{new_type}", new_type, {})
+        count = st.number_input(t("Брой"), min_value=1, value=1, step=1, key=f"{prefix}_add_count")
+        col_ok, col_no = st.columns(2)
+        ok = col_ok.form_submit_button(t("📍 Постави под чертежа"), type="primary", use_container_width=True)
+        cancel = col_no.form_submit_button(t("Отказ"), use_container_width=True)
+    missing = floor_missing(new_type, values)
+    if ok and missing:
+        st.error(t("Попълнете: {missing}.", missing=", ".join(missing)))
+    elif ok:
+        floor_apply(store, pieces, drawing, {"a": "add", "count": int(count),
+                                             "values": {**values, "type": new_type, "drawing": drawing or None}},
+                    row_width_cm=row_width_cm)
+    if cancel:
+        close_floor_dialog(store)
+
+
+def floor_edit_dialog(store, pieces, drawing, fkey, row_width_cm, pid=None):
+    """Името и размерите на избрания елемент; при брой над 1 - само този брой (нов ред) или целият ред."""
+    p = next((q for q in pieces if q["id"] == pid), None)
+    df = st.session_state["edited_df"].reset_index(drop=True)
+    if p is None or p["row"] >= len(df):
+        close_floor_dialog(store)
+    prefix = f"floor_{fkey}_{store.get('edit_n', 0)}"
+    st.markdown(f"**{p['label']}** ({t(TYPE_LABELS.get(p['type'], p['type']))})")
+    with st.form(f"{prefix}_edit_form_{hashlib.md5(p['id'].encode()).hexdigest()[:8]}", border=False):
+        values = floor_element_fields(f"{prefix}_edit_{p['row']}_{p['k']}", p["type"], df.iloc[p["row"]].to_dict())
+        every = False
+        if p["count"] > 1:
+            every = st.checkbox(t("Важи за всички {n} бр. от реда", n=p["count"]), key=f"{prefix}_edit_all",
+                                help=t("Без отметка - само този брой: той става нов ред в таблицата."))
+        col_ok, col_no = st.columns(2)
+        save = col_ok.form_submit_button(t("💾 Запази промените"), type="primary", use_container_width=True)
+        cancel = col_no.form_submit_button(t("Отказ"), use_container_width=True)
+    missing = floor_missing(p["type"], values)
+    if save and missing:
+        st.error(t("Попълнете: {missing}.", missing=", ".join(missing)))
+    elif save:
+        floor_apply(store, pieces, drawing, {"a": "edit", "row": p["row"], "k": p["k"], "values": values,
+                                             "all": every}, row_width_cm=row_width_cm)
+    if cancel:
+        close_floor_dialog(store)
+
+
+def floor_delete_dialog(store, pieces, drawing, fkey, row_width_cm, pid=None):
+    """Потвърждение за изтриване: бройката -1, при 1 бр. - редът."""
+    p = next((q for q in pieces if q["id"] == pid), None)
+    if p is None:
+        close_floor_dialog(store)
+    st.write(t("Да се изтрие ли „{name}“? Бройката в таблица 1 намалява с 1 (при 1 бр. редът се маха).",
+               name=p["label"]))
+    col_yes, col_no = st.columns(2)
+    if col_yes.button(t("🗑 Да, изтрий"), type="primary", key=f"floor_{fkey}_del_yes", use_container_width=True):
+        floor_apply(store, pieces, drawing, {"a": "delete", "row": p["row"], "k": p["k"]}, row_width_cm=row_width_cm)
+    if col_no.button(t("Отказ"), key=f"floor_{fkey}_del_no", use_container_width=True):
+        close_floor_dialog(store)
+
+
+def close_floor_dialog(store):
+    store.pop("dialog", None)
+    st.rerun()
+
+
+def show_floor_dialog(store, pieces, drawing, fkey, row_width_cm):
     """
-    Под плана (потребителят, 24.11.2026): полетата на нов елемент, на избрания елемент (име и размери) и
-    потвърждението за изтриване; „Постави“ от лентата - веднага. Всичко отива в таблица 1 (floor_apply).
+    Изскачащ прозорец (потребителят, 24.11.2026, вариант 3) - отворен, докато е в store["dialog"] (и при
+    презареждане на страницата); затваря се със „Запази“ (floor_apply), „Отказ“ или X.
+    """
+    kind, pid = store["dialog"]["kind"], store["dialog"].get("pid")
+    title, body, width = {"add": (t("➕ Нов елемент"), floor_add_dialog, "large"),
+                          "edit": (t("✏️ Размери на елемента"), floor_edit_dialog, "large"),
+                          "delete": (t("🗑 Изтриване"), floor_delete_dialog, "small")}[kind]
+    st.dialog(title, width=width, on_dismiss=lambda: store.pop("dialog", None))(body)(
+        store, pieces, drawing, fkey, row_width_cm, pid)
+
+
+def render_floor_edit(store, pieces, drawing, fkey, result, row_width_cm, side):
+    """
+    Промени от плана (потребителят, 24.11.2026, вариант 3): полетата - в изскачащ прозорец, не под плана.
+    Вдясно от плана (side): „➕ Нов елемент“ и „✏️ Размери“ на избрания (или двоен клик върху елемент);
+    „🗑 Изтрий“ от лентата - прозорец за потвърждение, „Постави“ - веднага. Всичко отива в таблица 1 (floor_apply).
     """
     by_id = {p["id"]: p for p in pieces}
     sel = getattr(result, "sel", None)
     if sel is not None:   # "" - нищо не е избрано
         store["sel"] = sel or None
     action = getattr(result, "action", None) or {}
-    if action.get("a") == "add":
-        store["adding"], store["sel"] = True, None
-        store.pop("confirm_delete", None)
+    if action.get("a") == "edit" and action.get("id") in by_id:   # двоен клик
+        store["sel"] = action["id"]
+        store["dialog"] = {"kind": "edit", "pid": action["id"]}
     elif action.get("a") == "delete" and action.get("id") in by_id:
-        store["confirm_delete"] = action["id"]
+        store["dialog"] = {"kind": "delete", "pid": action["id"]}
     elif action.get("a") == "paste" and action.get("id") in by_id:
         p = by_id[action["id"]]
         place = {"x": action["x"], "y": action["y"], "rot": action.get("rot", 0), "mir": bool(action.get("mir"))}
         floor_apply(store, pieces, drawing, {"a": "copy", "row": p["row"], "k": p["k"]}, place, row_width_cm)
 
-    df = st.session_state["edited_df"].reset_index(drop=True)
-    prefix = f"floor_{fkey}_{store.get('edit_n', 0)}"
-    if store.get("confirm_delete") in by_id:
-        p = by_id[store["confirm_delete"]]
-        st.warning(t("Да се изтрие ли „{name}“? Бройката в таблица 1 намалява с 1 (при 1 бр. редът се маха).",
-                     name=p["label"]))
-        col_yes, col_no, _ = st.columns([1, 1, 3])
-        if col_yes.button(t("🗑 Да, изтрий"), type="primary", key=f"{prefix}_del_yes"):
-            floor_apply(store, pieces, drawing, {"a": "delete", "row": p["row"], "k": p["k"]},
-                        row_width_cm=row_width_cm)
-        if col_no.button(t("Отказ"), key=f"{prefix}_del_no"):
-            store.pop("confirm_delete", None)
-            st.rerun(scope="fragment")
-    elif store.get("adding"):
-        st.markdown("#### " + t("➕ Нов елемент"))
-        new_type = st.selectbox(t("Какъв елемент да се добави?"), options=list(TYPE_LABELS),
-                                format_func=lambda code: t(TYPE_LABELS.get(code, code)), key=f"floor_add_type_{fkey}")
-        with st.form(f"{prefix}_add_form"):
-            values = floor_element_fields(f"{prefix}_add_{new_type}", new_type, {})
-            count = st.number_input(t("Брой"), min_value=1, value=1, step=1, key=f"{prefix}_add_count")
-            col_ok, col_no, _ = st.columns([1, 1, 2])
-            ok = col_ok.form_submit_button(t("📍 Постави под чертежа"), type="primary", use_container_width=True)
-            cancel = col_no.form_submit_button(t("Отказ"), use_container_width=True)
-        missing = floor_missing(new_type, values)
-        if ok and missing:
-            st.error(t("Попълнете: {missing}.", missing=", ".join(missing)))
-        elif ok:
-            floor_apply(store, pieces, drawing, {"a": "add", "count": int(count),
-                                                 "values": {**values, "type": new_type, "drawing": drawing or None}},
-                        row_width_cm=row_width_cm)
-        if cancel:
-            store.pop("adding", None)
-            st.rerun(scope="fragment")
-    elif store.get("sel") in by_id and by_id[store["sel"]]["row"] < len(df):
-        p = by_id[store["sel"]]
-        row = df.iloc[p["row"]].to_dict()
-        st.markdown("#### " + t("✏️ Избран: {name} ({type})", name=p["label"], type=t(TYPE_LABELS.get(p["type"], p["type"]))))
-        with st.form(f"{prefix}_edit_form_{hashlib.md5(p['id'].encode()).hexdigest()[:8]}"):
-            values = floor_element_fields(f"{prefix}_edit_{p['row']}_{p['k']}", p["type"], row)
-            every = False
-            if p["count"] > 1:
-                every = st.checkbox(t("Важи за всички {n} бр. от реда", n=p["count"]), key=f"{prefix}_edit_all",
-                                    help=t("Без отметка - само този брой: той става нов ред в таблицата."))
-            save = st.form_submit_button(t("💾 Запази промените"), type="primary")
-        missing = floor_missing(p["type"], values)
-        if save and missing:
-            st.error(t("Попълнете: {missing}.", missing=", ".join(missing)))
-        elif save:
-            floor_apply(store, pieces, drawing, {"a": "edit", "row": p["row"], "k": p["k"], "values": values,
-                                                 "all": every}, row_width_cm=row_width_cm)
+    sel_piece = by_id.get(store.get("sel"))
+    with side:
+        if st.button(t("➕ Нов елемент"), type="primary", key=f"floor_new_{fkey}", use_container_width=True):
+            store["dialog"] = {"kind": "add"}
+        if st.button(t("✏️ Размери"), key=f"floor_edit_{fkey}", disabled=sel_piece is None,
+                     use_container_width=True,
+                     help=t("Името и размерите на избрания елемент (или двоен клик върху него).")):
+            store["dialog"] = {"kind": "edit", "pid": sel_piece["id"]}
+        st.caption(t("Избран: {name}", name=sel_piece["label"]) if sel_piece
+                   else t("Кликнете елемент в плана, за да го изберете."))
+    if store.get("dialog"):
+        show_floor_dialog(store, pieces, drawing, fkey, row_width_cm)
 
 
 @st.fragment
@@ -2438,9 +2482,9 @@ def render_floor_tab(df_calc, current):
         st.success(t("✅ Таблица 1 е обновена и проектът е записан."))
     df_calc = df_calc.reset_index(drop=True)   # редовете по позиция - както в таблица 1 (промените от плана)
     groups = [(name, part) for name, part in drawing_groups(df_calc) if len(part)]
-    if not groups:
-        st.info(t("ℹ️ Въведете елементи в Таб 1 и натиснете 'Запази и Изчисли'."))
-        return
+    if not groups:   # празен проект - първият елемент може и от плана
+        st.info(t("ℹ️ Няма елементи - добавете ги с „➕ Нов елемент“ вдясно от плана или в таблица 1."))
+        groups = [("", df_calc.iloc[0:0])]
     choice = 0
     if len(groups) > 1:
         choice = st.selectbox(t("Чертеж (етаж):"), range(len(groups)), key="floor_drawing",
@@ -2555,10 +2599,10 @@ def render_floor_tab(df_calc, current):
                  "точен ъгъл, „↺ 90°“ / „↻ 90°“ (или клавиш R) - на 90°, „⇋ Огледално“ (или M) го обръща. Колелцето "
                  "приближава, влачене на празно място мести изгледа. Местата се пазят, докато страницата е отворена "
                  "(не се записват в архива)."))
-    st.caption(t("„➕ Нов елемент“ - полета за размерите под плана, елементът се появява под чертежа и се влачи до "
-                 "мястото си. Избран елемент: полетата под плана сменят името и размерите, „⧉ Копирай“ (Ctrl+C) и "
-                 "„📋 Постави“ (Ctrl+V - там, където е мишката) - още един брой, „🗑 Изтрий“ (Delete). Промените "
-                 "отиват направо в таблица 1 и се записват - незаписаните промени в таблица 1 се губят."))
+    st.caption(t("„➕ Нов елемент“ (вдясно от плана) и „✏️ Размери“ на избрания елемент (или двоен клик върху него) "
+                 "отварят прозорец с полетата. В лентата: „⧉ Копирай“ (Ctrl+C) и „📋 Постави“ (Ctrl+V - там, където "
+                 "е мишката) - още един брой, „🗑 Изтрий“ (Delete). Промените отиват направо в таблица 1 и се "
+                 "записват - незаписаните промени в таблица 1 се губят."))
     if bg and auto_on:
         how = list(store.get("how", {}).values())
         if how:
@@ -2585,12 +2629,14 @@ def render_floor_tab(df_calc, current):
                   "calib2": t("Кликнете в другия край на котата."),
                   "hint": t("Влачете елементите; клик върху елемент го избира."),
                   "selected": t("Избран: {name} - кръгчето го върти.", name="{name}"),
-                  "add": t("➕ Нов елемент"), "copy": t("⧉ Копирай"), "paste": t("📋 Постави"), "del": t("🗑 Изтрий"),
+                  "copy": t("⧉ Копирай"), "paste": t("📋 Постави"), "del": t("🗑 Изтрий"),
                   "copied": t("Копиран: {name} - Ctrl+V го поставя там, където е мишката.", name="{name}")},
     }
-    result = floor_component()(data=data, key=ckey, on_positions_change=lambda: None,
-                               on_calib_change=lambda: None, on_sel_change=lambda: None,
-                               on_action_change=lambda: None)
+    col_plan, col_side = st.columns([5, 1])   # вдясно - „➕ Нов елемент“ и „✏️ Размери“
+    with col_plan:
+        result = floor_component()(data=data, key=ckey, on_positions_change=lambda: None,
+                                   on_calib_change=lambda: None, on_sel_change=lambda: None,
+                                   on_action_change=lambda: None)
     moved = getattr(result, "positions", None)
     if moved:
         moved = {pid: pos for pid, pos in moved.items() if pid in ids}
@@ -2603,7 +2649,7 @@ def render_floor_tab(df_calc, current):
     if measured and bg:
         bg["cm_per_px"] *= st.session_state.get(f"floor_known_{fkey}", 1000.0) / measured
         st.rerun(scope="fragment")
-    render_floor_edit(store, pieces, drawing, fkey, result, bg_data["w"] if bg_data else ROW_WIDTH_CM)
+    render_floor_edit(store, pieces, drawing, fkey, result, bg_data["w"] if bg_data else ROW_WIDTH_CM, col_side)
 
     col_reset, col_lang, col_pdf = st.columns([1, 1, 1], vertical_alignment="bottom")
     if col_reset.button(t("↺ Подреди наново"), key=f"floor_reset_{fkey}",
