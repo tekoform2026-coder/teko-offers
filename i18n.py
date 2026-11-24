@@ -121,8 +121,7 @@ EN = {
     "✅ Заредени {n} цени от Excel. Създайте Excel наново.": "✅ Loaded {n} prices from Excel. Create the Excel again.",
     "Изход от приложението; ако компютърът е запомнен - забравя го.":
         "Sign out of the app; if this computer is remembered, it is forgotten.",
-    "TEKO — Оптимизация на панели": "TEKO — Panel Optimization",
-    "AI система за кофражно планиране": "AI system for formwork planning",
+    "ТЕКО система за кофражно планиране": "TEKO formwork planning system",
     "ТЕКО България ООД": "TEKO Bulgaria Ltd.",
     "⚙️ Настройки": "⚙️ Settings",
     "Въведете Gemini API Key:": "Enter the Gemini API Key:",
