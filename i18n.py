@@ -217,6 +217,32 @@ EN = {
     "Кликнете в другия край на котата.": "Click the other end of the dimension.",
     "Влачете елементите; клик върху елемент го избира.": "Drag the elements; a click on an element selects it.",
     "Избран: {name} - кръгчето го върти.": "Selected: {name} - the circle rotates it.",
+    "✅ Таблица 1 е обновена и проектът е записан.": "✅ Table 1 is updated and the project is saved.",
+    "„➕ Нов елемент“ - полета за размерите под плана, елементът се появява под чертежа и се влачи до мястото си. "
+    "Избран елемент: полетата под плана сменят името и размерите, „⧉ Копирай“ (Ctrl+C) и „📋 Постави“ (Ctrl+V - "
+    "там, където е мишката) - още един брой, „🗑 Изтрий“ (Delete). Промените отиват направо в таблица 1 и се "
+    "записват - незаписаните промени в таблица 1 се губят.":
+        "“➕ New element” - fields for the dimensions below the plan, the element appears below the drawing and is "
+        "dragged to its place. Selected element: the fields below the plan change the name and the dimensions, "
+        "“⧉ Copy” (Ctrl+C) and “📋 Paste” (Ctrl+V - where the mouse is) - one more piece, “🗑 Delete” (Delete). The "
+        "changes go straight into table 1 and are saved - unsaved changes in table 1 are lost.",
+    "➕ Нов елемент": "➕ New element",
+    "⧉ Копирай": "⧉ Copy",
+    "📋 Постави": "📋 Paste",
+    "Копиран: {name} - Ctrl+V го поставя там, където е мишката.":
+        "Copied: {name} - Ctrl+V pastes it where the mouse is.",
+    "Да се изтрие ли „{name}“? Бройката в таблица 1 намалява с 1 (при 1 бр. редът се маха).":
+        "Delete “{name}”? The quantity in table 1 goes down by 1 (at 1 pc. the row is removed).",
+    "🗑 Да, изтрий": "🗑 Yes, delete",
+    "📍 Постави под чертежа": "📍 Place below the drawing",
+    "Попълнете: {missing}.": "Fill in: {missing}.",
+    "✏️ Избран: {name} ({type})": "✏️ Selected: {name} ({type})",
+    "Важи за всички {n} бр. от реда": "Applies to all {n} pcs. of the row",
+    "Без отметка - само този брой: той става нов ред в таблицата.":
+        "Unticked - only this piece: it becomes a new row in the table.",
+    "💾 Запази промените": "💾 Save the changes",
+    "Празно = стандартната височина на проекта": "Empty = the standard height of the project",
+    "Празна = като стена A": "Empty = as wall A",
     "↺ Подреди наново": "↺ Arrange again",
     "Връща елементите на местата им по чертежа, другите - един до друг под него (преместеното с мишката се губи).":
         "Puts the elements back in their places on the drawing, the others side by side below it (what was moved "
