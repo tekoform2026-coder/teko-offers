@@ -91,6 +91,11 @@ def _response_schema():
         "thickness1": number, "thickness2": number, "thickness3": number,
         "closed_end_1": flag, "closed_end_2": flag, "closed_end_3": flag,
         "source": S(type=T.STRING, nullable=True),
+        # местата в плана (потребителят, 24.11.2026): за всеки брой - страницата и контурът (0-1000 от листа)
+        "places": S(type=T.ARRAY, nullable=True, items=S(
+            type=T.OBJECT, properties={"page": S(type=T.INTEGER),
+                                       "outline": S(type=T.ARRAY, items=S(type=T.ARRAY, items=S(type=T.NUMBER)))},
+            required=["page", "outline"], property_ordering=["page", "outline"])),
     }
     element = S(type=T.OBJECT, properties=element_fields, required=["type", "name", "count"],
                 property_ordering=list(element_fields))
@@ -137,7 +142,8 @@ def analyze_blueprint(image_input, api_key, model_choice=None, notes_language="b
     - "notes" - кратка бележка за всяко противоречие или несигурност в чертежа;
     - "elements" - за всеки елемент: "type" (column, wall, l_wall, u_wall, t_wall), "name", "count", "unit",
       размерите "thickness", "l1", "l2", "l3", "height", "thickness1", "thickness2", "thickness3",
-      затворените краища "closed_end_1", "closed_end_2", "closed_end_3" и "source" - значенията им са по-долу.
+      затворените краища "closed_end_1", "closed_end_2", "closed_end_3", "source" и "places" - значенията им
+      са по-долу.
 
     Инструкции за размерите:
     - Мерна единица: пиши числата ТОЧНО както са на чертежа и НЕ ги преобразувай в други единици - програмата
@@ -221,6 +227,14 @@ def analyze_blueprint(image_input, api_key, model_choice=None, notes_language="b
 
     Откъде е елементът ("source"): кратко - страницата и мястото в чертежа (оси, таблица, изглед), напр.
     „стр. 2, оси А-Б / 1-3“ или „стр. 1, таблица с колоните“; пиши го на езика на "notes".
+
+    Местата в плана ("places") - за всеки брой от елемента, който се вижда в ПЛАН (изглед отгоре), по един
+    запис: "page" - номерът на страницата с плана, "outline" - контурът на бетона в плана като точки [x, y]
+    по ъглите му, подред по обиколката (колона и права стена - 4 точки, L-стена - 6, U- и T-стена - 8).
+    Координатите са от 0 до 1000 спрямо целия лист на страницата: x - от левия ръб (0) до десния (1000),
+    y - от горния ръб (0) до долния (1000). Само бетона - без размерните линии, надписите и осите. Ако елемент
+    с "count" 3 е на три места в плана, дай трите. Ако елементът не се вижда в план (само в таблица или
+    разрез), "places" = null. Броят на записите в "places" не сменя "count".
     """
     prompt += (f'\n    Пиши всички "notes" на {NOTES_LANGUAGES.get(notes_language, NOTES_LANGUAGES["bg"])} език, '
                'независимо от езика на чертежа. Имената на елементите ("name") оставяй както са в чертежа.\n')
