@@ -78,13 +78,15 @@ def dt_face(name):
 # Думите в имената на артикулите (по реда на проверка): en, de, fr, es, el, hr, ro, pl, uk, ru, sr, tr
 TERMS = [
     # el - „Οδηγός στερέωσης“ (AW), „Μεταλλικός σύνδεσμος ξυλοτύπου“ (TC), „Υποστήριγμα στοιχείων“ (PP) - както в
-    # сайта на TEKO Гърция; ro - „Contrafișă reglabilă“ - TEKO Румъния; en / ro „Compensator“ - както при TEKO
+    # сайта на TEKO Гърция; ro - „Contrafișă reglabilă“ - TEKO Румъния; en / ro „Compensator“ - както при TEKO;
+    # hr ригел „Stezna vodilica“ - като Doka Хърватия, tr подравняващ ригел „Kuşak“, pl „Podpora pionująca“,
+    # es „Riel alineador“ (потребителят, 24.11.2026 - след проверката с търсене в изображения)
     (r"Подравняващ\s+ригел", ("Alignment waling", "Richtriegel", "Filière d'alignement", "Riel de alineación",
-                              "Οδηγός στερέωσης", "Profil za poravnanje", "Șină de rigidizare", "Rygiel wyrównujący",
+                              "Οδηγός στερέωσης", "Stezna vodilica", "Șină de rigidizare", "Rygiel wyrównujący",
                               "Вирівнювальний ригель", "Выравнивающий ригель", "Ригла за поравнање",
-                              "Hizalama kuşağı")),
-    (r"Ригел", ("Alignment waling", "Riegel", "Filière", "Riel", "Οδηγός στερέωσης", "Profil", "Șină de rigidizare", "Rygiel", "Ригель",
-                "Ригель", "Ригла", "Kuşak")),
+                              "Kuşak")),
+    (r"Ригел", ("Alignment waling", "Riegel", "Filière", "Riel alineador", "Οδηγός στερέωσης", "Stezna vodilica",
+                "Șină de rigidizare", "Rygiel", "Ригель", "Ригель", "Ригла", "Kuşak")),
     (r"поцинкован[иа]?", ("galvanized", "verzinkt", "galvanisée", "galvanizado", "γαλβανισμένος", "pocinčani",
                           "zincată", "ocynkowany", "оцинкований", "оцинкованный", "поцинкована",
                           "galvanizli")),
@@ -108,7 +110,7 @@ TERMS = [
     (r"Ръкохватка", ("Handle", "Griff", "Poignée", "Maneta", "Λαβή", "Ručka", "Mâner", "Uchwyt", "Ручка (замок)",
                      "Ручка (замок)", "Ручка", "Tutamak")),
     (r"Вертикализатор", ("Pull push prop", "Richtstütze", "Étai tire-pousse", "Puntal estabilizador",
-                         "Υποστήριγμα στοιχείων", "Podupirač", "Contrafișă reglabilă", "Podpora ustawcza", "Підкіс",
+                         "Υποστήριγμα στοιχείων", "Podupirač", "Contrafișă reglabilă", "Podpora pionująca", "Підкіс",
                          "Подкос", "Подупирач", "Ayarlı payanda")),
     (r"Шпилка", ("Tie rod", "Ankerstab", "Tige d'ancrage", "Barra de anclaje", "Ντίζα", "Sidrena šipka",
                  "Bară tirant", "Ściąg", "Стяжка", "Стяжка", "Затега", "Tij")),
@@ -119,7 +121,7 @@ TERMS = [
                               "Фіксувальна планка", "Фиксирующая планка", "Причврсна плочица",
                               "Sabitleme plakası")),
     (r"Съединител\s+за\s+ригел", ("Waling connector", "Riegelverbinder", "Connecteur de filière",
-                                    "Conector de riel", "Σύνδεσμος οδηγού στερέωσης", "Spojnica profila",
+                                    "Conector de riel", "Σύνδεσμος οδηγού στερέωσης", "Spojnica stezne vodilice",
                                     "Conector pentru șina de rigidizare", "Łącznik rygla", "З'єднувач ригеля", "Соединитель ригеля",
                                     "Спојница ригле", "Kuşak bağlantısı")),
     (r"Тапа", ("Plug", "Stopfen", "Bouchon", "Tapón", "Τάπα", "Čep", "Dop", "Zaślepka", "Заглушка", "Заглушка",
