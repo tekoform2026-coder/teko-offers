@@ -1546,11 +1546,13 @@ with tab1:
                 
                 selected_model = st.selectbox(
                     t("Избери AI модел за разчитане:"),
+                    # моделите (потребителят, 24.11.2026, по страницата на Google): 3.1 Pro е само „-preview“,
+                    # 2.5 Pro спира на 01.12.2026; Gemini 4 - нов, за проба
                     options=[
-                        "gemini-3.1-pro",
-                        "gemini-2.5-pro",
                         "gemini-3.8-flash",
-                        "gemini-3.6-flash"
+                        "gemini-3.1-pro-preview",
+                        "gemini-3.6-flash",
+                        "gemini-4-hydrogen"
                     ],
                     index=0,
                     help=t("Изберете кой модел на Gemini да анализира чертежа."),
