@@ -249,7 +249,8 @@ def analyze_blueprint(image_input, api_key, model_choice=None, notes_language="b
         "gemini-2.5-pro",
         "gemini-2.0-flash",
         "gemini-1.5-pro",
-        "gemini-1.5-flash"
+        "gemini-1.5-flash",
+        "gemini-4-hydrogen"   # Gemini 4 (потребителят, 24.11.2026)
     ]
 
     candidate_models = []
