@@ -26,8 +26,8 @@ from stock_layout import plan_project
 from weights_db import get_item_weight
 from i18n import t, t_item, init_language, language_switch, MANUAL_HELP_BG
 from doc_lang import DOC_FLAGS, DOC_LANGUAGES, document_language, dt
-from floor_plan import (ROW_WIDTH_CM, default_positions, drawing_places, floor_component, gemini_outlines,
-                        generate_floor_pdf, pdf_shapes, piece_boxes, piece_plan)
+from floor_plan import (ROW_WIDTH_CM, apply_floor_edit, default_positions, drawing_places, floor_component,
+                        gemini_outlines, generate_floor_pdf, pdf_shapes, piece_boxes, piece_plan)
 
 init_language()
 st.set_page_config(
@@ -2160,10 +2160,10 @@ FLOOR_BG_WIDTH_CM = 3000  # картина без мащаб - приема се
 def floor_pieces(df_part):
     """
     Елементите на един чертеж за 3D плана - по един за всеки брой. id - от типа, името и размерите
-    (остава същото при промяна на други редове в таблицата).
+    (остава същото при промяна на други редове в таблицата); row - индексът на реда, k - поредният брой.
     """
     pieces, seen = [], {}
-    for _, row in df_part.iterrows():
+    for idx, row in df_part.iterrows():
         elem_type = str(row.get("type", "wall"))
         layout = element_layout(elem_type, row)
         if layout is None:
@@ -2177,8 +2177,112 @@ def floor_pieces(df_part):
         cnt = int(_row_float(row, "count", 1))
         for k in range(cnt):
             pieces.append({**plan, "boxes": boxes, "id": f"{base}|{seen[base]}|{k}", "type": elem_type, "name": name,
-                           "label": label + (f" ({k + 1})" if cnt > 1 else "")})
+                           "label": label + (f" ({k + 1})" if cnt > 1 else ""), "row": idx, "k": k, "count": cnt})
     return pieces
+
+
+# Промени от плана (потребителят, 24.11.2026, вариант А): нов елемент, промяна на име и размери, копирай / постави,
+# изтрий - направо в таблица 1 и в архива; сметките (табове 2-5) следват таблицата
+FLOOR_FIELDS = {"column": ["l1_cm", "thickness1_cm", "height_cm"],
+                "wall": ["l1_cm", "thickness1_cm", "height_cm"],
+                "l_wall": ["l1_cm", "thickness1_cm", "l2_cm", "thickness2_cm", "height_cm"],
+                "u_wall": ["l1_cm", "thickness1_cm", "l2_cm", "thickness2_cm", "l3_cm", "thickness3_cm", "height_cm"],
+                "t_wall": ["l1_cm", "thickness1_cm", "l2_cm", "thickness2_cm", "l3_cm", "thickness3_cm", "height_cm"]}
+FLOOR_FIELD_LABELS = {"l1_cm": "Стена A (см)", "thickness1_cm": "Дебелина стена A (см)", "l2_cm": "Стена B (см)",
+                      "thickness2_cm": "Дебелина стена B (см)", "l3_cm": "Стена C (см)",
+                      "thickness3_cm": "Дебелина стена C (см)", "height_cm": "Височина (см)"}
+FLOOR_ENDS = {"column": 0, "wall": 2, "l_wall": 2, "u_wall": 2, "t_wall": 3}   # затворените краища на типа
+FLOOR_END_LABELS = ("Затворен край 1", "Затворен край 2", "Затворен край 3 (само T-стена)")
+
+
+def element_signature(row):
+    """
+    Еднакви елементи (копие = още един брой на същия ред): чертеж, тип, име, стените и дебелините на типа (празна
+    дебелина B / C = като A), височина (празна = стандартната), затворените краища.
+    """
+    elem_type = str(row.get("type") or "wall")
+    num = lambda col: _row_float(row, col, None)
+    n_walls = WALL_THICKNESS_COLUMNS.get(elem_type, 1)
+    t1 = num("thickness1_cm") or num("thickness_cm")
+    lengths = ("l1_cm",) if n_walls == 1 else ("l1_cm", "l2_cm", "l3_cm")
+    name = row.get("name")
+    name = "" if name is None or (not isinstance(name, str) and pd.isna(name)) else str(name).strip()
+    return (drawing_name(row.get("drawing")), elem_type, name, tuple(num(c) or 0 for c in lengths),
+            tuple([t1] + [num(c) or t1 for c in ARM_THICKNESS_COLUMNS[1:n_walls]]),
+            num("height_cm") or st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM),
+            tuple(_closed_end(row, c) for c in CLOSED_END_COLUMNS[:FLOOR_ENDS.get(elem_type, 2)]))
+
+
+def floor_element_fields(prefix, elem_type, row):
+    """Полетата на елемента в таб 6 (както колоните на таблица 1) -> стойностите; row - сегашните (или {})."""
+    name = row.get("name")
+    name = "" if name is None or (not isinstance(name, str) and pd.isna(name)) else str(name)
+    values = {"name": st.text_input(t("Наименование / Маркировка"), value=name, key=f"{prefix}_name").strip()}
+    cols = st.columns(4)
+    for i, col in enumerate(FLOOR_FIELDS.get(elem_type, FLOOR_FIELDS["wall"])):
+        hint = None
+        if col == "height_cm":
+            hint = t("Празно = стандартната височина на проекта")
+        elif col in ARM_THICKNESS_COLUMNS[1:]:
+            hint = t("Празна = като стена A")
+        elif col == "l3_cm" and elem_type == "t_wall":
+            hint = t("При Т-стена: от левия край на полката до лявото лице на реброто; празно = реброто е в средата")
+        values[col] = cols[i % 4].number_input(t(FLOOR_FIELD_LABELS[col]), min_value=0.0,
+                                               value=_row_float(row, col, None), step=5.0, format="%g",
+                                               key=f"{prefix}_{col}", help=hint)
+    n_ends = FLOOR_ENDS.get(elem_type, 2)
+    if n_ends:
+        cols = st.columns(4)
+        for i, col in enumerate(CLOSED_END_COLUMNS[:n_ends]):
+            values[col] = cols[i].checkbox(t(FLOOR_END_LABELS[i]), value=_closed_end(row, col), key=f"{prefix}_{col}")
+    return values
+
+
+def floor_missing(elem_type, values):
+    """Задължителните размери без стойност (както в таблица 1; празната височина е стандартната)."""
+    cols = {"thickness_cm": "thickness1_cm"}
+    return [t(label) for col, label in REQUIRED_DIMENSIONS.get(elem_type, [])
+            if col != "height_cm" and not (values.get(cols.get(col, col)) or 0) > 0]
+
+
+def floor_apply(store, pieces, drawing, action, place=None, row_width_cm=ROW_WIDTH_CM):
+    """
+    Промяна от 3D плана -> таблица 1 (записва проекта и презарежда цялата страница). Местата следват бройките:
+    поставеното копие - на place, новите елементи - под чертежа; след промяна всички остават, където са.
+    Избран след презареждането: новият / копираният / промененият брой.
+    """
+    df = st.session_state["edited_df"].reset_index(drop=True)
+    new_df, moves, added = apply_floor_edit(df, action, element_signature)
+    new_df = thickness_to_walls(new_df, migrate=False)
+    std = st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM)
+    part = next((g for name, g in drawing_groups(fill_default_height(new_df, std)) if name == drawing),
+                new_df.iloc[0:0])
+    new_pieces = floor_pieces(part)
+    new_id = {(p["row"], p["k"]): p["id"] for p in new_pieces}
+    old_to_new = {p["id"]: new_id.get(moves.get((p["row"], p["k"]))) for p in pieces}
+    remap = lambda items: {old_to_new[pid]: v for pid, v in items if old_to_new.get(pid)}
+    positions = remap(store["positions"].items())
+    store["how"] = remap(store.get("how", {}).items())
+    store["moved"] = set(remap((pid, True) for pid in store.get("moved", set())))
+    added_ids = [new_id[tok] for tok in added if tok in new_id]
+    if place is not None:
+        positions.update({pid: dict(place) for pid in added_ids})
+    store["positions"] = default_positions(new_pieces, positions, row_width_cm=row_width_cm)
+    store["fixed"] = set(store["positions"])   # след промяна - всички остават, където са (не се местят по чертежа)
+    edited = next((p["id"] for p in pieces if (p["row"], p["k"]) == (action.get("row"), action.get("k"))), None)
+    store["sel"] = added_ids[0] if added_ids else old_to_new.get(edited) if action["a"] == "edit" else None
+    store["keep_view"] = True
+    store["edit_n"] = store.get("edit_n", 0) + 1
+    for key in ("pdf", "adding", "confirm_delete"):
+        store.pop(key, None)
+    if part.empty:   # изтрит е последният елемент на чертежа
+        st.session_state.pop("floor_drawing", None)
+    reset_table_editors()
+    st.session_state["edited_df"] = new_df
+    save_current_project()
+    st.session_state.pop("excel_bytes", None)
+    st.session_state["floor_saved"] = True
+    st.rerun()
 
 
 def floor_background(file, page):
@@ -2257,9 +2361,84 @@ def floor_auto_scale(store, scale_key, pieces, places):
         bg["auto_scale"] = True
 
 
+def render_floor_edit(store, pieces, drawing, fkey, result, row_width_cm):
+    """
+    Под плана (потребителят, 24.11.2026): полетата на нов елемент, на избрания елемент (име и размери) и
+    потвърждението за изтриване; „Постави“ от лентата - веднага. Всичко отива в таблица 1 (floor_apply).
+    """
+    by_id = {p["id"]: p for p in pieces}
+    sel = getattr(result, "sel", None)
+    if sel is not None:   # "" - нищо не е избрано
+        store["sel"] = sel or None
+    action = getattr(result, "action", None) or {}
+    if action.get("a") == "add":
+        store["adding"], store["sel"] = True, None
+        store.pop("confirm_delete", None)
+    elif action.get("a") == "delete" and action.get("id") in by_id:
+        store["confirm_delete"] = action["id"]
+    elif action.get("a") == "paste" and action.get("id") in by_id:
+        p = by_id[action["id"]]
+        place = {"x": action["x"], "y": action["y"], "rot": action.get("rot", 0), "mir": bool(action.get("mir"))}
+        floor_apply(store, pieces, drawing, {"a": "copy", "row": p["row"], "k": p["k"]}, place, row_width_cm)
+
+    df = st.session_state["edited_df"].reset_index(drop=True)
+    prefix = f"floor_{fkey}_{store.get('edit_n', 0)}"
+    if store.get("confirm_delete") in by_id:
+        p = by_id[store["confirm_delete"]]
+        st.warning(t("Да се изтрие ли „{name}“? Бройката в таблица 1 намалява с 1 (при 1 бр. редът се маха).",
+                     name=p["label"]))
+        col_yes, col_no, _ = st.columns([1, 1, 3])
+        if col_yes.button(t("🗑 Да, изтрий"), type="primary", key=f"{prefix}_del_yes"):
+            floor_apply(store, pieces, drawing, {"a": "delete", "row": p["row"], "k": p["k"]},
+                        row_width_cm=row_width_cm)
+        if col_no.button(t("Отказ"), key=f"{prefix}_del_no"):
+            store.pop("confirm_delete", None)
+            st.rerun(scope="fragment")
+    elif store.get("adding"):
+        st.markdown("#### " + t("➕ Нов елемент"))
+        new_type = st.selectbox(t("Какъв елемент да се добави?"), options=list(TYPE_LABELS),
+                                format_func=lambda code: t(TYPE_LABELS.get(code, code)), key=f"floor_add_type_{fkey}")
+        with st.form(f"{prefix}_add_form"):
+            values = floor_element_fields(f"{prefix}_add_{new_type}", new_type, {})
+            count = st.number_input(t("Брой"), min_value=1, value=1, step=1, key=f"{prefix}_add_count")
+            col_ok, col_no, _ = st.columns([1, 1, 2])
+            ok = col_ok.form_submit_button(t("📍 Постави под чертежа"), type="primary", use_container_width=True)
+            cancel = col_no.form_submit_button(t("Отказ"), use_container_width=True)
+        missing = floor_missing(new_type, values)
+        if ok and missing:
+            st.error(t("Попълнете: {missing}.", missing=", ".join(missing)))
+        elif ok:
+            floor_apply(store, pieces, drawing, {"a": "add", "count": int(count),
+                                                 "values": {**values, "type": new_type, "drawing": drawing or None}},
+                        row_width_cm=row_width_cm)
+        if cancel:
+            store.pop("adding", None)
+            st.rerun(scope="fragment")
+    elif store.get("sel") in by_id and by_id[store["sel"]]["row"] < len(df):
+        p = by_id[store["sel"]]
+        row = df.iloc[p["row"]].to_dict()
+        st.markdown("#### " + t("✏️ Избран: {name} ({type})", name=p["label"], type=t(TYPE_LABELS.get(p["type"], p["type"]))))
+        with st.form(f"{prefix}_edit_form_{hashlib.md5(p['id'].encode()).hexdigest()[:8]}"):
+            values = floor_element_fields(f"{prefix}_edit_{p['row']}_{p['k']}", p["type"], row)
+            every = False
+            if p["count"] > 1:
+                every = st.checkbox(t("Важи за всички {n} бр. от реда", n=p["count"]), key=f"{prefix}_edit_all",
+                                    help=t("Без отметка - само този брой: той става нов ред в таблицата."))
+            save = st.form_submit_button(t("💾 Запази промените"), type="primary")
+        missing = floor_missing(p["type"], values)
+        if save and missing:
+            st.error(t("Попълнете: {missing}.", missing=", ".join(missing)))
+        elif save:
+            floor_apply(store, pieces, drawing, {"a": "edit", "row": p["row"], "k": p["k"], "values": values,
+                                                 "all": every}, row_width_cm=row_width_cm)
+
+
 @st.fragment
 def render_floor_tab(df_calc, current):
     st.header(t("6. 3D план на етажа"))
+    if st.session_state.pop("floor_saved", False):
+        st.success(t("✅ Таблица 1 е обновена и проектът е записан."))
+    df_calc = df_calc.reset_index(drop=True)   # редовете по позиция - както в таблица 1 (промените от плана)
     groups = [(name, part) for name, part in drawing_groups(df_calc) if len(part)]
     if not groups:
         st.info(t("ℹ️ Въведете елементи в Таб 1 и натиснете 'Запази и Изчисли'."))
@@ -2359,9 +2538,12 @@ def render_floor_tab(df_calc, current):
                 pieces, bg["w_px"], bg["h_px"], bg["cm_per_px"],
                 gemini_outlines(places, bg["page"], bg["w_px"], bg["h_px"]), bg["shapes"], bg["labels"])
         moved_ids = store.setdefault("moved", set())
-        store["positions"] = {pid: pos for pid, pos in store["positions"].items() if pid in moved_ids}
-        store["positions"].update({pid: pos for pid, pos in auto.items() if pid not in moved_ids})
-        store["how"] = {pid: h for pid, h in how.items() if pid not in moved_ids}
+        fixed_ids = store.setdefault("fixed", set())   # след промяна от плана - остават, където са
+        kept = moved_ids | fixed_ids
+        store["positions"] = {pid: pos for pid, pos in store["positions"].items() if pid in kept}
+        store["positions"].update({pid: pos for pid, pos in auto.items() if pid not in kept})
+        store["how"] = {**{pid: h for pid, h in store.get("how", {}).items() if pid in fixed_ids - moved_ids},
+                        **{pid: h for pid, h in how.items() if pid not in kept}}
         store["auto_key"] = auto_key
         store["auto_n"] = store.get("auto_n", 0) + 1   # компонентът взима новите места
         store.pop("pdf", None)
@@ -2375,6 +2557,10 @@ def render_floor_tab(df_calc, current):
                  "точен ъгъл, „↺ 90°“ / „↻ 90°“ (или клавиш R) - на 90°, „⇋ Огледално“ (или M) го обръща. Колелцето "
                  "приближава, влачене на празно място мести изгледа. Местата се пазят, докато страницата е отворена "
                  "(не се записват в архива)."))
+    st.caption(t("„➕ Нов елемент“ - полета за размерите под плана, елементът се появява под чертежа и се влачи до "
+                 "мястото си. Избран елемент: полетата под плана сменят името и размерите, „⧉ Копирай“ (Ctrl+C) и "
+                 "„📋 Постави“ (Ctrl+V - там, където е мишката) - още един брой, „🗑 Изтрий“ (Delete). Промените "
+                 "отиват направо в таблица 1 и се записват - незаписаните промени в таблица 1 се губят."))
     if bg and auto_on:
         how = list(store.get("how", {}).values())
         if how:
@@ -2385,22 +2571,28 @@ def render_floor_tab(df_calc, current):
             st.caption(t("📍 Местата на елементите не са намерени в чертежа (няма места от разчитането и контури в "
                          "PDF-а до имената им) - влачете ги с мишката."))
     # нов ключ при ново поставяне по чертежа - иначе компонентът връща старите места и ги записва като преместени
-    ckey = f"floor_{fkey}_{store['reset']}_{store.get('auto_n', 0)}"
+    ckey = f"floor_{fkey}_{store['reset']}_{store.get('auto_n', 0)}_{store.get('edit_n', 0)}"
     data = {
         "pieces": [{k: p[k] for k in ("id", "label", "poly", "forms", "cx", "cy", "w", "h")} for p in pieces],
         "positions": store["positions"],
         "bg": bg_data,
         "token": f"{ckey}|{bg_data['w'] if bg_data else 0}",
+        "view_key": fkey,
+        "keep_view": store.pop("keep_view", False),
+        "select": store.get("sel"),
         "texts": {"rotl": t("↺ 90°"), "rotr": t("↻ 90°"), "angle": t("Ъгъл:"), "mir": t("⇋ Огледално"),
                   "fit": t("⤢ Целият план"),
                   "calib": t("📏 Мащаб по кота"),
                   "calib1": t("Кликнете в единия край на известната кота."),
                   "calib2": t("Кликнете в другия край на котата."),
                   "hint": t("Влачете елементите; клик върху елемент го избира."),
-                  "selected": t("Избран: {name} - кръгчето го върти.", name="{name}")},
+                  "selected": t("Избран: {name} - кръгчето го върти.", name="{name}"),
+                  "add": t("➕ Нов елемент"), "copy": t("⧉ Копирай"), "paste": t("📋 Постави"), "del": t("🗑 Изтрий"),
+                  "copied": t("Копиран: {name} - Ctrl+V го поставя там, където е мишката.", name="{name}")},
     }
     result = floor_component()(data=data, key=ckey, on_positions_change=lambda: None,
-                               on_calib_change=lambda: None)
+                               on_calib_change=lambda: None, on_sel_change=lambda: None,
+                               on_action_change=lambda: None)
     moved = getattr(result, "positions", None)
     if moved:
         moved = {pid: pos for pid, pos in moved.items() if pid in ids}
@@ -2413,12 +2605,13 @@ def render_floor_tab(df_calc, current):
     if measured and bg:
         bg["cm_per_px"] *= st.session_state.get(f"floor_known_{fkey}", 1000.0) / measured
         st.rerun(scope="fragment")
+    render_floor_edit(store, pieces, drawing, fkey, result, bg_data["w"] if bg_data else ROW_WIDTH_CM)
 
     col_reset, col_lang, col_pdf = st.columns([1, 1, 1], vertical_alignment="bottom")
     if col_reset.button(t("↺ Подреди наново"), key=f"floor_reset_{fkey}",
                         help=t("Връща елементите на местата им по чертежа, другите - един до друг под него "
                                "(преместеното с мишката се губи).")):
-        store["positions"], store["moved"] = {}, set()
+        store["positions"], store["moved"], store["fixed"] = {}, set(), set()
         store.pop("auto_key", None)
         store["reset"] += 1
         store.pop("pdf", None)
