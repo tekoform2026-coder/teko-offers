@@ -26,7 +26,8 @@ from stock_layout import plan_project
 from weights_db import get_item_weight
 from i18n import t, t_item, init_language, language_switch, MANUAL_HELP_BG
 from doc_lang import DOC_FLAGS, DOC_LANGUAGES, document_language, dt
-from floor_plan import ROW_WIDTH_CM, default_positions, floor_component, generate_floor_pdf, piece_boxes, piece_plan
+from floor_plan import (ROW_WIDTH_CM, default_positions, drawing_places, floor_component, gemini_outlines,
+                        generate_floor_pdf, pdf_shapes, piece_boxes, piece_plan)
 
 init_language()
 st.set_page_config(
@@ -1465,12 +1466,14 @@ def render_drawing_manager(groups):
     with st.expander(t("📄 Чертежи в проекта ({n}) - преименуване и изтриване", n=len(groups))):
         st.caption(t("Първо натиснете „💾 Запази и Изчисли“ - незаписаните промени в таблиците се губят."))
         for i, (dname, part) in enumerate(groups):
-            if not dname:
-                continue
             c_name, c_save, c_del = st.columns([4, 1, 1], vertical_alignment="bottom")
-            new_name = c_name.text_input(t("Чертеж {i} ({n} елемента)", i=i + 1, n=len(part)), value=dname,
-                                         key=f"drawing_name_{i}_{dname}")
-            if c_save.button(t("✏️ Преименувай"), key=f"rename_drawing_{i}", use_container_width=True):
+            if not dname:   # въведените ръчно - без име, затова само изтриване (потребителят, 23.11.2026)
+                c_name.text_input(t("Без чертеж ({n} елемента)", n=len(part)),
+                                  value=t("Без чертеж (въведени ръчно)"), disabled=True, key=f"drawing_name_{i}_")
+            else:
+                new_name = c_name.text_input(t("Чертеж {i} ({n} елемента)", i=i + 1, n=len(part)), value=dname,
+                                             key=f"drawing_name_{i}_{dname}")
+            if dname and c_save.button(t("✏️ Преименувай"), key=f"rename_drawing_{i}", use_container_width=True):
                 others = [n for n, _p in groups if n != dname]
                 new_name = new_name.strip()
                 if not new_name or new_name in others:
@@ -1481,20 +1484,24 @@ def render_drawing_manager(groups):
                     notes = st.session_state.get("drawing_notes", {})
                     if dname in notes:
                         notes[new_name] = notes.pop(dname)
-                    files = st.session_state.get("drawing_files", {})
-                    if drawing_file_key(dname) in files:
-                        files[drawing_file_key(new_name)] = files.pop(drawing_file_key(dname))
+                    for store_key in ("drawing_files", "drawing_places"):
+                        saved = st.session_state.get(store_key, {})
+                        if drawing_file_key(dname) in saved:
+                            saved[drawing_file_key(new_name)] = saved.pop(drawing_file_key(dname))
                     reset_table_editors()
                     save_current_project()
                     st.rerun()
             if st.session_state.get("delete_drawing") == dname:
                 c_del.button(t("Отказ"), key=f"cancel_delete_drawing_{i}", use_container_width=True,
                              on_click=lambda: st.session_state.pop("delete_drawing", None))
-                st.warning(t("Да се изтрият ли {n} елемента на „{name}“?", n=len(part), name=dname))
-                if st.button(t("🗑 Да, изтрий чертежа"), key=f"confirm_delete_drawing_{i}", type="primary"):
+                st.warning(t("Да се изтрият ли {n} елемента на „{name}“?", n=len(part),
+                             name=dname or t("Без чертеж (въведени ръчно)")))
+                if st.button(t("🗑 Да, изтрий чертежа") if dname else t("🗑 Да, изтрий таблицата"),
+                             key=f"confirm_delete_drawing_{i}", type="primary"):
                     st.session_state["edited_df"] = join_drawing_groups([g for g in groups if g[0] != dname])
                     st.session_state.get("drawing_notes", {}).pop(dname, None)
                     st.session_state.get("drawing_files", {}).pop(drawing_file_key(dname), None)
+                    st.session_state.get("drawing_places", {}).pop(drawing_file_key(dname), None)
                     st.session_state.pop("delete_drawing", None)
                     reset_table_editors()
                     save_current_project()
@@ -1613,6 +1620,10 @@ with tab1:
                                     for e in elements_list:
                                         if isinstance(e, dict):
                                             e.pop("source", None)
+                                    # местата в плана - за таб 6 (потребителят, 24.11.2026), не колона
+                                    st.session_state.setdefault("drawing_places", {})[drawing_file_key(drawing)] = [
+                                        {"type": e.get("type"), "name": e.get("name"), "places": e.pop("places", None)}
+                                        for e in elements_list if isinstance(e, dict)]
 
                                     df_ai = columns_to_cm(pd.DataFrame(elements_list))
                                     for col in DATA_COLUMNS:
@@ -1725,18 +1736,26 @@ with tab1:
             )
             edited_groups.append((dname, edited))
 
-        col_new_type, col_add = st.columns([2, 1], vertical_alignment="bottom")
-        if named:
-            col_new_type, col_drawing, col_add = st.columns([2, 2, 1], vertical_alignment="bottom")
-            target = col_drawing.selectbox(
-                t("Към кой чертеж?"), options=list(range(len(groups))), index=len(groups) - 1,
-                format_func=lambda i: (t("Чертеж {i}: {name}", i=i + 1, name=groups[i][0]) if groups[i][0]
-                                       else t("Без чертеж (въведени ръчно)")), key="new_element_drawing")
-        else:
-            target = 0
+        # „Към кой чертеж?“ - съществуващите таблици, „Без чертеж“ (и когато я няма - създава се) и нова таблица
+        # с име (потребителят, 23.11.2026); формата не презарежда при избор, затова името е винаги видимо
+        drawing_options = list(range(len(groups)))
+        if all(name for name, _part in groups):
+            drawing_options.append("manual")
+        drawing_options.append("new")
+        col_new_type, col_drawing, col_new_name, col_add = st.columns([2, 2, 2, 1], vertical_alignment="bottom")
+        target = col_drawing.selectbox(
+            t("Към кой чертеж?"), options=drawing_options, index=len(groups) - 1,
+            format_func=lambda i: (t("➕ Нова таблица…") if i == "new"
+                                   else t("Без чертеж (въведени ръчно)") if i == "manual" or not groups[i][0]
+                                   else t("Чертеж {i}: {name}", i=i + 1, name=groups[i][0])),
+            key="new_element_drawing")
+        new_table_name = col_new_name.text_input(
+            t("Име на новата таблица"), placeholder=t("напр. Етаж 2 - ръчно"), key="new_table_name",
+            help=t("Само при „➕ Нова таблица…“ в „Към кой чертеж?“."))
         new_type = col_new_type.selectbox(t("Какъв елемент да се добави?"), options=list(TYPE_LABELS), index=None,
                                           format_func=lambda code: t(TYPE_LABELS.get(code, code)),
                                           placeholder=t("Изберете тип елемент"), key="new_element_type")
+        new_table_name = (new_table_name or "").strip()
         add_btn = col_add.form_submit_button(t("➕ Добави елемент"), use_container_width=True,
                                              help=t("Записва таблицата и добавя нов ред от избрания тип "
                                                     "(1 бр., затворени краища)."), key="add_element")
@@ -1744,15 +1763,26 @@ with tab1:
                                            key="save_table")
         if add_btn and new_type is None:
             st.warning(t("Изберете тип елемент и натиснете отново „➕ Добави елемент“."))
+        elif add_btn and target == "new" and (not new_table_name
+                                              or new_table_name in [name for name, _part in groups]):
+            st.warning(t("Напишете име на новата таблица, което го няма в проекта, и натиснете отново "
+                         "„➕ Добави елемент“."))
         elif add_btn or submit_btn:
             if add_btn:
                 # новият ред - с всички колони на таблицата, иначе празните (дължини, височина ...) изчезват;
-                # в края на избрания чертеж
+                # в края на избрания чертеж, а „Без чертеж“ (когато я няма) и новата таблица - най-отдолу
+                if target in ("manual", "new"):
+                    edited_groups.append(("" if target == "manual" else new_table_name,
+                                          edited_groups[0][1].iloc[0:0]))
+                    target = len(edited_groups) - 1
                 dname, part = edited_groups[target]
                 new_row = pd.DataFrame([{"type": new_type, "name": "", "count": 1, "closed_end_1": True, "closed_end_2": True,
                                          "closed_end_3": True}], columns=part.columns)
                 edited_groups[target] = (dname, pd.concat([part, new_row], ignore_index=True))
                 st.session_state.pop("new_element_type", None)  # изборът се изчиства за следващия елемент
+                if target == len(edited_groups) - 1:   # новата таблица е последна - избрана за следващия елемент
+                    st.session_state.pop("new_element_drawing", None)
+                st.session_state.pop("new_table_name", None)
             reset_table_editors()  # таблиците се показват наново с новия ред
             st.session_state["edited_df"] = thickness_to_walls(join_drawing_groups(edited_groups), migrate=False)
             save_current_project()
@@ -2144,7 +2174,7 @@ def floor_pieces(df_part):
         label = format_element_label(elem_type, name)
         cnt = int(_row_float(row, "count", 1))
         for k in range(cnt):
-            pieces.append({**plan, "boxes": boxes, "id": f"{base}|{seen[base]}|{k}",
+            pieces.append({**plan, "boxes": boxes, "id": f"{base}|{seen[base]}|{k}", "type": elem_type, "name": name,
                            "label": label + (f" ({k + 1})" if cnt > 1 else "")})
     return pieces
 
@@ -2159,6 +2189,7 @@ def floor_background(file, page):
         file = {"name": file.name, "type": file.type, "data": file.getvalue()}
     data = file["data"]
     pt_per_px = None
+    shapes, labels = [], []
     if file["type"] == "application/pdf":
         with fitz.open(stream=data, filetype="pdf") as doc:
             pg = doc.load_page(page - 1)
@@ -2166,6 +2197,10 @@ def floor_background(file, page):
             pix = pg.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
             img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
             pt_per_px = 1 / zoom
+            try:   # векторен PDF - контурите на бетона и надписите (за местата на елементите)
+                shapes, labels = pdf_shapes(pg, pt_per_px)
+            except Exception:  # noqa: BLE001 - необичаен PDF: без контури, само Gemini
+                shapes, labels = [], []
     else:
         img = Image.open(io.BytesIO(data))
         img.thumbnail((FLOOR_BG_MAX_PX, FLOOR_BG_MAX_PX))
@@ -2173,13 +2208,51 @@ def floor_background(file, page):
     img.convert("L").save(buf, format="JPEG", quality=60)
     return {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(), "jpeg": buf.getvalue(),
             "w_px": img.width, "h_px": img.height, "pt_per_px": pt_per_px,
-            "cm_per_px": FLOOR_BG_WIDTH_CM / img.width}
+            "cm_per_px": FLOOR_BG_WIDTH_CM / img.width, "shapes": shapes, "labels": labels}
 
 
 def floor_scale_changed(store, key):
     """Мащаб 1:N на PDF чертежа -> см на пиксел (1 pt = 2,54 / 72 см на хартията)."""
     bg = store["bg"]
     bg["cm_per_px"] = bg["pt_per_px"] * 2.54 / 72 * st.session_state[key]
+
+
+FLOOR_STANDARD_SCALES = (10, 20, 25, 50, 75, 100, 125, 150, 200, 250, 500, 1000)
+
+
+def places_pages(places):
+    """Страниците с местата от Gemini (за всеки брой - една)."""
+    pages = []
+    for e in places or []:
+        for place in e.get("places") or []:
+            try:
+                pages.append(int(place.get("page") or 1))
+            except (TypeError, ValueError, AttributeError):
+                pass
+    return pages
+
+
+def floor_auto_scale(store, scale_key, pieces, places):
+    """
+    Мащабът по елементите (потребителят, 24.11.2026) - веднъж при зареждане на фона: по контурите от векторния
+    PDF, иначе по контурите от Gemini (приблизително). PDF - най-близкият стандартен мащаб (до 8 %).
+    """
+    bg = store["bg"]
+    outlines = gemini_outlines(places, bg["page"], bg["w_px"], bg["h_px"])
+    _pos, _how, est = drawing_places(pieces, bg["w_px"], bg["h_px"], bg["cm_per_px"], outlines,
+                                     bg["shapes"], bg["labels"])
+    if not est:
+        return
+    if bg["pt_per_px"]:
+        n = est / (bg["pt_per_px"] * 2.54 / 72)
+        near = min(FLOOR_STANDARD_SCALES, key=lambda sc: abs(sc - n) / sc)
+        n = near if abs(near - n) / near <= 0.08 else max(1, round(n))
+        st.session_state[scale_key] = n
+        floor_scale_changed(store, scale_key)
+        bg["auto_scale"] = n
+    else:
+        bg["cm_per_px"] = est
+        bg["auto_scale"] = True
 
 
 @st.fragment
@@ -2199,7 +2272,11 @@ def render_floor_tab(df_calc, current):
     store = st.session_state.setdefault("floor_plans", {}).setdefault(fkey, {"positions": {}, "bg": None, "reset": 0})
     pieces = floor_pieces(part)
 
+    places = None   # местата от Gemini - само за разчетения чертеж
     with st.expander(t("🖼️ Чертежът като фон"), expanded=True):
+        auto_on = st.checkbox(t("📍 Постави елементите по чертежа"), value=True, key=f"floor_auto_{fkey}",
+                              help=t("Местата от разчитането с Gemini (приблизително) и от контурите на бетона във "
+                                     "векторен PDF (точно). Елементите, преместени с мишката, остават, където са."))
         # фонът - сам от разчетения в таб 1 чертеж; друг файл - само ако няма или трябва друг
         own = drawing_file(drawing)
         other = st.file_uploader(t("Друг файл за фон (PDF или картина) - само ако не е разчетеният в таб 1:")
@@ -2214,6 +2291,7 @@ def render_floor_tab(df_calc, current):
             file = {"name": other.name, "type": other.type, "data": other.getvalue()}
         elif own:
             file = own
+            places = st.session_state.get("drawing_places", {}).get(drawing_file_key(drawing))
             st.caption(t("Фонът е чертежът от таб 1: „{name}“.", name=own["name"]))
         elif drawing:
             st.caption(t("Файлът на „{name}“ не е зареден (пази се само докато страницата е отворена) - качете го "
@@ -2224,16 +2302,20 @@ def render_floor_tab(df_calc, current):
                 with fitz.open(stream=file["data"], filetype="pdf") as doc:
                     n_pages = doc.page_count
                 if n_pages > 1:
-                    page = st.number_input(t("Страница:"), min_value=1, max_value=n_pages, value=1, step=1,
+                    pages = [pg for pg in places_pages(places) if pg <= n_pages]   # страницата с плана
+                    page = st.number_input(t("Страница:"), min_value=1, max_value=n_pages,
+                                           value=max(set(pages), key=pages.count) if pages else 1, step=1,
                                            key=f"floor_bg_page_{fkey}")
-            src = (file["name"], len(file["data"]), page)
+            src = (file["name"], len(file["data"]), page, len(places_pages(places)))
             if store["bg"] is None or store["bg"].get("src") != src:
                 store["bg"] = floor_background(file, page)
-                store["bg"]["src"] = src
+                store["bg"]["src"], store["bg"]["page"] = src, page
                 scale_key = f"floor_bg_scale_{fkey}"
                 if store["bg"]["pt_per_px"]:  # PDF - по мащаба 1:N (по подразбиране 1:50)
                     st.session_state.setdefault(scale_key, 50)
                     floor_scale_changed(store, scale_key)
+                if auto_on:   # мащабът - по елементите на чертежа
+                    floor_auto_scale(store, scale_key, pieces, places)
         if file is None:
             store["bg"] = None
         bg = store["bg"]
@@ -2253,6 +2335,9 @@ def render_floor_tab(df_calc, current):
                 store["bg"], store["bg_off"] = None, True
                 st.rerun(scope="fragment")
             st.checkbox(t("Фонът в PDF-а (бледо, под елементите)"), value=True, key=f"floor_bg_pdf_{fkey}")
+            if bg.get("auto_scale"):
+                st.caption(t("📏 Мащабът е определен по елементите на чертежа: 1:{n}.", n=bg["auto_scale"])
+                           if bg["pt_per_px"] else t("📏 Мащабът е определен по елементите на чертежа."))
             st.caption(t("Ако елементите не съвпадат по размер с чертежа, натиснете „📏 Мащаб по кота“ в лентата над "
                          "плана и кликнете двата края на известна кота."))
 
@@ -2262,6 +2347,22 @@ def render_floor_tab(df_calc, current):
         bg_data = {"url": bg["url"], "w": bg["w_px"] * bg["cm_per_px"], "h": bg["h_px"] * bg["cm_per_px"],
                    "opacity": bg.get("opacity", 0.45)}
     ids = {p["id"] for p in pieces}
+    # местата от чертежа (потребителят, 24.11.2026) - наново при друг фон, мащаб или елементи; преместените с
+    # мишката остават
+    auto_key = (bg["src"] if bg else None, bg["cm_per_px"] if bg else None, auto_on, tuple(sorted(ids)))
+    if store.get("auto_key") != auto_key:
+        auto, how = {}, {}
+        if bg and auto_on:
+            auto, how, _scale = drawing_places(
+                pieces, bg["w_px"], bg["h_px"], bg["cm_per_px"],
+                gemini_outlines(places, bg["page"], bg["w_px"], bg["h_px"]), bg["shapes"], bg["labels"])
+        moved_ids = store.setdefault("moved", set())
+        store["positions"] = {pid: pos for pid, pos in store["positions"].items() if pid in moved_ids}
+        store["positions"].update({pid: pos for pid, pos in auto.items() if pid not in moved_ids})
+        store["how"] = {pid: h for pid, h in how.items() if pid not in moved_ids}
+        store["auto_key"] = auto_key
+        store["auto_n"] = store.get("auto_n", 0) + 1   # компонентът взима новите места
+        store.pop("pdf", None)
     known = {pid: pos for pid, pos in store["positions"].items() if pid in ids}
     # новите елементи - на редове под чертежа (фонът е от y = 0 нагоре), оттам се влачат до мястото си
     store["positions"] = default_positions(pieces, known,
@@ -2272,7 +2373,17 @@ def render_floor_tab(df_calc, current):
                  "точен ъгъл, „↺ 90°“ / „↻ 90°“ (или клавиш R) - на 90°, „⇋ Огледално“ (или M) го обръща. Колелцето "
                  "приближава, влачене на празно място мести изгледа. Местата се пазят, докато страницата е отворена "
                  "(не се записват в архива)."))
-    ckey = f"floor_{fkey}_{store['reset']}"
+    if bg and auto_on:
+        how = list(store.get("how", {}).values())
+        if how:
+            st.caption(t("📍 По чертежа: {n} от {total} елемента ({pdf} по контура в PDF-а, {gemini} по Gemini - "
+                         "приблизително). Другите са под чертежа - влачете ги до мястото им.", n=len(how),
+                         total=len(pieces), pdf=how.count("pdf"), gemini=how.count("gemini")))
+        else:
+            st.caption(t("📍 Местата на елементите не са намерени в чертежа (няма места от разчитането и контури в "
+                         "PDF-а до имената им) - влачете ги с мишката."))
+    # нов ключ при ново поставяне по чертежа - иначе компонентът връща старите места и ги записва като преместени
+    ckey = f"floor_{fkey}_{store['reset']}_{store.get('auto_n', 0)}"
     data = {
         "pieces": [{k: p[k] for k in ("id", "label", "poly", "forms", "cx", "cy", "w", "h")} for p in pieces],
         "positions": store["positions"],
@@ -2291,7 +2402,9 @@ def render_floor_tab(df_calc, current):
     moved = getattr(result, "positions", None)
     if moved:
         moved = {pid: pos for pid, pos in moved.items() if pid in ids}
-        if any(store["positions"].get(pid) != pos for pid, pos in moved.items()):
+        changed = {pid for pid, pos in moved.items() if store["positions"].get(pid) != pos}
+        if changed:
+            store.setdefault("moved", set()).update(changed)   # остават при ново поставяне по чертежа
             store["positions"].update(moved)
             store.pop("pdf", None)  # готовият PDF е със старите места
     measured = getattr(result, "calib", None)
@@ -2301,8 +2414,10 @@ def render_floor_tab(df_calc, current):
 
     col_reset, col_lang, col_pdf = st.columns([1, 1, 1], vertical_alignment="bottom")
     if col_reset.button(t("↺ Подреди наново"), key=f"floor_reset_{fkey}",
-                        help=t("Връща всички елементи един до друг (местата се губят).")):
-        store["positions"] = {}
+                        help=t("Връща елементите на местата им по чертежа, другите - един до друг под него "
+                               "(преместеното с мишката се губи).")):
+        store["positions"], store["moved"] = {}, set()
+        store.pop("auto_key", None)
         store["reset"] += 1
         store.pop("pdf", None)
         st.rerun(scope="fragment")
