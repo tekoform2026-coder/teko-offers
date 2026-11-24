@@ -218,8 +218,24 @@ EN = {
     "Влачете елементите; клик върху елемент го избира.": "Drag the elements; a click on an element selects it.",
     "Избран: {name} - кръгчето го върти.": "Selected: {name} - the circle rotates it.",
     "↺ Подреди наново": "↺ Arrange again",
-    "Връща всички елементи един до друг (местата се губят).":
-        "Puts all elements side by side again (the positions are lost).",
+    "Връща елементите на местата им по чертежа, другите - един до друг под него (преместеното с мишката се губи).":
+        "Puts the elements back in their places on the drawing, the others side by side below it (what was moved "
+        "with the mouse is lost).",
+    "📍 Постави елементите по чертежа": "📍 Place the elements by the drawing",
+    "Местата от разчитането с Gemini (приблизително) и от контурите на бетона във векторен PDF (точно). "
+    "Елементите, преместени с мишката, остават, където са.":
+        "The places from the Gemini reading (approximate) and from the concrete outlines in a vector PDF (exact). "
+        "Elements moved with the mouse stay where they are.",
+    "📏 Мащабът е определен по елементите на чертежа: 1:{n}.": "📏 The scale was found from the drawing's elements: 1:{n}.",
+    "📏 Мащабът е определен по елементите на чертежа.": "📏 The scale was found from the drawing's elements.",
+    "📍 По чертежа: {n} от {total} елемента ({pdf} по контура в PDF-а, {gemini} по Gemini - приблизително). "
+    "Другите са под чертежа - влачете ги до мястото им.":
+        "📍 By the drawing: {n} of {total} elements ({pdf} by the outline in the PDF, {gemini} by Gemini - "
+        "approximate). The others are below the drawing - drag them to their place.",
+    "📍 Местата на елементите не са намерени в чертежа (няма места от разчитането и контури в PDF-а до имената им) "
+    "- влачете ги с мишката.":
+        "📍 The places of the elements were not found in the drawing (no places from the reading and no outlines in "
+        "the PDF next to their names) - drag them with the mouse.",
     "📄 Генерирай 3D PDF": "📄 Generate 3D PDF",
     "Чертане на 3D плана...": "Drawing the 3D plan...",
     "📥 Изтегли 3D плана (PDF)": "📥 Download the 3D plan (PDF)",
@@ -278,6 +294,12 @@ EN = {
     "Към кой чертеж?": "To which drawing?",
     "Чертеж {i}: {name}": "Drawing {i}: {name}",
     "Без чертеж (въведени ръчно)": "No drawing (entered manually)",
+    "➕ Нова таблица…": "➕ New table…",
+    "Име на новата таблица": "Name of the new table",
+    "напр. Етаж 2 - ръчно": "e.g. Floor 2 - manual",
+    "Само при „➕ Нова таблица…“ в „Към кой чертеж?“.": "Only with “➕ New table…” in “To which drawing?”.",
+    "Напишете име на новата таблица, което го няма в проекта, и натиснете отново „➕ Добави елемент“.":
+        "Type a name for the new table that is not in the project yet and press “➕ Add element” again.",
     "📄 Чертежи в проекта ({n}) - преименуване и изтриване": "📄 Drawings in the project ({n}) - rename and delete",
     "Първо натиснете „💾 Запази и Изчисли“ - незаписаните промени в таблиците се губят.":
         "First press “💾 Save and Calculate” - unsaved changes in the tables are lost.",
@@ -287,6 +309,8 @@ EN = {
     "Отказ": "Cancel",
     "Да се изтрият ли {n} елемента на „{name}“?": "Delete the {n} elements of “{name}”?",
     "🗑 Да, изтрий чертежа": "🗑 Yes, delete the drawing",
+    "🗑 Да, изтрий таблицата": "🗑 Yes, delete the table",
+    "Без чертеж ({n} елемента)": "No drawing ({n} elements)",
     "🗑 Изтрий": "🗑 Delete",
     "Изберете чертеж (PDF, PNG, JPG):": "Choose a drawing (PDF, PNG, JPG):",
     "🖼️ Преглед на файла": "🖼️ File preview",
