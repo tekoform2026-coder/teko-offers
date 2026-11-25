@@ -15,13 +15,13 @@ from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 from gemini_agent2 import analyze_blueprint
 from drawing_generator import generate_pdf_drawings, generate_top_view_buf, generate_front_view_buf
-from excel_export import (KSS_EXTRA, KSS_ITEMS, generate_excel, stock_to_excel, stock_from_excel,
+from excel_export import (KSS_ITEMS, generate_excel, stock_to_excel, stock_from_excel,
                           prices_from_excel)
 import projects_store
 from accessories_calculator import calculate_accessories
 from teko_calculator import (solve_height_cm, layout_element, count_panels, is_compensator_row, thickness_label,
                              panel_height_cm,
-                             t_wall_offset_label)
+                             t_wall_offset_label, shaft_inside_label)
 from stock_layout import plan_project
 from weights_db import get_item_weight
 from i18n import t, t_item, init_language, language_switch, MANUAL_HELP_BG
@@ -166,6 +166,17 @@ def check_element_dimensions(row):
         board_warning("Стена A", "l1_cm", 200)
         board_warning("Стена B", "l2_cm", 200)
         board_warning("Стена C", "l3_cm", 200)
+    elif elem_type == "shaft":
+        board_warning("Стена A", "l1_cm", 200)
+        board_warning("Стена B", "l2_cm", 200)
+        # шахта: една дебелина (стена A), без Стена C и затворени краища - другите полета не се ползват
+        unused = [label for col, label in (("l3_cm", "Стена C"), ("thickness2_cm", "Дебелина стена B"),
+                                           ("thickness3_cm", "Дебелина стена C"))
+                  if _row_float(row, col, None)]
+        if unused:
+            warnings.append(t("• **{name}**: При шахта не се ползват {fields} - дебелината е „Дебелина стена A“ за "
+                              "четирите стени, празна Стена B = квадратна шахта.", name=name,
+                              fields=", ".join(t(u) for u in unused)))
     elif elem_type == "t_wall":
         l1_cm = round(_row_float(row, "l1_cm", 200))
         l2_cm = round(_row_float(row, "l2_cm", 200))
@@ -207,6 +218,13 @@ def check_element_dimensions(row):
         if 0 < length < t1:
             warnings.append(t("• **{name}**: Дължината ({l} cm) е по-малка от дебелината ({t} cm) - разменени ли са?",
                               name=name, l=f"{length:g}", t=f"{t1:g}"))
+    if elem_type == "shaft" and t1:   # всяка стена - между два ъгъла: 2 x (дебелина + 10) + поне 5 см панел
+        for label, col in (("Стена A", "l1_cm"), ("Стена B", "l2_cm")):
+            length = _row_float(row, col, 0)
+            if 0 < length < 2 * (t1 + 10) + 5:
+                warnings.append(t("• **{name}**: {label} ({l} cm) е твърде къса - до ъглите са нужни {k} cm и поне "
+                                  "5 cm панел. Проверете размерите.", name=name, label=t(label), l=f"{length:g}",
+                                  k=f"{2 * (t1 + 10):g}"))
     if elem_type in ("l_wall", "u_wall") and t1:
         t2 = _row_float(row, "thickness2_cm", None) or t1
         t3 = _row_float(row, "thickness3_cm", None) or t1
@@ -251,17 +269,19 @@ REQUIRED_DIMENSIONS = {
                ("l3_cm", "Стена C"), ("height_cm", "Височина")],
     "t_wall": [("thickness_cm", "Дебелина стена A"), ("l1_cm", "Стена A"), ("l2_cm", "Стена B"),
                ("height_cm", "Височина")],
+    "shaft": [("thickness_cm", "Дебелина стена A"), ("l1_cm", "Стена A"), ("height_cm", "Височина")],  # B празна = A
 }
 
 # Дебелина стена A / B / C (thickness1_cm ...); общата „Дебелина“ (thickness_cm) не се показва
 ARM_THICKNESS_COLUMNS = ("thickness1_cm", "thickness2_cm", "thickness3_cm")
 # Стените на всеки тип, за които се показва дебелина (колона и права стена - само A)
-WALL_THICKNESS_COLUMNS = {"column": 1, "wall": 1, "l_wall": 2, "t_wall": 2, "u_wall": 3}
+WALL_THICKNESS_COLUMNS = {"column": 1, "wall": 1, "l_wall": 2, "t_wall": 2, "u_wall": 3, "shaft": 1}
 
 # Колоните на таблицата по реда на показване; дължината на права стена и колона е в „Стена A“,
 # другият размер на колоната - в „Дебелина стена A“; thickness_cm остава в данните (архив, Gemini), скрита
 # Тип елемент: в таблицата се виждат имената, в данните (архив, Gemini) остават кодовете
-TYPE_LABELS = {"column": "Колона", "wall": "Права стена", "l_wall": "L-стена", "u_wall": "П-стена", "t_wall": "T-стена"}
+TYPE_LABELS = {"column": "Колона", "wall": "Права стена", "l_wall": "L-стена", "u_wall": "П-стена", "t_wall": "T-стена",
+               "shaft": "Шахта"}
 TABLE_COLUMNS = ["type", "name", "count", "l1_cm", "thickness1_cm", "l2_cm", "thickness2_cm", "l3_cm",
                  "thickness3_cm", "height_cm", "closed_end_1", "closed_end_2", "closed_end_3"]
 DATA_COLUMNS = TABLE_COLUMNS + ["thickness_cm", "drawing"]
@@ -431,6 +451,10 @@ def row_to_layout(elem_type, row):
                               l3_cm=_row_float(row, "l3_cm", 0),  # мястото на реброто; празно = средата
                               thickness_cm=t_cm, **arms,   # дебелина C - полката вляво от реброто
                               closed_end_3=_closed_end(row, "closed_end_3"), **closed)
+    elif elem_type == "shaft":
+        # шахта: Стена A, Стена B (празна = квадратна), една дебелина - стена A; външни размери
+        return layout_element("shaft", h_cm, l1_cm=_row_float(row, "l1_cm", 200),
+                              l2_cm=_row_float(row, "l2_cm", 0), thickness_cm=t_cm)
     return None
 
 def row_layout_key(elem_type, row):
@@ -477,6 +501,9 @@ def get_element_accessories(elem_type, row):
         dims = layout["dims"]
         stem = next(f for f in layout["faces"] if f["name"] == "B")["length_cm"]
         acc = calculate_accessories("T-образна стена", dims["l1"], stem, h_cm, widths_a, h_levels, layout=layout)
+    elif elem_type == "shaft":
+        dims = layout["dims"]
+        acc = calculate_accessories("Шахта", dims["l1"], dims["l2"], h_cm, widths_a, h_levels, layout=layout)
     else:
         dims = layout["dims"]
         acc = calculate_accessories("П-образна стена", dims["l1"] + dims["l2"] + dims["l3"], dims["t"], h_cm, widths_a, h_levels, layout=layout)
@@ -690,7 +717,7 @@ def kss_prices():
             if stock_key(name):
                 by_key.setdefault(stock_key(name), float(price))
     result = {}
-    for name in [n for n, _codes in KSS_ITEMS] + [n for n, *_rest in KSS_EXTRA]:
+    for name in [n for n, _codes in KSS_ITEMS]:
         if name in by_name:
             result[name] = by_name[name]
         elif stock_key(name) in by_key:
@@ -743,7 +770,7 @@ def kss_stock():
             by_name[name] = by_name.get(name, 0) + float(qty)
     available, _ = stock_available()
     result = {}
-    for name in [n for n, _codes in KSS_ITEMS] + [n for n, *_rest in KSS_EXTRA]:
+    for name in [n for n, _codes in KSS_ITEMS]:
         if name in by_name:
             result[name] = by_name[name]
         elif stock_key(name) in available:
@@ -791,7 +818,7 @@ def element_dims_and_area(elem_type, row):
     cnt = int(_row_float(row, "count", 1))
     h = _row_float(row, "height_cm", 300)
     t = _row_float(row, "thickness_cm", 25)
-    if elem_type not in ("column", "wall", "l_wall", "u_wall", "t_wall"):
+    if elem_type not in ("column", "wall", "l_wall", "u_wall", "t_wall", "shaft"):
         return "", 0.0
     panels = element_layout(elem_type, row)
     hp = panel_height_cm(panels)  # H в надписа - височината на панелите (262 -> 265)
@@ -823,6 +850,10 @@ def element_dims_and_area(elem_type, row):
         perimeter = 2 * (l1 + l2)
         offset = t_wall_offset_label(layout)
         dim_str = f"T: A={l1:g} см, B={l2:g} см, {offset + ', ' if offset else ''}{thickness_label(layout)}, H={hp:g} см"
+    elif elem_type == "shaft":
+        d = panels["dims"]
+        perimeter = 2 * (d["l1"] + d["l2"])
+        dim_str = f"A={d['l1']:g} см, B={d['l2']:g} см, {thickness_label(panels)}, {shaft_inside_label(panels)}, H={hp:g} см"
     else:
         return "", 0.0
     return dim_str.replace(" см", " " + dt("см")), panel_area * cnt   # мерната единица на езика на документа
@@ -833,6 +864,7 @@ DISPLAY_TYPES = {
     "l_wall": "L-образна Стена",
     "u_wall": "П-образна Стена",
     "t_wall": "T-образна Стена",
+    "shaft": "Шахта",
 }
 
 def build_drawing_elements(df):
@@ -895,7 +927,7 @@ def render_element_preview(idx, row):
     dim_str, _ = element_dims_and_area(elem_type, row)
     cnt = int(_row_float(row, "count", 1))
     ends = CLOSED_END_COLUMNS if elem_type == "t_wall" else CLOSED_END_COLUMNS[:2]
-    closed = "" if elem_type == "column" else t(", затворени краища: {n}", n=sum(_closed_end(row, k) for k in ends))
+    closed = "" if elem_type in ("column", "shaft") else t(", затворени краища: {n}", n=sum(_closed_end(row, k) for k in ends))
     title = f"{label} · {t(DISPLAY_TYPES[elem_type])} — {t_item(dim_str)}{closed}, {cnt} {t('бр.')}"
     with st.expander(title):
         for w in check_element_dimensions(row):
@@ -926,6 +958,8 @@ def format_element_label(elem_type, name):
         return name_str if (name_str.lower().startswith("п-стена") or name_str.lower().startswith("стена")) else f"{dt('П-стена')} {name_str}".strip()
     elif elem_type == "t_wall":
         return name_str if (name_str.lower().startswith("t-стена") or name_str.lower().startswith("стена")) else f"{dt('T-стена')} {name_str}".strip()
+    elif elem_type == "shaft":
+        return name_str if name_str.lower().startswith("шахта") else f"{dt('Шахта')} {name_str}".strip()
     return name_str
 
 EXTRA_PAGE_MAX_PX = 3500  # страниците след първата - най-много толкова пиксела по дългата страна
@@ -1167,10 +1201,10 @@ with st.sidebar:
 language_switch()  # езикът - горе вдясно, над лентата
 st.markdown("""
     <style>
-    .teko-header {display: flex; align-items: center; gap: 14px; background: #14532d; color: #fff;
+    .teko-header {display: flex; align-items: center; gap: 14px; background: #0f1b2d; color: #fff;
                   padding: 14px 22px; border-radius: 10px; margin-bottom: 18px;}
-    .teko-logo {background: #16a34a; color: #fff; font-weight: 800; font-size: 20px; width: 42px;
-                height: 42px; border-radius: 8px; display: flex; align-items: center; justify-content: center;}
+    .teko-logo {background: #fff; width: 42px; height: 42px; border-radius: 8px; display: flex;
+                align-items: center; justify-content: center; flex-shrink: 0;}
     .teko-title {font-weight: 800; font-size: 19px; line-height: 1.2;}
     .teko-right {margin-left: auto; color: #a7c9b3; font-size: 13px;}
     .teko-projects-title {font-size: 26px !important; font-weight: 700; color: #0f172a; margin: 0;}
@@ -1191,8 +1225,11 @@ st.markdown("""
     [class*="st-key-del_"] button p {color: #94a3b8; font-size: 13px;}
     </style>
     <div class="teko-header">
-      <div class="teko-logo">TK</div>
-      <div class="teko-title">""" + t("ТЕКО система за кофражно планиране") + """</div>
+      <div class="teko-logo"><svg width="32" height="26" viewBox="-3 -3 106 83">
+        <polygon points="1.5,0 98.5,0 100,1.5 100,17.1 98.5,18.6 69.2,18.6 67.7,20.1 67.7,74.9 66.2,76.4
+                         33.2,76.4 31.7,74.9 31.7,20.1 30.2,18.6 1.5,18.6 0,17.1 0,1.5"
+                 fill="#0bb81f" stroke="#000" stroke-width="3.5" stroke-linejoin="round"/></svg></div>
+      <div class="teko-title">""" + t("ТЕКО Система за кофражно планиране") + """</div>
       <div class="teko-right">""" + t("ТЕКО България ООД") + """</div>
     </div>
 """, unsafe_allow_html=True)
@@ -1364,13 +1401,14 @@ col_back.button(t("← Проекти"), on_click=close_project, use_container_w
                 help=t("Записва таблицата и се връща към списъка с проекти."))
 
 load_stock_once()  # преди табовете - предупрежденията за наличността са и в табове 1 и 2
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([t(label) for label in (
+# 3D планът - веднага след таблица 1 (потребителят, 25.11.2026); в кода остава tab6
+tab1, tab6, tab2, tab3, tab4, tab5 = st.tabs([t(label) for label in (
     "📐 Чертеж и Редактиране",
+    "🏗️ 3D план на етажа",
     "🧱 Кофражни Елементи и Панели TEKO",
     "📄 PDF Чертежи",
     "📄 Оферта",
     "📦 Складова наличност",
-    "🏗️ 3D план на етажа"
 )])
 
 def element_column_config():
@@ -2185,11 +2223,12 @@ FLOOR_FIELDS = {"column": ["l1_cm", "thickness1_cm", "height_cm"],
                 "wall": ["l1_cm", "thickness1_cm", "height_cm"],
                 "l_wall": ["l1_cm", "thickness1_cm", "l2_cm", "thickness2_cm", "height_cm"],
                 "u_wall": ["l1_cm", "thickness1_cm", "l2_cm", "thickness2_cm", "l3_cm", "thickness3_cm", "height_cm"],
-                "t_wall": ["l1_cm", "thickness1_cm", "l2_cm", "thickness2_cm", "l3_cm", "thickness3_cm", "height_cm"]}
+                "t_wall": ["l1_cm", "thickness1_cm", "l2_cm", "thickness2_cm", "l3_cm", "thickness3_cm", "height_cm"],
+                "shaft": ["l1_cm", "thickness1_cm", "l2_cm", "height_cm"]}
 FLOOR_FIELD_LABELS = {"l1_cm": "Стена A (см)", "thickness1_cm": "Дебелина стена A (см)", "l2_cm": "Стена B (см)",
                       "thickness2_cm": "Дебелина стена B (см)", "l3_cm": "Стена C (см)",
                       "thickness3_cm": "Дебелина стена C (см)", "height_cm": "Височина (см)"}
-FLOOR_ENDS = {"column": 0, "wall": 2, "l_wall": 2, "u_wall": 2, "t_wall": 3}   # затворените краища на типа
+FLOOR_ENDS = {"column": 0, "wall": 2, "l_wall": 2, "u_wall": 2, "t_wall": 3, "shaft": 0}   # затворените краища на типа
 FLOOR_END_LABELS = ("Затворен край 1", "Затворен край 2", "Затворен край 3 (само T-стена)")
 
 
@@ -2225,6 +2264,8 @@ def floor_element_fields(prefix, elem_type, row):
             hint = t("Празна = като стена A")
         elif col == "l3_cm" and elem_type == "t_wall":
             hint = t("При Т-стена: от левия край на полката до лявото лице на реброто; празно = реброто е в средата")
+        elif col == "l2_cm" and elem_type == "shaft":
+            hint = t("Празна = квадратна шахта (B = A)")
         values[col] = cols[i % 4].number_input(t(FLOOR_FIELD_LABELS[col]), min_value=0.0,
                                                value=_row_float(row, col, None), step=5.0, format="%g",
                                                key=f"{prefix}_{col}", help=hint)
@@ -2615,7 +2656,7 @@ def render_floor_tab(df_calc, current):
     # нов ключ при ново поставяне по чертежа - иначе компонентът връща старите места и ги записва като преместени
     ckey = f"floor_{fkey}_{store['reset']}_{store.get('auto_n', 0)}_{store.get('edit_n', 0)}"
     data = {
-        "pieces": [{k: p[k] for k in ("id", "label", "poly", "forms", "cx", "cy", "w", "h")} for p in pieces],
+        "pieces": [{k: p[k] for k in ("id", "label", "poly", "rings", "forms", "cx", "cy", "w", "h")} for p in pieces],
         "positions": store["positions"],
         "bg": bg_data,
         "token": f"{ckey}|{bg_data['w'] if bg_data else 0}",
