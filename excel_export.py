@@ -18,7 +18,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from drawing_generator import PANEL_T, _face_strips, _plan_geometry
-from teko_calculator import (format_panel_code, is_compensator_row, thickness_label, t_wall_offset_label,
+from teko_calculator import (format_panel_code, is_compensator_row, thickness_label, t_wall_offset_label, shaft_inside_label,
                              face_row_pieces, panel_height_cm)
 from weights_db import WEIGHTS_DB
 from doc_lang import TR, dt, dt_face, dt_item
@@ -90,12 +90,10 @@ KSS_TABLE = [
     ("Съединител за ригел AC", [], "25/10", None),
     ("Тапа 15", [], "1,5/1,2", None),
 ]
-# Само когато програмата ги ползва - най-отдолу (TK 60/10 го има в спецификацията на TEKO, но не и в офертата)
-KSS_EXTRA = [("Панел TEKO TK 60/10", ["TK 60/10"], "60/10/7,8", 0.06)]
 KSS_ITEMS = [(name, codes) for name, codes, _dims, _area in KSS_TABLE]
-_KSS_NAME_BY_CODE = {code: name for name, codes, _d, _a in KSS_TABLE + KSS_EXTRA for code in codes}
-KSS_DIMENSIONS = {name: (dims, area) for name, _codes, dims, area in KSS_TABLE + KSS_EXTRA}
-KSS_WEIGHTS = {name: WEIGHTS_DB.get(codes[0] if codes else name) for name, codes, _d, _a in KSS_TABLE + KSS_EXTRA}
+_KSS_NAME_BY_CODE = {code: name for name, codes, _d, _a in KSS_TABLE for code in codes}
+KSS_DIMENSIONS = {name: (dims, area) for name, _codes, dims, area in KSS_TABLE}
+KSS_WEIGHTS = {name: WEIGHTS_DB.get(codes[0] if codes else name) for name, codes, _d, _a in KSS_TABLE}
 
 # Колоните на „Кол. сметка“ след „Кол.“ (като в „1. Оферта – софтуер.xlsx“); M и O - мерните единици под „ОБЩО“
 KSS_OFFER_HEADERS = {"E": "Ед. Цена", "F": "Стойност", "G": "Ед. Цена с отстъпка", "H": "Стойност с отстъпка",
@@ -110,7 +108,7 @@ EURO = r'#,##0.00 [$€-1]'
 MONEY = "#,##0.00;-#,##0.00;;@"
 
 TYPE_WORDS = {"column": "колона", "wall": "права стена", "l_wall": "L-стена",
-              "u_wall": "П-стена", "t_wall": "T-стена"}
+              "u_wall": "П-стена", "t_wall": "T-стена", "shaft": "шахта"}
 
 
 def kss_rows(bom):
@@ -482,6 +480,8 @@ def _element_title(index, element):
         parts.append(f"{dt('дължина')} {d['length']:g}")
     elif typ == "u_wall":
         parts += [f"A {d['l1']:g}", f"B {d['l2']:g}", f"C {d['l3']:g}"]
+    elif typ == "shaft":
+        parts += [f"A {d['l1']:g}", f"B {d['l2']:g}", shaft_inside_label(layout, "")]
     else:
         parts += [f"A {d['l1']:g}", f"B {d['l2']:g}", t_wall_offset_label(layout, "")]
     parts.append(f"{dt('височина')} {panel_height_cm(layout):g}")   # височината на панелите (262 -> 265)
