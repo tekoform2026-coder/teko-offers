@@ -122,14 +122,15 @@ def calculate_walers(layout: Dict[str, Any]) -> Dict[str, Any]:
 # ==========================================
 # 2. ИЗЧИСЛЯВАНЕ НА ШПИЛКИ И ГАЙКИ (TIE RODS & NUTS)
 # ==========================================
-TIE_FACES_PREFIXES = ("A1", "B1", "C1")  # вътрешните страни на L-, П- и Т-стена
+TIE_FACES_PREFIXES = ("A1", "B1", "C1", "D1")  # вътрешните страни на L-, П-, Т-стена и шахта
 
 
 def _tie_faces(layout: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Страните, чиито панели се броят за шпилки: шпилката минава през стената там, където два панела
     стоят един срещу друг - по една на панел от вътрешната страна (10.11.2026).
-    Права стена - A (= A1); колона - A и B; L / П / Т - A1, B1, C1 (без панелите до EX и челата).
+    Права стена - A (= A1); колона - A и B; L / П / Т - A1, B1, C1; шахта - A1 ... D1 (без панелите до EX и
+    челата).
     """
     faces = [f for f in layout["faces"] if f["length_cm"] > NARROW_LIMIT_CM]
     if layout["type"] == "column":
@@ -332,6 +333,7 @@ def calculate_push_pull_props(layout: Dict[str, Any]) -> Dict[str, Any]:
     Вертикализатори по Алгоритъма:
       - колона: по два на колона, на две съседни страни
       - стена / рамо на L и U: по _props_on_sides на външната страна и срещу тях
+      - шахта: само отвън, на четирите страни (вътре няма място - потребителят, 25.11.2026)
     """
     h = layout["height_cm"]
     prop_code = PROP_CODE
@@ -342,6 +344,14 @@ def calculate_push_pull_props(layout: Dict[str, Any]) -> Dict[str, Any]:
         total = 2
         details.append({"side": "Страни A и B (съседни)", "count": 2,
                         "positions_cm": [round(faces["A"]["length_cm"] / 2, 1), round(faces["B"]["length_cm"] / 2, 1)]})
+    elif layout["type"] == "shaft":
+        total = 0
+        for name in ("A", "B", "C", "D"):
+            length = faces[name]["length_cm"]
+            outer, _opposite = _props_on_sides(length, h)
+            total += outer
+            details.append({"side": f"Страна {name} (отвън)", "count": outer,
+                            "positions_cm": _prop_positions(length, outer)})
     else:
         total = 0
         for name in ("A", "B", "C"):
