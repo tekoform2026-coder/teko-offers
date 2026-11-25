@@ -96,7 +96,7 @@ def _replacement(width, h, spare, times, key):
     """
     options = []
     for w in WIDTHS:
-        if w >= width or (h >= 120 and w <= 15):
+        if w >= width or (h >= 120 and w <= 15) or (h == 60 and w < 15):   # TK 60/10 няма
             continue
         k = key(format_panel_code(w, h))
         if k is not None and spare.get(k, 0) >= times:
