@@ -83,7 +83,7 @@ def _response_schema():
     number = S(type=T.NUMBER, nullable=True)
     flag = S(type=T.BOOLEAN, nullable=True)
     element_fields = {
-        "type": S(type=T.STRING, enum=["column", "wall", "l_wall", "u_wall", "t_wall"]),
+        "type": S(type=T.STRING, enum=["column", "wall", "l_wall", "u_wall", "t_wall", "shaft"]),
         "name": S(type=T.STRING),
         "count": S(type=T.INTEGER),
         "unit": S(type=T.STRING, enum=list(UNIT_TO_CM)),
@@ -140,7 +140,7 @@ def analyze_blueprint(image_input, api_key, model_choice=None, notes_language="b
     Върни САМО валиден JSON обект (без образец - всички стойности са от чертежа):
     - "project_name" - името на обекта / проекта от чертежа;
     - "notes" - кратка бележка за всяко противоречие или несигурност в чертежа;
-    - "elements" - за всеки елемент: "type" (column, wall, l_wall, u_wall, t_wall), "name", "count", "unit",
+    - "elements" - за всеки елемент: "type" (column, wall, l_wall, u_wall, t_wall, shaft), "name", "count", "unit",
       размерите "thickness", "l1", "l2", "l3", "height", "thickness1", "thickness2", "thickness3",
       затворените краища "closed_end_1", "closed_end_2", "closed_end_3", "source" и "places" - значенията им
       са по-долу.
@@ -182,6 +182,13 @@ def analyze_blueprint(image_input, api_key, model_choice=None, notes_language="b
       край на полката до лявото (по-близкото) лице на реброто, като стената се гледа с полката отгоре и
       реброто надолу. Ако реброто е в средата на полката или мястото не се вижда ясно, "l3" = 0 -
       не го отгатвай.
+    - За "shaft" (шахта - асансьорна, стълбищна, инсталационна: затворен правоъгълник от 4 стени с празно
+      пространство вътре; върни я като един елемент "shaft", а не като 4 стени или П-стена + стена): "l1" =
+      стена A - външната дължина на едната страна, "l2" = стена B - външната дължина на другата страна (ако
+      шахтата е квадратна, "l2" = null), "thickness" = дебелината на стените, "height". Размерите са ВЪНШНИ
+      (ако на чертежа е вътрешният отвор, добави двете дебелини и го запиши в "notes"); "thickness1" ...
+      "thickness3", "l3" и затворените краища са null. Ако стените на шахтата са с различна дебелина, вземи
+      най-често срещаната и запиши разликата в "notes". В "places" - 4-те точки на ВЪНШНИЯ контур.
     - Дебелина на стените (само за "l_wall", "u_wall" и "t_wall"): ако стените на елемента са с РАЗЛИЧНА
       дебелина, задай "thickness1" (стена A, l1), "thickness2" (стена B, l2) и при "u_wall"
       "thickness3" (стена C, l3). При "t_wall": "thickness1" = полката вдясно от реброто (или цялата
