@@ -754,8 +754,13 @@ FLOOR_CSS = """
 .fp-piece .EX { fill: #a0d784; stroke: #3a2e36; }
 .fp-piece .IN { fill: #4a8f42; stroke: #3a2e36; }
 .fp-piece.sel .c { fill: #9fc3f0; stroke: #1565c0; }
-.fp-label { fill: #111; font-weight: bold; paint-order: stroke; stroke: #fff; stroke-width: 3px;
-            stroke-linejoin: round; pointer-events: none; }
+.fp-label { fill: #111; font-family: "Arial Narrow", "Roboto Condensed", "Segoe UI", sans-serif;
+            font-stretch: condensed; font-weight: 600; letter-spacing: -0.2px; paint-order: stroke; stroke: #fff;
+            stroke-width: 2.5px; stroke-linejoin: round; pointer-events: none; }
+.fp-label .k { font-weight: normal; fill: #444; }
+.fp-label.on, .fp-label.on .k { fill: #1565c0; font-weight: bold; }
+.fp-label.on { stroke-width: 4px; }
+.fp-root.busy .fp-label:not(.on) { opacity: 0.25; }
 .fp-handle-line { stroke: #1565c0; stroke-dasharray: 4 3; pointer-events: none; }
 .fp-handle { fill: #fff; stroke: #1565c0; cursor: grab; }
 .fp-handle:hover { fill: #ffe9a8; }
@@ -892,14 +897,14 @@ function build(parent) {
       const deg = Math.atan2(-p.y - pos.y, p.x - pos.x) * 180 / Math.PI - 90;
       const step = evt.shiftKey ? 1 : SNAP_DEG;
       pos.rot = norm(Math.round(deg / step) * step);
-      S.turn.moved = true;
+      if (!S.turn.moved) { S.turn.moved = true; labelState(root); }
       place(root, S.turn.id);
     } else if (S.drag) {
       const p = pt(evt);
       const pos = S.pos[S.drag.id];
       pos.x = S.drag.x + (p.x - S.drag.p0.x);
       pos.y = S.drag.y - (p.y - S.drag.p0.y);
-      S.drag.moved = true;
+      if (!S.drag.moved) { S.drag.moved = true; labelState(root); }
       place(root, S.drag.id);
     } else if (S.pan) {
       S.view.x = S.pan.v.x - (evt.clientX - S.pan.cx) / S.pan.k;
@@ -919,6 +924,7 @@ function build(parent) {
     // изборът - към Python (полетата на избрания елемент под плана), след пускането - не по време на влаченето
     if (S.drag && S.drag.sel) S.api.setStateValue("sel", S.sel || "");
     S.drag = null; S.pan = null; S.turn = null;
+    labelState(root);
   };
   svg.addEventListener("pointerup", up);
   // двоен клик върху елемент - прозорецът с името и размерите (в Python)
@@ -933,6 +939,7 @@ function build(parent) {
     const v = S.view;
     v.x = p.x - (p.x - v.x) * f; v.y = p.y - (p.y - v.y) * f; v.w *= f; v.h *= f;
     svg.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
+    rescale(root);
   }, { passive: false });
   return root;
 }
@@ -949,6 +956,7 @@ function select(root, id, send = true) {
   const svg = root.querySelector("svg");
   svg.querySelectorAll(".fp-piece").forEach((n) => n.classList.toggle("sel", n.dataset.id === id));
   if (id) place(root, id);
+  labelState(root);
   updateBar(root);
   if (send) S.api.setStateValue("sel", id || "");
 }
@@ -993,7 +1001,10 @@ function place(root, id) {
   const g = svg.querySelector(`.fp-piece[data-id="${CSS.escape(id)}"]`);
   const t = svg.querySelector(`.fp-label[data-id="${CSS.escape(id)}"]`);
   if (g) g.setAttribute("transform", pieceTransform(p, pos));
-  if (t) { t.setAttribute("x", pos.x); t.setAttribute("y", -pos.y); }
+  if (t) {
+    t.setAttribute("x", pos.x); t.setAttribute("y", -pos.y);
+    t.querySelectorAll("tspan").forEach((s) => s.setAttribute("x", pos.x));
+  }
   if (id === S.sel) {
     const [hx, hy] = handlePoint(S, id);
     const line = svg.querySelector(".fp-handle-line"), h = svg.querySelector(".fp-handle");
@@ -1004,6 +1015,50 @@ function place(root, id) {
     const angle = root.querySelector(".fp-angle");
     if (root.getRootNode().activeElement !== angle) angle.value = String(pos.rot || 0).replace(".", ",");
   }
+}
+
+// надписите (потребителят, 25.11.2026, вариант Б): еднакъв размер на екрана при всяко приближаване (не растат и не
+// се застъпват); на два реда - видът дребно („Колона“), името под него („К16“); избраният - синьо, по-голям и
+// най-отгоре; докато се влачи или върти, другите избледняват
+const LABEL_PX = 11;
+
+function labelSize(root, S) {
+  const svg = root.querySelector("svg");
+  const cw = svg.clientWidth || 1000, ch = svg.clientHeight || 680;
+  return LABEL_PX * Math.max(S.view.w / cw, S.view.h / ch);
+}
+
+function setLabel(t, p, fs, x) {
+  const parts = p.label.split(" "), kind = parts.shift(), name = parts.join(" ");
+  t.replaceChildren();
+  if (!name) { t.textContent = p.label; return; }
+  const a = el("tspan", { x, dy: "-0.5em", class: "k", "font-size": fs * 0.8 });
+  a.textContent = kind;
+  const b = el("tspan", { x, dy: "1.05em" });
+  b.textContent = name;
+  t.append(a, b);
+}
+
+function labelState(root) {
+  const S = root.__s, svg = root.querySelector("svg");
+  root.classList.toggle("busy", !!((S.drag && S.drag.moved) || (S.turn && S.turn.moved)));
+  svg.querySelectorAll(".fp-label").forEach((t) => {
+    const p = S.byId[t.dataset.id], on = t.dataset.id === S.sel, fs = on ? S.fs * 1.25 : S.fs;
+    if (!p) return;
+    t.classList.toggle("on", on);
+    t.setAttribute("font-size", fs);
+    setLabel(t, p, fs, S.pos[p.id] ? S.pos[p.id].x : 0);
+    if (on) t.parentNode.appendChild(t);
+  });
+}
+
+// след приближаване с колелцето - надписите и кръгчето за завъртане - пак със същия размер на екрана
+function rescale(root) {
+  const S = root.__s, svg = root.querySelector("svg");
+  S.fs = labelSize(root, S);
+  svg.querySelector(".fp-handle")?.setAttribute("r", S.fs * 0.55);
+  labelState(root);
+  if (S.sel) place(root, S.sel);
 }
 
 function updateBar(root) {
@@ -1057,7 +1112,7 @@ function draw(root) {
   svg.setAttribute("viewBox", `${S.view.x} ${S.view.y} ${S.view.w} ${S.view.h}`);
   svg.replaceChildren();
   const span = Math.max(S.view.w, S.view.h);
-  S.fs = Math.max(20, span / 70);
+  S.fs = labelSize(root, S);
 
   const gid = "fpgrid" + Math.random().toString(36).slice(2, 8);
   const defs = el("defs", {});
@@ -1101,6 +1156,7 @@ function draw(root) {
     svg.appendChild(el("circle", { class: "fp-calib", cx: a[0], cy: -a[1], r: S.fs / 3 }));
   }
   D.pieces.forEach((p) => place(root, p.id));
+  labelState(root);
   updateBar(root);
 }
 
