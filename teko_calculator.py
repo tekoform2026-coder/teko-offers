@@ -43,7 +43,8 @@ STANDING_REMAINDERS = {
 }
 
 # Остатък в ред легнали 60 след 150 и 120. Панел TK 60/35 няма, компенсатор в ред 60 няма (TC 60/x няма):
-# 35 = 20 + 15 (TK 60/20 + TK 60/15); 10 и 15 са панели TK 60/10, TK 60/15 (потребителят, 09.11.2026).
+# 35 = 20 + 15 (TK 60/20 + TK 60/15); 15 е панел TK 60/15 (потребителят, 09.11.2026).
+# Панел TK 60/10 няма (потребителят, 25.11.2026): остатък 10 - 150 + 10 -> 120 + 20 + 20, 120 + 10 -> 130.
 LYING_REMAINDERS = {
     35: [20, 15],
     60: [30, 30],
@@ -59,13 +60,14 @@ LYING_REMAINDERS = {
     110: [30, 30, 30, 20],
     115: [30, 30, 30, 25],
     125: [30, 30, 30, 20, 15],
+    130: [30, 30, 30, 20, 20],
 }
 
 def format_panel_code(width_cm, height_cm):
     """
     Генерира каталожното наименование според официалната спецификация ТЕКО.
     Полегнал ред (височина 60): ширини 150/120 са полегнали големи панели,
-    останалите са TK 60/x (и 10 / 15 - панели TK 60/10, TK 60/15; компенсатори TC 60/x няма).
+    останалите са TK 60/x (15 - панел TK 60/15; TK 60/10 и компенсатори TC 60/x няма).
     Ред 20-35 см (полегнали панели): TK по-голям/по-малък размер, напр. 150/20, 20/15.
     Ред 5/10/15 см - компенсатор отгоре: TC 150/x.
     """
@@ -207,16 +209,17 @@ def _solve_width_lying(width_cm):
     """
     Полегнал ред (H=60): първо полегнали 150 и 120, после малки модули (LYING_REMAINDERS).
     Остатък 5 (60/5 няма): 150 + 5 -> 120 + 20 + 15, 120 + 5 -> 30 + 30 + 30 + 20 + 15;
-    само 5 см не се покрива точно (панелът 10 излиза) - layout_element сменя основата.
+    остатък 10 (60/10 няма): 150 + 10 -> 120 + 20 + 20, 120 + 10 -> 30 + 30 + 30 + 20 + 20;
+    само 5 / 10 см не се покрива точно (панелът 15 излиза) - layout_element сменя основата.
     """
     count_150, rem = divmod(width_cm, 150)
     count_120, rem = divmod(rem, 120)
-    if rem == 5 and count_150:
-        count_150, count_120, rem = count_150 - 1, count_120 + 1, 35
-    elif rem == 5 and count_120:
-        count_120, rem = count_120 - 1, 125
-    elif rem == 5:
-        return [10]
+    if rem in (5, 10) and count_150:
+        count_150, count_120, rem = count_150 - 1, count_120 + 1, rem + 30
+    elif rem in (5, 10) and count_120:
+        count_120, rem = count_120 - 1, rem + 120
+    elif rem in (5, 10):
+        return [15]
     small = LYING_REMAINDERS.get(rem) or STANDING_REMAINDERS[rem]
     return [150] * count_150 + [120] * count_120 + small
 
@@ -375,6 +378,11 @@ def thickness_label(layout, unit=" см"):
         return f"{dt('дебелина')} {arms[0]:g}{unit}"
     return ", ".join(f"{dt('стена')} {'ABC'[i]} {dt('дебелина')} {t:g}{unit}" for i, t in enumerate(arms))
 
+def shaft_inside_label(layout, unit=" см"):
+    """„вътре 210 x 160 см“ - вътрешният отвор на шахта (външните размери минус двете стени)."""
+    d = layout["dims"]
+    return dt("вътре {a} x {b}{unit}", a=f"{d['l1'] - 2 * d['t']:g}", b=f"{d['l2'] - 2 * d['t']:g}", unit=dt_cm(unit))
+
 def t_wall_middle_cm(l1_cm, stem_thickness_cm):
     """Ребро в средата на полката: от левия край до лявото лице на реброто, надолу до 5 см."""
     return math.floor((float(l1_cm) - stem_thickness_cm) / 2 / 5.0) * 5
@@ -398,7 +406,9 @@ def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=2
                "u_wall" (l1 = рамо A, l2 = гръб B, l3 = рамо C, thickness),
                "t_wall" (l1 = страна A (полката), l2 = страна B / B1 (реброто, от предното лице
                          на полката до края му), l3 = от левия край на полката (край 2) до лявото
-                         лице на реброто - празно / 0 = реброто е в средата, thickness).
+                         лице на реброто - празно / 0 = реброто е в средата, thickness),
+               "shaft" (шахта - затворен правоъгълник от 4 стени: l1 = стена A, l2 = стена B - празно / 0 =
+                        квадратна (B = A), външни размери; thickness - еднаква за четирите стени; без краища).
     closed_end_1 / closed_end_2: затворени челни края (стени). Край 1 е краят на рамо A
                  (при права стена - десният), край 2 - краят на последното рамо B / C
                  (при права стена - левият). При T-стена: край 1 - десният край на полката,
@@ -530,6 +540,20 @@ def layout_element(elem_type, height_cm, length_cm=0, width_cm=0, thickness_cm=2
         dims = {"l1": l1, "l2": l2, "l3": p, "t": t, "t1": t1, "t2": ts}
         if tc != t1:
             dims["t3"] = tc   # надписът „стена C дебелина ...“ - само когато е зададена различна
+
+    elif elem_type == "shaft":
+        # Шахта (потребителят, 25.11.2026): 4 стени, всяка като гърба на П-стена - отвън „дебелина + 10“ до
+        # всеки EX и средата, отвътре средата между двата IN (огледална на външната). Стени A, B, C (= A), D (= B).
+        l1 = float(l1_cm)
+        l2 = float(l2_cm) if l2_cm and float(l2_cm) > 0 else l1
+        k = t + IN_CORNER_CM
+        faces = []
+        for name, length in (("A", l1), ("B", l2), ("C", l1), ("D", l2)):
+            faces.append(_face(name, [k, length - 2 * k, k], levels, "EX", "EX"))
+            faces.append(_face(name + "1", [length - 2 * k], levels, "IN", "IN"))
+        ex, inn = 4, 4
+        dims = {"l1": l1, "l2": l2, "t": t}
+        closed = [False, False]
 
     else:
         raise ValueError(f"Непознат тип елемент: {elem_type}")
