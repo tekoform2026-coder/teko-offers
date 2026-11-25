@@ -54,6 +54,26 @@ def _concrete_rects(poly):
     return rects
 
 
+def _rings(poly):
+    """Контурите на бетона: един многоъгълник или пръстен (шахта - външният, после вътрешният; точката, с която
+    контурът започва, се повтаря в края му)."""
+    rings, cur = [], []
+    for q in poly:
+        if len(cur) > 2 and list(q) == list(cur[0]):
+            rings.append(cur)
+            cur = []
+        else:
+            cur.append(list(q))
+    if cur:
+        rings.append(cur)
+    return rings
+
+
+def _outer(piece):
+    """Външният контур на бетона (при шахта - без дупката): за напасването и мащаба по контурите на чертежа."""
+    return piece.get("rings", [piece["poly"]])[0]
+
+
 def piece_plan(layout):
     """
     Изгледът отгоре за подреждането: бетонът (многоъгълник), кофражът ([x0, y0, x1, y1, вид] - "P" панели,
@@ -69,6 +89,7 @@ def piece_plan(layout):
     xs = [p[0] for p in poly] + [f[0] for f in forms] + [f[2] for f in forms]
     ys = [p[1] for p in poly] + [f[1] for f in forms] + [f[3] for f in forms]
     return {"poly": [[float(x), float(y)] for x, y in poly],
+            "rings": [[[float(x), float(y)] for x, y in ring] for ring in _rings(poly)],
             "forms": [[float(v) for v in f[:4]] + [f[4]] for f in forms],
             "cx": (min(xs) + max(xs)) / 2, "cy": (min(ys) + max(ys)) / 2,
             "w": max(xs) - min(xs), "h": max(ys) - min(ys)}
@@ -288,7 +309,7 @@ def fit_piece(piece, outline):
     най-дългата страна на контура (+ 0 / 90 / 180 / 270°) и огледално; центърът на тежестта - върху центъра
     на контура. (място, застъпване 0-1).
     """
-    P, T = np.array(piece["poly"], float), np.asarray(outline, float)
+    P, T = np.array(_outer(piece), float), np.asarray(outline, float)
     cP, cT = _centroid(P), _centroid(T)
     c = np.array([piece["cx"], piece["cy"]], float)
     base, best = _main_angle(T), None
@@ -468,10 +489,10 @@ def drawing_places(pieces, w_px, h_px, cm_per_px, gemini=None, shapes=(), labels
             chosen[pid], used = i, used | {i}
 
     by_id = {p["id"]: p for p in pieces}
-    ratios = [np.sqrt(_area(by_id[pid]["poly"]) / areas[i]) for pid, i in chosen.items() if areas[i] > 0]
+    ratios = [np.sqrt(_area(_outer(by_id[pid])) / areas[i]) for pid, i in chosen.items() if areas[i] > 0]
     scale = float(np.median(ratios)) if ratios else None
     if scale is None and approx:   # само Gemini - приблизително
-        ratios = [np.sqrt(_area(by_id[pid]["poly"]) / _area(g)) for pid, g in approx.items() if _area(g) > 0]
+        ratios = [np.sqrt(_area(_outer(by_id[pid])) / _area(g)) for pid, g in approx.items() if _area(g) > 0]
         scale = float(np.median(ratios)) if ratios else None
 
     to_cm = lambda poly: np.column_stack([poly[:, 0] * cm_per_px, (h_px - poly[:, 1]) * cm_per_px])
@@ -666,7 +687,10 @@ def draw_floor_plan(ax, pieces, positions, label_size=6, background=None):
         pos = positions[p["id"]]
         M, t = _transform(p, pos)
         pts = (M @ np.array(p["poly"], float).T).T + t
-        ax.add_patch(plt.Polygon(pts, closed=True, fc=PLAN_CONCRETE, ec=TOP_CONCRETE_BORDER, lw=0.4, zorder=2))
+        ax.add_patch(plt.Polygon(pts, closed=True, fc=PLAN_CONCRETE, ec='none', zorder=2))
+        for ring in p.get("rings", [p["poly"]]):   # контурът - по пръстените (шахта - без линия между тях)
+            ring_pts = (M @ np.array(ring, float).T).T + t
+            ax.add_patch(plt.Polygon(ring_pts, closed=True, fill=False, ec=TOP_CONCRETE_BORDER, lw=0.4, zorder=2))
         for x0, y0, x1, y1, kind in p["forms"]:
             quad = (M @ np.array([[x0, x1, x1, x0], [y0, y0, y1, y1]], float)).T + t
             fc, ec = colors.get(kind, colors["P"])
@@ -749,11 +773,14 @@ FLOOR_CSS = """
 .fp-svg { width: 100%; height: 680px; background: #fbfcfd; border: 1px solid #dde1e6; border-radius: 6px;
           touch-action: none; user-select: none; display: block; }
 .fp-piece { cursor: grab; }
-.fp-piece .c { fill: #c9cdd2; stroke: #2c3e50; }
+/* бетонът - само контур, чертежът се вижда отвътре (потребителят, 25.11.2026); хваща се и за вътрешността */
+.fp-piece .c { fill: transparent; stroke: #2c3e50; pointer-events: all; }
 .fp-piece .P { fill: #e5bec0; stroke: #3a2e36; }
 .fp-piece .EX { fill: #a0d784; stroke: #3a2e36; }
 .fp-piece .IN { fill: #4a8f42; stroke: #3a2e36; }
-.fp-piece.sel .c { fill: #9fc3f0; stroke: #1565c0; }
+.fp-piece.sel .c { fill: transparent; stroke: #1565c0; stroke-width: 2px; }
+/* докато се мести или върти - избраният елемент полупрозрачен, вижда се чертежът под панелите */
+.fp-root.busy .fp-piece.sel { opacity: 0.5; }
 .fp-label { fill: #111; font-family: "Arial Narrow", "Roboto Condensed", "Segoe UI", sans-serif;
             font-stretch: condensed; font-weight: 600; letter-spacing: -0.2px; paint-order: stroke; stroke: #fff;
             stroke-width: 2.5px; stroke-linejoin: round; pointer-events: none; }
@@ -1133,8 +1160,11 @@ function draw(root) {
   for (const p of D.pieces) {
     const g = el("g", { class: "fp-piece" + (p.id === S.sel ? " sel" : "") });
     g.dataset.id = p.id;
-    g.appendChild(el("polygon", { class: "c", points: p.poly.map((q) => q.join(",")).join(" "),
-                                  "vector-effect": "non-scaling-stroke", "stroke-width": 1 }));
+    // бетонът - контурите (шахта - пръстен: външният и вътрешният, дупката не се хваща)
+    const rings = p.rings || [p.poly];
+    g.appendChild(el("path", { class: "c", "fill-rule": "evenodd",
+                               d: rings.map((r) => "M " + r.map((q) => q.join(",")).join(" L ") + " Z").join(" "),
+                               "vector-effect": "non-scaling-stroke", "stroke-width": 1 }));
     for (const f of p.forms) {
       g.appendChild(el("rect", { class: f[4], x: f[0], y: f[1], width: f[2] - f[0], height: f[3] - f[1],
                                  "vector-effect": "non-scaling-stroke", "stroke-width": 0.5 }));
