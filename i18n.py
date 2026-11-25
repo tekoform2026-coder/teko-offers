@@ -32,7 +32,8 @@ def t(text, **values):
 _ITEM_WORDS = [("Вътрешен ъгъл", "Internal corner"), ("Външен ъгъл", "External corner"), ("Ръкохватка", "Handle"),
                ("Ригел", "Alignment waling"), ("Вертикализатор", "Pull push prop"), ("Шпилка", "Tie rod"),
                ("Гайка", "Nut"),
-               ("Компенсатор", "Compensator"), ("(полегнал)", "(horizontal)"), (" см", " cm"), ("бр.", "pcs")]
+               ("Компенсатор", "Compensator"), ("(полегнал)", "(horizontal)"), ("вътре ", "inside "), (" см", " cm"),
+               ("бр.", "pcs")]
 
 
 def t_item(text):
@@ -121,7 +122,7 @@ EN = {
     "✅ Заредени {n} цени от Excel. Създайте Excel наново.": "✅ Loaded {n} prices from Excel. Create the Excel again.",
     "Изход от приложението; ако компютърът е запомнен - забравя го.":
         "Sign out of the app; if this computer is remembered, it is forgotten.",
-    "ТЕКО система за кофражно планиране": "TEKO formwork planning system",
+    "ТЕКО Система за кофражно планиране": "TEKO formwork planning system",
     "ТЕКО България ООД": "TEKO Bulgaria Ltd.",
     "⚙️ Настройки": "⚙️ Settings",
     "Въведете Gemini API Key:": "Enter the Gemini API Key:",
@@ -427,6 +428,10 @@ EN = {
     "L-образна Стена": "L-shaped Wall",
     "П-образна Стена": "U-shaped Wall",
     "T-образна Стена": "T-shaped Wall",
+    "Шахта": "Shaft",
+    "Празна = квадратна шахта (B = A)": "Empty = square shaft (B = A)",
+    "• **{name}**: При шахта не се ползват {fields} - дебелината е „Дебелина стена A“ за четирите стени, празна Стена B = квадратна шахта.":
+        "• **{name}**: {fields} are not used for a shaft - the thickness is “Wall A thickness” for all four walls, an empty Wall B = square shaft.",
 
     # Преглед на елемент
     ", затворени краища: {n}": ", closed ends: {n}",
@@ -628,26 +633,28 @@ EN = {
 # Инструкцията за ръчно въвеждане (таб 1)
 MANUAL_HELP_BG = (
     "📝 **Инструкция за попълване в таблицата по-долу:**\n"
-    "- Изберете **тип елемент**: Колона, Права стена, L-стена, П-стена или T-стена.\n"
+    "- Изберете **тип елемент**: Колона, Права стена, L-стена, П-стена, T-стена или Шахта.\n"
     "- Всички размери (стени, дебелини, височина) са в **сантиметри**.\n"
     "- За **права стена**: попълнете **Стена A** (дължината) и **Дебелина стена A**.\n"
     "- За **колона**: попълнете **Стена A** и **Дебелина стена A** - колона 50x30: стена A 50 (страна A на чертежа), дебелина 30 (страна B).\n"
     "- За **L-стена**: попълнете **Стена A**, **Стена B** и **Дебелина стена A**.\n"
     "- За **П-стена**: попълнете **Стена A**, **Стена B**, **Стена C** и **Дебелина стена A**.\n"
     "- За **T-стена**: **Стена A** (цялата полка), **Стена B** (реброто, от полката до края му) и **Дебелина стена A**. **Стена C** - мястото на реброто: от левия край на полката до лявото лице на реброто; празно = реброто е в средата на полката. Реброто може да е и до самия край - остава Т-стена. Край 1 е десният край на полката, край 2 - левият, **Затворен край 3** - краят на реброто (само за T-стена).\n"
+    "- За **шахта** (затворен правоъгълник от 4 стени): **Стена A** и **Стена B** - външните размери (празна Стена B = квадратна шахта), **Дебелина стена A** - една за четирите стени. Затворени краища няма; вертикализаторите са само отвън.\n"
     "- **Дебелина стена A** е дебелината на целия елемент. **Дебелина стена B / C** (L-, П- и T-стена) се попълва само когато стената е с различна дебелина; празното поле = като стена A (равна на A се изчиства). При T-стена стена A е полката, стена B - реброто, а стена C - полката вляво от реброто (дължината „Стена C“; празна = цялата полка е с дебелина A).\n"
     "- **Затворен край 1 / Затворен край 2** (отметки) за стени, L- и П-стени: челните краища, затворени с панел колкото дебелината. Край 1 е краят на стена A (при права стена - десният), край 2 - краят на последната стена (при права стена - левият). **Всички краища са затворени по подразбиране** - за отворен край махнете отметката.\n"
     "- Непотребните полета за съответния тип могат да се оставят празни — системата автоматично игнорира празни клетки без грешки!"
 )
 EN[MANUAL_HELP_BG] = (
     "📝 **How to fill in the table below:**\n"
-    "- Choose the **element type**: Column, Straight wall, L-wall, U-wall or T-wall.\n"
+    "- Choose the **element type**: Column, Straight wall, L-wall, U-wall, T-wall or Shaft.\n"
     "- All dimensions (walls, thicknesses, height) are in **centimetres**.\n"
     "- **Straight wall**: fill in **Wall A** (the length) and **Wall A thickness**.\n"
     "- **Column**: fill in **Wall A** and **Wall A thickness** - column 50x30: wall A 50 (side A on the drawing), thickness 30 (side B).\n"
     "- **L-wall**: fill in **Wall A**, **Wall B** and **Wall A thickness**.\n"
     "- **U-wall**: fill in **Wall A**, **Wall B**, **Wall C** and **Wall A thickness**.\n"
     "- **T-wall**: **Wall A** (the whole flange), **Wall B** (the stem, from the flange to its end) and **Wall A thickness**. **Wall C** - the stem position: from the left end of the flange to the left face of the stem; empty = the stem is in the middle of the flange. The stem may be right at the end - it is still a T-wall. End 1 is the right end of the flange, end 2 - the left one, **Closed end 3** - the end of the stem (T-wall only).\n"
+    "- **Shaft** (a closed rectangle of 4 walls): **Wall A** and **Wall B** - the outer dimensions (empty Wall B = square shaft), **Wall A thickness** - one for all four walls. There are no closed ends; the push-pull props are outside only.\n"
     "- **Wall A thickness** is the thickness of the whole element. **Wall B / C thickness** (L-, U- and T-wall) is filled in only when that wall has a different thickness; an empty field = same as wall A (equal to A is cleared). For a T-wall, wall A is the flange, wall B is the stem and wall C is the flange left of the stem (the “Wall C” length; empty = the whole flange has the wall A thickness).\n"
     "- **Closed end 1 / Closed end 2** (checkboxes) for walls, L- and U-walls: the ends closed with a panel as wide as the thickness. End 1 is the end of wall A (straight wall - the right one), end 2 - the end of the last wall (straight wall - the left one). **All ends are closed by default** - untick for an open end.\n"
     "- Fields not needed for the type can be left empty — empty cells are ignored without errors!"
