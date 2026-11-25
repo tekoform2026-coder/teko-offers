@@ -20,6 +20,7 @@ from reportlab.lib.utils import ImageReader
 
 from accessories_calculator import waler_levels_cm, NARROW_LIMIT_CM
 from teko_calculator import (IN_CORNER_CM, is_compensator_row, thickness_label, t_wall_offset_label, face_row_pieces,
+                             shaft_inside_label,
                              panel_height_cm)
 from doc_lang import dt, dt_item, dt_face
 
@@ -204,6 +205,17 @@ def _plan_geometry(layout):
         if layout["closed"][2]:
             corners += [("EX", p - T, -T), ("EX", p + ts, -T)]
 
+    elif typ == "shaft":
+        # шахта: A отдолу, B вдясно, C отгоре, D вляво; бетонът - пръстен (външният контур, после вътрешният
+        # в обратна посока - дупката е извън многоъгълника; линията между тях не се рисува - SHAFT_EDGES)
+        A, B = d["l1"], d["l2"]
+        poly = [[0, 0], [A, 0], [A, B], [0, B], [0, 0], [t, t], [t, B - t], [A - t, B - t], [A - t, t], [t, t]]
+        k = t + IN_CORNER_CM
+        place = {"A": (0, -T, 'x'), "B": (A, 0, 'y'), "C": (0, B, 'x'), "D": (-T, 0, 'y'),
+                 "A1": (k, t, 'x'), "B1": (A - t - T, k, 'y'), "C1": (k, B - t - T, 'x'), "D1": (t, k, 'y')}
+        corners = [("EX", -T, -T), ("EX", A, -T), ("EX", A, B), ("EX", -T, B),
+                   ("IN", t, t), ("IN", A - t - T, t), ("IN", A - t - T, B - t - T), ("IN", t, B - t - T)]
+
     else:  # u_wall: рамо A вляво (t1), гръб B отдолу (t2), рамо C вдясно (t3)
         l1, m, l3 = d["l1"], d["l2"], d["l3"]
         poly = [[0, 0], [m, 0], [m, l3], [m - t3, l3], [m - t3, t2], [t1, t2], [t1, l1], [0, l1]]
@@ -237,6 +249,8 @@ def _dims_label(layout):
     if typ == "t_wall":
         offset = t_wall_offset_label(layout, " cm")
         return f"A={int(d['l1'])}, B={int(d['l2'])}, {offset + ', ' if offset else ''}{thickness_label(layout, ' cm')}"
+    if typ == "shaft":
+        return f"A={int(d['l1'])}, B={int(d['l2'])}, {thickness_label(layout, ' cm')}, {shaft_inside_label(layout, ' cm')}"
     return f"A={int(d['l1'])}, B={int(d['l2'])}, C={int(d['l3'])}, {thickness_label(layout, ' cm')}"
 
 # ==========================================
@@ -323,6 +337,11 @@ def _prop_marks(layout, strips):
     if layout["type"] == "column":
         for name in ("A", "B"):
             marks.append((name, strips[name][1] + faces[name]["length_cm"] / 2))
+    elif layout["type"] == "shaft":   # само отвън, на четирите страни (вътре няма място)
+        for name in ("A", "B", "C", "D"):
+            length = faces[name]["length_cm"]
+            outer, _opposite = _props_on_sides(length, layout["height_cm"])
+            marks += [(name, strips[name][1] + pos) for pos in _prop_positions(length, outer)]
     else:
         for name in ("A", "B", "C"):
             if name not in faces:
@@ -401,7 +420,7 @@ def _top_accessories(layout, place, poly):
 
     marks = _prop_marks(layout, strips)
     # първо външните страни (пълна дължина), после вътрешните - по-късите страни първи (симетрично)
-    marks.sort(key=lambda m: (m[0] not in ("A", "B", "C"), faces[m[0]]["length_cm"]))
+    marks.sort(key=lambda m: (m[0] not in ("A", "B", "C", "D"), faces[m[0]]["length_cm"]))
     def overlaps(bx):
         return any(bx[0] < o[2] and o[0] < bx[2] and bx[1] < o[3] and o[1] < bx[3] for o in drawn)
 
@@ -630,7 +649,13 @@ def generate_top_view_buf(layout, name="Елемент"):
     for gy in range(int(math.ceil(y_min / g)) * g, int(y_max) + 1, g):
         ax.plot([x_min, x_max], [gy, gy], color=TOP_GRID, linewidth=0.6, zorder=0)
 
-    ax.add_patch(patches.Polygon(poly, facecolor=TOP_CONCRETE, edgecolor=TOP_CONCRETE_BORDER, linewidth=1.0, zorder=1))
+    if layout["type"] == "shaft":   # пръстен: запълването без контур, после външният и вътрешният контур
+        ax.add_patch(patches.Polygon(poly, facecolor=TOP_CONCRETE, edgecolor='none', zorder=1))
+        for ring in (poly[:4], poly[5:9]):
+            ax.add_patch(patches.Polygon(ring, fill=False, edgecolor=TOP_CONCRETE_BORDER, linewidth=1.0, zorder=1))
+    else:
+        ax.add_patch(patches.Polygon(poly, facecolor=TOP_CONCRETE, edgecolor=TOP_CONCRETE_BORDER, linewidth=1.0,
+                                     zorder=1))
 
     # Размер на надписа според мащаба: да се събира по дължината на панела (без застъпване);
     # ако и най-малкият размер не стига - надписът излиза до панела, към бетона, на два реда през един
@@ -879,6 +904,7 @@ VIEW_3D = {
     "l_wall": (30, -130),
     "u_wall": (32, -115),
     "t_wall": (30, -60),
+    "shaft": (32, -55),
 }
 
 
