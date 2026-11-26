@@ -2,7 +2,7 @@
 excel_export.py
 Количествена сметка (КСС) и чертежи в Excel за редактиране - по образеца reference/expected/12345676.xlsx:
   - лист „Кол. сметка“ като „Цена BG“ в „1. Оферта – софтуер.xlsx“: артикулите в реда на офертата, количествата
-    са формули към листовете на елементите; цена на ръка, размери, площ, тегло, наличност от таб 5, общо, отстъпка;
+    са формули към листовете на елементите; цена на ръка, размери, площ, тегло, наличност от таб 6, общо, отстъпка;
   - лист „Елемент N“: изглед отгоре и изглед отпред на всяка страна от слети клетки (1 клетка = 5 см),
     всеки панел и ъгъл с дебела външна граница; вдясно от чертежите - пълната КСС за елемента
     (за 1 бр. и общо = за 1 бр. x брой);
@@ -502,8 +502,11 @@ def _draw_views(sheet, layout):
         last = _front_view(sheet, layout, group[0], label_row + 1, starts.get(group[0]["name"]))
 
 
-def _element_sheet(wb, index, element):
-    """Лист „Елемент N“; връща {наименование в КСС: адрес на клетката „Кол. общо“}."""
+def _element_sheet(wb, index, element, corrected=()):
+    """
+    Лист „Елемент N“; връща {наименование в КСС: адрес на клетката „Кол. общо“}.
+    corrected - наименованията, коригирани в таб 3: в КСС на елемента празни (бройката е само в „Кол. сметка“).
+    """
     ws = wb.create_sheet(dt("Елемент {i}", i=index))
     layout = element["layout"]
     count = max(1, int(element.get("count", 1)))
@@ -536,6 +539,8 @@ def _element_sheet(wb, index, element):
         one = totals.get(name, 0) / count
         sheet.cell(r, name_col, 16, dt_item(name), align="left")
         sheet.cell(r, unit_col, 3, dt("бр"))
+        if name in corrected:   # коригирано в таб 3 - бройка само в общата сметка (потребителят, 26.11.2026)
+            one = 0
         one_ref = sheet.cell(r, one_col, 4, (int(one) if one == int(one) else one) or None, number_format=HIDE_ZERO)
         refs[name] = sheet.cell(r, all_col, 4, f'=IF({one_ref}="","",{one_ref}*{count_ref})', bold=True,
                                 number_format=HIDE_ZERO)
@@ -557,8 +562,8 @@ def _kss_sheet(ws, names, quantity, stock=None, prices=None):
     """
     „Кол. сметка“ като „Цена BG“ в „1. Оферта – софтуер.xlsx“ (потребителят, 18.11.2026): заглавия на ред 3,
     артикулите от ред 4, после ОБЩО / ОТСТЪПКА. quantity(name) - количеството (формула към елементите или число);
-    stock - {наименование: наличност} от таб 5 (колона „Наличност в склада“); prices - {наименование: ед. цена}
-    от „💶 Цени от Excel“ в таб 2 (20.11.2026; в кода няма цени). Без цена клетката остава празна (жълта) - на
+    stock - {наименование: наличност} от таб 6 (колона „Наличност в склада“); prices - {наименование: ед. цена}
+    от „💶 Цени от Excel“ в таб 3 (20.11.2026; в кода няма цени). Без цена клетката остава празна (жълта) - на
     ръка; отстъпката % е формулата от файла.
     """
     first = 4
@@ -607,7 +612,7 @@ def _kss_sheet(ws, names, quantity, stock=None, prices=None):
             elif col in "DPQ":
                 cell.number_format = HIDE_ZERO
             if col == "E":
-                cell.fill = PatternFill("solid", fgColor=FILL_COUNT)   # цената - от таб 2 или на ръка
+                cell.fill = PatternFill("solid", fgColor=FILL_COUNT)   # цената - от таб 3 или на ръка
             elif col in "GH":
                 cell.fill = PatternFill("solid", fgColor=FILL_DISCOUNT)
             elif name == "Ръкохватка H8":
@@ -692,24 +697,41 @@ def _palette_sheet(wb):
 # ==========================================
 # ГЛАВНА ФУНКЦИЯ
 # ==========================================
-def generate_excel(elements, stock=None, prices=None):
+def generate_excel(elements, stock=None, prices=None, corrections=None):
     """
     elements: [{"name", "count", "layout", "bom"}] - bom е сметката на елемента, умножена по броя.
-    stock: {наименование в КСС: наличност} от таб 5 - колона „Наличност в склада“ (без него - празна).
+    stock: {наименование в КСС: наличност} от таб 6 - колона „Наличност в склада“ (без него - празна).
     prices: {наименование в КСС: ед. цена} - колона „Ед. Цена“ (без него - празна, на ръка).
+    corrections: {код от сметката: коригиран брой} - корекциите в таб 3 (26.11.2026): в „Кол. сметка“ клетката
+    „Кол.“ е коригираният брой (число, не формула; изтритият - празен); в КСС на листовете на елементите - празно
+    (чертежите не се пипат). Без обяснения - файлът е за клиента (потребителят, 26.11.2026).
     Връща BytesIO с .xlsx.
     """
     wb = Workbook()
     kss = wb.active
     kss.title = dt("Кол. сметка")
+    # корекциите от таб 3 - по редовете на КСС: коригираният брой (с некоригираните кодове на реда)
+    bom = {}
+    for element in elements:
+        for code, qty in element["bom"].items():
+            bom[code] = bom.get(code, 0) + qty
+    calc = dict(kss_rows(bom))
+    wanted = dict(kss_rows({**bom, **(corrections or {})}))
+    touched = {_KSS_NAME_BY_CODE.get(code, code) for code in corrections or {}}
+    touched = {name for name in touched if wanted.get(name, 0) != calc.get(name, 0)}
+
     element_refs = []
     extra = []
     known = {name for name, _codes in KSS_ITEMS}
     for i, element in enumerate(elements, 1):
-        refs = _element_sheet(wb, i, element)
+        refs = _element_sheet(wb, i, element, touched)
         element_refs.append((dt("Елемент {i}", i=i), refs))   # името на листа (_element_sheet)
         extra += [n for n in refs if n not in known and n not in extra]
+    extra += [n for n in sorted(touched) if n not in known and n not in extra]
+
     def formula(name):
+        if name in touched:
+            return wanted.get(name, 0)
         sources = [f"'{sheet}'!{refs[name]}" for sheet, refs in element_refs if name in refs]
         return f"=SUM({','.join(sources)})" if sources else None
 
@@ -724,7 +746,7 @@ def generate_excel(elements, stock=None, prices=None):
 
 
 # ==========================================
-# СКЛАДОВА НАЛИЧНОСТ (таб 5)
+# СКЛАДОВА НАЛИЧНОСТ (таб 6)
 # ==========================================
 STOCK_SHEET_TITLE = "Складова наличност"
 STOCK_HEADERS = ["Елемент", "Мярка", "Остава"]   # колоните в данните и в архива
