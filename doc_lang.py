@@ -465,7 +465,7 @@ TR = {
         "Опалубка железобетонных элементов для объекта: «{project}»\n",
         "Оплата армиранобетонских елемената за објекат: „{project}”\n",
         "Betonarme elemanların kalıplanması, proje: “{project}”\n"),
-    # 3D план на етажа (таб 6, 22.11.2026)
+    # 3D план на етажа (таб 2, 22.11.2026)
     "3D план на етажа": ("3D floor plan", "3D-Geschossplan", "Plan 3D de l'étage", "Plano 3D de la planta",
                          "Τρισδιάστατη κάτοψη ορόφου", "3D tlocrt etaže", "Plan 3D al etajului", "Rzut 3D kondygnacji",
                          "3D план поверху", "3D план этажа", "3D основа спрата", "3B kat planı"),
