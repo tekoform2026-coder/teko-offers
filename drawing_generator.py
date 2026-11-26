@@ -145,6 +145,28 @@ def generate_overall_project_3d_buf(pdf_elements):
 # ==========================================
 PANEL_T = 10  # дебелина на панела/ъгъла в чертежа (cm)
 
+
+class _concrete_path:
+    """Проверка „в бетона ли е точката“ (`contains_point`). Пръстенът на шахтата (точката на началото се повтаря) -
+    вътре във външния контур и извън вътрешния: като един многоъгълник линията от външния към вътрешния ъгъл
+    е част от контура и ъгълът излиза празен (3D изгледът)."""
+
+    def __init__(self, poly):
+        from matplotlib.path import Path
+        rings, cur = [], []
+        for q in poly:
+            if len(cur) > 2 and list(q) == list(cur[0]):
+                rings.append(cur)
+                cur = []
+            else:
+                cur.append(list(q))
+        if cur:
+            rings.append(cur)
+        self.outer, self.holes = Path(rings[0]), [Path(r) for r in rings[1:]]
+
+    def contains_point(self, p):
+        return self.outer.contains_point(p) and not any(h.contains_point(p) for h in self.holes)
+
 def _plan_geometry(layout):
     """
     Разполага страните от teko_calculator.layout_element в план.
@@ -310,7 +332,7 @@ def _face_strips(layout, place, poly):
     Посоката навън (+1/-1 напречно на оста) е към страната без бетон.
     """
     from matplotlib.path import Path
-    core = Path(poly)
+    core = _concrete_path(poly)
     T = PANEL_T
     strips = {}
     for face in layout["faces"]:
@@ -946,7 +968,7 @@ def generate_3d_axonometry_buf(layout, name="Елемент"):
         col = COLOR_3D_CORNER if kind == "EX" else COLOR_3D_CORNER_IN
         boxes.append((x, y, 0, T, T, top, col, COLOR_3D_CORNER_EDGE))
 
-    core = Path(poly)
+    core = _concrete_path(poly)
 
     # Бетонът - също кутии (ивици по y), за да се подрежда отзад-напред заедно с панелите:
     # при T-стена панелите зад реброто иначе се рисуват върху бетона
