@@ -1148,7 +1148,11 @@ def generate_3d_axonometry_buf(layout, name="Елемент"):
 # ==========================================
 # 6. ГЕНЕРИРАНЕ НА ЦЕЛИЯ ДОКУМЕНТ
 # ==========================================
-def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
+def generate_pdf_drawings(pdf_elements, bom_summary, proj_info, corrected=()):
+    """
+    corrected - кодовете, коригирани на ръка в таб 3 (потребителят, 26.11.2026): не са в таблицата на елемента,
+    бройката им е само в общата сметка (bom_summary - вече с корекциите, без изтритите); чертежите не се пипат.
+    """
     has_dejavu = setup_pdf_fonts()
     font_name = 'DejaVuSans' if has_dejavu else 'Helvetica'
     font_bold = 'DejaVuSans-Bold' if has_dejavu else 'Helvetica-Bold'
@@ -1180,7 +1184,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
 
     story = []
     
-    # стойността по подразбиране от таб 3 („Няма посочен клиент“) - на езика на документа
+    # стойността по подразбиране от таб 4 („Няма посочен клиент“) - на езика на документа
     client = proj_info.get('client') or 'Няма посочен клиент'
     if client == 'Няма посочен клиент':
         client = dt(client)
@@ -1304,6 +1308,8 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info):
         ]]
 
         for code, qty in sorted(elem_bom.items()):
+            if code in corrected:
+                continue
             one = qty / e_count
             elem_table_data.append([
                 Paragraph(dt_item(code), cell_style),
