@@ -288,7 +288,7 @@ DATA_COLUMNS = TABLE_COLUMNS + ["thickness_cm", "drawing"]
 
 # Чертежи (потребителят, 18.11.2026): всеки разчетен чертеж добавя своите елементи в отделна таблица под
 # заглавие „Чертеж N: име на файла“; drawing е името на чертежа, празно - без чертеж (ръчно, стари проекти).
-# Сметките (табове 2-5) са за всички чертежи заедно.
+# Сметките (табове 3-6) са за всички чертежи заедно.
 TABLE_EDITOR_KEY = "elements_form_editor"
 
 def drawing_name(value):
@@ -315,7 +315,7 @@ def drawing_file_key(drawing):
     return (st.session_state.get("current_project"), drawing)
 
 def keep_drawing_file(drawing, uploaded_file):
-    """Файлът на разчетения чертеж - в сесията (не в архива), за фона в таб 6 „3D план на етажа“."""
+    """Файлът на разчетения чертеж - в сесията (не в архива), за фона в таб 2 „3D план на етажа“."""
     st.session_state.setdefault("drawing_files", {})[drawing_file_key(drawing)] = {
         "name": uploaded_file.name, "type": uploaded_file.type, "data": uploaded_file.getvalue()}
 
@@ -513,8 +513,8 @@ def get_element_accessories(elem_type, row):
         res[code] = qty * cnt
     return res
 
-# Складова наличност (таб 5): елементите в реда от „1. Наличности.xlsx“ (лист „Складова наличност“).
-# Таблицата се редактира в таб 5 и се пази в архива (лист „Наличност“, обща за всички проекти);
+# Складова наличност (таб 6): елементите в реда от „1. Наличности.xlsx“ (лист „Складова наличност“).
+# Таблицата се редактира в таб 6 и се пази в архива (лист „Наличност“, обща за всички проекти);
 # без архив - само докато страницата е отворена. Празен архив - този списък с празна наличност.
 # Складът - същите артикули и ред като „Кол. сметка“ в Excel („1. Оферта – софтуер.xlsx“, потребителят 18.11.2026);
 # наличността не е в кода - зарежда се от Excel („📥 Зареди от Excel“) или се пише в таблицата
@@ -533,7 +533,7 @@ def load_stock_once():
     stock_df, modified = None, None
     try:
         stock_df, modified = projects_store.load_stock()
-    except Exception as exc:  # noqa: BLE001 - архивът не е достъпен, таб 5 работи без него
+    except Exception as exc:  # noqa: BLE001 - архивът не е достъпен, таб 6 работи без него
         st.session_state["stock_error"] = f"{type(exc).__name__}: {exc}"
     st.session_state["stock_df"] = stock_df if stock_df is not None else default_stock_df()
     st.session_state["stock_modified"] = modified
@@ -546,7 +546,7 @@ def reload_stock():
     load_stock_once()
 
 def store_stock(stock_df):
-    """Записва наличността в сесията и в архива; при грешка в архива - съобщение в таб 5."""
+    """Записва наличността в сесията и в архива; при грешка в архива - съобщение в таб 6."""
     st.session_state["stock_df"] = stock_df.reset_index(drop=True)
     st.session_state.pop("stock_error", None)
     st.session_state.pop("excel_bytes", None)   # колоната „Наличност в склада“ в Excel - наново
@@ -572,19 +572,61 @@ def stock_key(name):
     return None
 
 def project_requirements(df_calc):
-    """Нужните бройки за проекта (панели и аксесоари, по броя елементи), събрани по stock_key."""
-    need = {}
+    """
+    Нужните бройки за проекта (панели и аксесоари, по броя елементи), събрани по stock_key;
+    с корекциите от таб 3 (продадено по-малко - по-малко от склада).
+    """
+    bom = {}
     for _, row in df_calc.iterrows():
         elem_type = str(row.get("type", "wall"))
         try:
             items = {**get_element_teko_panels(elem_type, row), **get_element_accessories(elem_type, row)}
         except Exception:
-            continue  # грешен ред - предупреждението за размерите е в таб 2
+            continue  # грешен ред - предупреждението за размерите е в таб 3
         for code, qty in items.items():
-            key = stock_key(code)
-            if key:
-                need[key] = need.get(key, 0) + qty
+            bom[code] = bom.get(code, 0) + qty
+    need = {}
+    for code, qty in apply_corrections(bom).items():
+        key = stock_key(code)
+        if key and qty:
+            need[key] = need.get(key, 0) + qty
     return need
+
+# ==========================================
+# КОРЕКЦИИ НА БРОЙКИТЕ (таб 3, потребителят 26.11.2026)
+# ==========================================
+# Общите бройки на проекта (панели и аксесоари) се коригират на ръка - напр. по-малко вертикализатори, защото
+# клиентът вече ги има. Реденето и сметките на елементите не се пипат; корекцията е върху общата сметка и
+# влиза в теглата в таб 3, „Кол. сметка“ в Excel, общата сметка в PDF и нужното от склада (таб 6).
+# Пази се с проекта: {код: [коригиран брой, изчислен брой при корекцията]}.
+BOM_PANEL_PREFIXES = ("TK ", "TC ")
+
+def stored_corrections():
+    """Корекциите на отворения проект: {код: [коригиран брой, изчислен брой при корекцията]}."""
+    project = projects_store.get_project(st.session_state.get("projects", {}),
+                                         st.session_state.get("current_project"))
+    return dict((project or {}).get("corrections") or {})
+
+def apply_corrections(bom, corrections=None):
+    """Сметката {код: брой} с корекциите от таб 3 (коригираният брой вместо изчисления; 0 - изтрит)."""
+    corrections = stored_corrections() if corrections is None else corrections
+    result = dict(bom)
+    for code, (qty, _calc) in corrections.items():
+        result[code] = qty
+    return {code: qty for code, qty in result.items() if qty}
+
+def corrected_bom():
+    """Само коригираните бройки {код: брой} - за Excel (generate_excel)."""
+    return {code: qty for code, (qty, _calc) in stored_corrections().items()}
+
+def bom_item_codes(panels):
+    """Артикулите, които могат да се добавят в таблицата Панели (panels=True) или Аксесоари: кодовете от КСС."""
+    codes = []
+    for name, item_codes in KSS_ITEMS:
+        for code in item_codes or [name]:   # FP, AC, Тапа нямат код - по името
+            if code.startswith(BOM_PANEL_PREFIXES) == panels and code not in codes:
+                codes.append(code)
+    return codes
 
 def stock_available():
     """
@@ -627,7 +669,7 @@ def update_stock_plan(df_calc):
         try:
             layout = row_to_layout(elem_type, row)
         except Exception:
-            continue  # грешен ред - предупреждението за размерите е в таб 2
+            continue  # грешен ред - предупреждението за размерите е в таб 3
         if layout is None:
             continue
         key = row_layout_key(elem_type, row)
@@ -650,7 +692,7 @@ def stock_plan_signature(elem_type, row):
     return repr((layout["height_levels"], [face["rows"] for face in layout["faces"]]))
 
 def show_stock_layout_notes(df_calc):
-    """Какво е сменено при „Редене според складовата наличност“ (табове 1 и 2)."""
+    """Какво е сменено при „Редене според складовата наличност“ (табове 1 и 3)."""
     if not st.session_state.get("stock_layout_on"):
         return
     plan = st.session_state.get("stock_plan", {})
@@ -725,7 +767,7 @@ def kss_prices():
     return result
 
 def render_prices_box():
-    """„💶 Цени от Excel“ в таб 2 (вариант А, 20.11.2026): цените влизат в колона „Ед. Цена“ на „Кол. сметка“."""
+    """„💶 Цени от Excel“ в таб 3 (вариант А, 20.11.2026): цените влизат в колона „Ед. Цена“ на „Кол. сметка“."""
     load_prices_once()
     prices_df = st.session_state.get("prices_df")
     count = 0 if prices_df is None else len(prices_df)
@@ -799,7 +841,7 @@ def stock_shortages(df_calc):
     return short, missing
 
 def show_stock_warnings(df_calc):
-    """Предупреждения при недостиг в склада (табове 1, 2 и 5)."""
+    """Предупреждения при недостиг в склада (табове 1, 3 и 6)."""
     short, missing = stock_shortages(df_calc)
     if short:
         lines = [t("- **{k}**: нужни {q} бр., на склад {a} бр. (не стигат {d} бр.)",
@@ -1400,11 +1442,11 @@ with col_edit.popover(t("✏️ Промени"), use_container_width=True,
 col_back.button(t("← Проекти"), on_click=close_project, use_container_width=True,
                 help=t("Записва таблицата и се връща към списъка с проекти."))
 
-load_stock_once()  # преди табовете - предупрежденията за наличността са и в табове 1 и 2
-# 3D планът - веднага след таблица 1 (потребителят, 25.11.2026); в кода остава tab6
-tab1, tab6, tab2, tab3, tab4, tab5 = st.tabs([t(label) for label in (
+load_stock_once()  # преди табовете - предупрежденията за наличността са и в табове 1 и 3
+# 3D планът - веднага след таблица 1 (потребителят, 25.11.2026); номерата - по реда на табовете (26.11.2026)
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([t(label) for label in (
     "📐 Чертеж и Редактиране",
-    "🏗️ 3D план на етажа",
+    "🏗️ 3D план",
     "🧱 Кофражни Елементи и Панели TEKO",
     "📄 PDF Чертежи",
     "📄 Оферта",
@@ -1658,7 +1700,7 @@ with tab1:
                                     for e in elements_list:
                                         if isinstance(e, dict):
                                             e.pop("source", None)
-                                    # местата в плана - за таб 6 (потребителят, 24.11.2026), не колона
+                                    # местата в плана - за таб 2 (потребителят, 24.11.2026), не колона
                                     st.session_state.setdefault("drawing_places", {})[drawing_file_key(drawing)] = [
                                         {"type": e.get("type"), "name": e.get("name"), "places": e.pop("places", None)}
                                         for e in elements_list if isinstance(e, dict)]
@@ -1695,7 +1737,7 @@ with tab1:
                                     if double_check:
                                         notes += double_check_notes(blueprint_data.get("double_check") or [])
                                     st.session_state.setdefault("drawing_notes", {})[drawing] = notes + sources
-                                    # самият чертеж - за фона в „3D план на етажа“ (без ново качване в таб 6)
+                                    # самият чертеж - за фона в „3D план на етажа“ (без ново качване в таб 2)
                                     keep_drawing_file(drawing, uploaded_file)
                                 except Exception as e:
                                     st.error(t("Грешка при анализа: {error}", error=e))
@@ -1874,11 +1916,116 @@ def doc_language_select(key, on_change=None):
                         on_change=on_change, width=260,
                         help=t("Езикът, на който се генерира файлът (екранът не се сменя)."))
 
-# Табове 2-4: всеки е отделна част (st.fragment) - поле или бутон в таба презарежда само него.
+def bom_summary_table(calc_summary, corrections, panels):
+    """
+    Таблицата Панели (panels=True) или Аксесоари в таб 3 с корекциите: (DataFrame, общо тегло в kg).
+    „Изчислено“ - от реденето; „Общ брой“ - коригираният брой (без корекция - изчисленият); теглата - по него.
+    """
+    codes = set(calc_summary) | {c for c in corrections if c.startswith(BOM_PANEL_PREFIXES) == panels}
+    rows, total_w = [], 0.0
+    for code in sorted(codes):
+        qty = corrections[code][0] if code in corrections else calc_summary.get(code, 0)
+        unit_w = get_item_weight(code)
+        total_w += unit_w * qty
+        rows.append({
+            t("Код на панела / коф. елемент") if panels else t("Аксесоар / Окомплектовка"): t_item(code),
+            t("Изчислено (бр.)"): calc_summary.get(code, 0),
+            t("Общ брой (бр.)"): qty,
+            t("Ед. тегло (kg)"): round(unit_w, 2),
+            t("Общо тегло (kg)"): round(unit_w * qty, 2),
+        })
+    df = pd.DataFrame(rows, columns=[t("Код на панела / коф. елемент") if panels else t("Аксесоар / Окомплектовка"),
+                                     t("Изчислено (бр.)"), t("Общ брой (бр.)"), t("Ед. тегло (kg)"),
+                                     t("Общо тегло (kg)")])
+    if not df.empty:
+        df.index = range(1, len(df) + 1)
+    return df, total_w
+
+def corrections_from_tables(edited, calc):
+    """
+    Корекциите от редактираните таблици в таб 3: {код: [брой, изчислен]} само където бройката се различава
+    от изчислената. Изтрит ред - 0; нов ред - избраният артикул и бройката; два реда с един артикул - сборът.
+    """
+    final = {}
+    for df, panels in edited:
+        codes = bom_item_codes(panels) + [c for c in calc if c.startswith(BOM_PANEL_PREFIXES) == panels]
+        labels = {t_item(code): code for code in codes}
+        for _, row in df.iterrows():
+            code = labels.get(row.iloc[0])
+            qty = pd.to_numeric(row[t("Общ брой (бр.)")], errors="coerce")
+            if code is None or pd.isna(qty):
+                continue
+            final[code] = final.get(code, 0) + max(0, int(round(float(qty))))
+    result = {}
+    for code in set(final) | set(calc):
+        qty, calc_qty = final.get(code, 0), calc.get(code, 0)
+        if qty != calc_qty:
+            result[code] = [qty, calc_qty]
+    return result
+
+def save_corrections(corrections):
+    """Записва корекциите в проекта (и в архива) и презарежда цялата страница - табове 1, 4 и 6 следват."""
+    projects_store.save_project(st.session_state["projects"], st.session_state["current_project"],
+                                corrections=corrections)
+    st.session_state.pop("excel_bytes", None)   # готовият Excel е със старите бройки
+    st.session_state["bom_editor_version"] = st.session_state.get("bom_editor_version", 0) + 1
+    st.rerun()
+
+def render_bom_corrections(df_panels, w_panels, df_acc, w_acc, calc, corrections):
+    """
+    Таблиците Панели и Аксесоари в таб 3 - редактируеми (потребителят, 26.11.2026): смяна на бройката,
+    изтриване на ред (кошчето) и нов ред („+“) с артикул от КСС; важи след „💾 Запази корекциите“.
+    """
+    if corrections:
+        lines = []
+        for code, (qty, calc_then) in sorted(corrections.items()):
+            line = t("- **{item}**: изчислено {c} бр. → {q} бр.", item=t_item(code), c=calc.get(code, 0), q=qty)
+            if calc.get(code, 0) != calc_then:
+                line += t(" ⚠️ изчисленото се е сменило след корекцията (беше {old} бр.) - проверете",
+                          old=calc_then)
+            lines.append(line)
+        st.info(t("✏️ Коригирани бройки (влизат в теглото, Excel „Кол. сметка“, PDF и склада):") + "\n" +
+                "\n".join(lines))
+    version = st.session_state.get("bom_editor_version", 0)
+    tables = []
+    with st.form("bom_corrections_form", border=False):
+        col_p1, col_p2 = st.columns(2)
+        for col, df, weight, panels in ((col_p1, df_panels, w_panels, True), (col_p2, df_acc, w_acc, False)):
+            with col:
+                if panels:
+                    st.subheader(t("📦 Панели TEKO (Общо: {w} kg)", w=f"{weight:.2f}"))
+                else:
+                    st.subheader(t("Аксесоари и Ъгли (Общо: {w} kg)", w=f"{weight:.2f}"))
+                options = [t_item(code) for code in
+                           bom_item_codes(panels) + sorted(c for c in calc if c.startswith(BOM_PANEL_PREFIXES) == panels)]
+                options = list(dict.fromkeys(options))
+                edited = st.data_editor(
+                    df, key=f"bom_{'panels' if panels else 'acc'}_{version}", num_rows="dynamic",
+                    use_container_width=True,
+                    column_config={
+                        df.columns[0]: st.column_config.SelectboxColumn(options=options, required=True),
+                        t("Изчислено (бр.)"): st.column_config.NumberColumn(disabled=True, format="%d"),
+                        t("Общ брой (бр.)"): st.column_config.NumberColumn(min_value=0, step=1, format="%d",
+                                                                         required=True),
+                        t("Ед. тегло (kg)"): st.column_config.NumberColumn(disabled=True),
+                        t("Общо тегло (kg)"): st.column_config.NumberColumn(disabled=True),
+                    })
+                tables.append((edited, panels))
+        st.caption(t("✏️ Бройките могат да се коригират (напр. по-малко вертикализатори - клиентът вече ги има): "
+                     "сменете „Общ брой“, изтрийте ред (кошчето) или добавете артикул („+“ под таблицата). "
+                     "Реденето и сметките на елементите не се сменят."))
+        saved = st.form_submit_button(t("💾 Запази корекциите"), type="primary")
+    if saved:
+        save_corrections(corrections_from_tables(tables, calc))
+    if corrections and st.button(t("↺ Върни изчислените бройки"), key="reset_bom_corrections",
+                                 help=t("Маха всички корекции - бройките стават пак изчислените.")):
+        save_corrections({})
+
+# Табове 3-5: всеки е отделна част (st.fragment) - поле или бутон в таба презарежда само него.
 # Таблицата се сменя само в таб 1, а това презарежда цялата страница и всички табове.
 @st.fragment
 def render_specification_tab(df_calc):
-    st.header(t("2. Спецификация на кофражните елементи и панели TEKO"))
+    st.header(t("3. Спецификация на кофражните елементи и панели TEKO"))
     
     if df_calc.empty or len(df_calc) == 0:
         st.info(t("ℹ️ Въведете елементи в Таб 1 и натиснете 'Запази и Изчисли'."))
@@ -1928,37 +2075,9 @@ def render_specification_tab(df_calc):
         if not df_detailed.empty:
             df_detailed.index = range(1, len(df_detailed) + 1)
 
-        panels_sum_data = []
-        total_panels_weight = 0.0
-        for k, v in sorted(project_panels_summary.items()):
-            unit_w = get_item_weight(k)
-            tot_w = unit_w * v
-            total_panels_weight += tot_w
-            panels_sum_data.append({
-                t("Код на панела / коф. елемент"): t_item(k),
-                t("Общ брой (бр.)"): v,
-                t("Ед. тегло (kg)"): round(unit_w, 2),
-                t("Общо тегло (kg)"): round(tot_w, 2)
-            })
-        df_panels_sum = pd.DataFrame(panels_sum_data)
-        if not df_panels_sum.empty:
-            df_panels_sum.index = range(1, len(df_panels_sum) + 1)
-
-        acc_sum_data = []
-        total_acc_weight = 0.0
-        for k, v in sorted(project_accessories_summary.items()):
-            unit_w = get_item_weight(k)
-            tot_w = unit_w * v
-            total_acc_weight += tot_w
-            acc_sum_data.append({
-                t("Аксесоар / Окомплектовка"): t_item(k),
-                t("Общ брой (бр.)"): v,
-                t("Ед. тегло (kg)"): round(unit_w, 2),
-                t("Общо тегло (kg)"): round(tot_w, 2)
-            })
-        df_acc_sum = pd.DataFrame(acc_sum_data)
-        if not df_acc_sum.empty:
-            df_acc_sum.index = range(1, len(df_acc_sum) + 1)
+        corrections = stored_corrections()
+        df_panels_sum, total_panels_weight = bom_summary_table(project_panels_summary, corrections, True)
+        df_acc_sum, total_acc_weight = bom_summary_table(project_accessories_summary, corrections, False)
 
         total_formwork_weight = total_panels_weight + total_acc_weight
 
@@ -1979,15 +2098,8 @@ def render_specification_tab(df_calc):
         st.dataframe(df_detailed, use_container_width=True)
 
         st.divider()
-        col_p1, col_p2 = st.columns(2)
-        
-        with col_p1:
-            st.subheader(t("📦 Панели TEKO (Общо: {w} kg)", w=f"{total_panels_weight:.2f}"))
-            st.dataframe(df_panels_sum, use_container_width=True)
-
-        with col_p2:
-            st.subheader(t("Аксесоари и Ъгли (Общо: {w} kg)", w=f"{total_acc_weight:.2f}"))
-            st.dataframe(df_acc_sum, use_container_width=True)
+        render_bom_corrections(df_panels_sum, total_panels_weight, df_acc_sum, total_acc_weight,
+                               {**project_panels_summary, **project_accessories_summary}, corrections)
 
         st.divider()
         st.subheader(t("📊 КСС и чертежи в Excel"))
@@ -1999,7 +2111,8 @@ def render_specification_tab(df_calc):
         if st.button(t("📊 Създай Excel (КСС и чертежи)"), key="make_excel"):
             with st.spinner(t("Генериране на Excel...")), document_language(excel_lang):
                 st.session_state["excel_bytes"] = generate_excel(build_drawing_elements(df_calc),
-                                                                 kss_stock(), kss_prices()).getvalue()
+                                                                 kss_stock(), kss_prices(),
+                                                                 corrected_bom()).getvalue()
         if st.session_state.get("excel_bytes"):
             st.download_button(
                 label=t("📥 Изтегли КСС и чертежи (Excel .xlsx)"),
@@ -2011,7 +2124,7 @@ def render_specification_tab(df_calc):
 
 @st.fragment
 def render_pdf_tab(df_calc, current):
-    st.header(t("3. Генериране на PDF чертежи и спецификации"))
+    st.header(t("4. Генериране на PDF чертежи и спецификации"))
     if df_calc.empty or len(df_calc) == 0:
         st.info(t("ℹ️ Въведете елементи в Таб 1, за да генерирате чертежи."))
     else:
@@ -2024,18 +2137,20 @@ def render_pdf_tab(df_calc, current):
             with st.spinner(t("Генериране на векторни чертежи и PDF документ...")), document_language(pdf_lang):
                 pdf_elements = build_drawing_elements(df_calc)
 
-                # общата сметка - сборът от сметките на елементите (същите числа като в таб 2)
+                # общата сметка - сборът от сметките на елементите (същите числа като в таб 3)
                 project_full_bom = {}
                 for elem in pdf_elements:
                     for code, qty in elem["bom"].items():
                         project_full_bom[code] = project_full_bom.get(code, 0) + qty
+                project_full_bom = apply_corrections(project_full_bom)   # корекциите от таб 3
 
                 proj_info = {
                     "project": proj_name_input,
                     "client": client_name_input
                 }
 
-                pdf_bytes = generate_pdf_drawings(pdf_elements, project_full_bom, proj_info)
+                pdf_bytes = generate_pdf_drawings(pdf_elements, project_full_bom, proj_info,
+                                                  corrected=set(stored_corrections()))
                 st.success(t("✅ PDF чертежите бяха генерирани успешно!"))
                 st.download_button(
                     label=t("📥 Изтегли пълен PDF с чертежи и спецификации"),
@@ -2047,7 +2162,7 @@ def render_pdf_tab(df_calc, current):
 
 @st.fragment
 def render_offer_tab(df_calc, current):
-    st.header(t("4. Търговска оферта"))
+    st.header(t("5. Търговска оферта"))
     if df_calc.empty or len(df_calc) == 0:
         st.info(t("ℹ️ Въведете елементи в Таб 1, за да генерирате оферта."))
     else:
@@ -2104,7 +2219,7 @@ def render_offer_tab(df_calc, current):
 
 @st.fragment
 def render_stock_tab(df_calc):
-    st.header(t("5. Складова наличност"))
+    st.header(t("6. Складова наличност"))
     show_stock_warnings(df_calc)
     if st.session_state.get("stock_error"):
         st.error(t("Архивът в Google не е достъпен ({error}). Наличността се пази само докато страницата е "
@@ -2154,7 +2269,7 @@ def render_stock_tab(df_calc):
             store_stock(edited_stock[STOCK_COLUMNS])
             # както в таб 1: таблицата се показва наново от записаните данни, иначе следващата промяна се губи
             st.session_state.pop("stock_editor", None)
-            st.rerun()  # цялата страница - предупрежденията в табове 1 и 2 също се обновяват
+            st.rerun()  # цялата страница - предупрежденията в табове 1 и 3 също се обновяват
 
     st.subheader("Excel")
     stock_lang = doc_language_select("doc_lang_stock")
@@ -2186,7 +2301,7 @@ def render_stock_tab(df_calc):
         st.success(t("✅ Заредени {n} реда от Excel.", n=st.session_state.pop("stock_loaded")))
 
 
-# === 3D план на етажа (таб 6, потребителят 22.11.2026) ===
+# === 3D план на етажа (таб 2, потребителят 22.11.2026) ===
 # Елементите на един чертеж се подреждат с мишката в изглед отгоре (приблизително) и се чертаят заедно в 3D -
 # отделен PDF. Местата се пазят само докато страницата е отворена (не се записват в архива).
 FLOOR_BG_MAX_PX = 2400  # чертежът като фон - най-много толкова пиксела по дългата страна
@@ -2218,7 +2333,7 @@ def floor_pieces(df_part):
 
 
 # Промени от плана (потребителят, 24.11.2026, вариант А): нов елемент, промяна на име и размери, копирай / постави,
-# изтрий - направо в таблица 1 и в архива; сметките (табове 2-5) следват таблицата
+# изтрий - направо в таблица 1 и в архива; сметките (табове 3-6) следват таблицата
 FLOOR_FIELDS = {"column": ["l1_cm", "thickness1_cm", "height_cm"],
                 "wall": ["l1_cm", "thickness1_cm", "height_cm"],
                 "l_wall": ["l1_cm", "thickness1_cm", "l2_cm", "thickness2_cm", "height_cm"],
@@ -2251,7 +2366,7 @@ def element_signature(row):
 
 
 def floor_element_fields(prefix, elem_type, row):
-    """Полетата на елемента в таб 6 (както колоните на таблица 1) -> стойностите; row - сегашните (или {})."""
+    """Полетата на елемента в таб 2 (както колоните на таблица 1) -> стойностите; row - сегашните (или {})."""
     name = row.get("name")
     name = "" if name is None or (not isinstance(name, str) and pd.isna(name)) else str(name)
     values = {"name": st.text_input(t("Наименование / Маркировка"), value=name, key=f"{prefix}_name").strip()}
@@ -2518,7 +2633,7 @@ def render_floor_edit(store, pieces, drawing, fkey, result, row_width_cm, side):
 
 @st.fragment
 def render_floor_tab(df_calc, current):
-    st.header(t("6. 3D план на етажа"))
+    st.header(t("2. 3D план"))
     if st.session_state.pop("floor_saved", False):
         st.success(t("✅ Таблица 1 е обновена и проектът е записан."))
     df_calc = df_calc.reset_index(drop=True)   # редовете по позиция - както в таблица 1 (промените от плана)
@@ -2722,12 +2837,12 @@ df_calc = fill_default_height(st.session_state["edited_df"],
                               st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM))
 update_stock_plan(df_calc)
 with tab2:
-    render_specification_tab(df_calc)
-with tab3:
-    render_pdf_tab(df_calc, current)
-with tab4:
-    render_offer_tab(df_calc, current)
-with tab5:
-    render_stock_tab(df_calc)
-with tab6:
     render_floor_tab(df_calc, current)
+with tab3:
+    render_specification_tab(df_calc)
+with tab4:
+    render_pdf_tab(df_calc, current)
+with tab5:
+    render_offer_tab(df_calc, current)
+with tab6:
+    render_stock_tab(df_calc)
