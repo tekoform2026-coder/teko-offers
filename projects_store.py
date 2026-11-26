@@ -5,12 +5,14 @@
 use_archive) всяка промяна се записва и в таблицата „TEKO Проекти“, а refresh() зарежда общия списък.
 Без архив (напр. в тестовете или без ключ в secrets) проектите се губят при презареждане.
 Проект: id, name, client, date, created, modified, elements (таблицата с елементите), std_height_cm,
-stock_layout (отметката „Редене според складовата наличност“).
+stock_layout (отметката „Редене според складовата наличност“), corrections (корекциите на бройките в таб 3:
+{код: [коригиран брой, изчислен брой при корекцията]}; 26.11.2026).
 
-Складовата наличност (таб 5) е обща за всички проекти: load_stock() / save_stock(), в архива - лист „Наличност“;
+Складовата наличност (таб 6) е обща за всички проекти: load_stock() / save_stock(), в архива - лист „Наличност“;
 при всеки запис предишната наличност се добавя в лист „Наличност - история“ (резервно копие).
 Единичните цени (за „Кол. сметка“ в Excel) са общи: load_prices() / save_prices(), в архива - лист „Цени“.
 """
+import json
 import math
 import uuid
 from datetime import date, datetime
@@ -53,7 +55,7 @@ def _now(now):
 
 
 def new_project(store, name, client="", project_date=None, std_height_cm=270, elements=None, now=None,
-                stock_layout=False):
+                stock_layout=False, corrections=None):
     """Създава празен проект и връща неговото id."""
     stamp = _now(now)
     pid = uuid.uuid4().hex
@@ -67,6 +69,7 @@ def new_project(store, name, client="", project_date=None, std_height_cm=270, el
         "elements": None if elements is None else elements.copy(),
         "std_height_cm": std_height_cm,
         "stock_layout": bool(stock_layout),
+        "corrections": dict(corrections or {}),
     }
     if _archive is not None:
         _archive.write_project(store[pid], with_elements=True)
@@ -82,8 +85,11 @@ def get_project(store, pid):
     return store.get(pid)
 
 
-def save_project(store, pid, elements=None, std_height_cm=None, now=None, stock_layout=None):
-    """Записва таблицата, височината и редене по склада в проекта; „Последна промяна“ се мени само ако има промяна."""
+def save_project(store, pid, elements=None, std_height_cm=None, now=None, stock_layout=None, corrections=None):
+    """
+    Записва таблицата, височината, редене по склада и корекциите на бройките (таб 3) в проекта;
+    „Последна промяна“ се мени само ако има промяна.
+    """
     project = store[pid]
     changed = elements_changed = False
     if elements is not None:
@@ -96,6 +102,9 @@ def save_project(store, pid, elements=None, std_height_cm=None, now=None, stock_
         changed = True
     if stock_layout is not None and bool(stock_layout) != project.get("stock_layout", False):
         project["stock_layout"] = bool(stock_layout)
+        changed = True
+    if corrections is not None and dict(corrections) != project.get("corrections", {}):
+        project["corrections"] = dict(corrections)
         changed = True
     if changed:
         project["modified"] = _now(now)
@@ -123,7 +132,7 @@ def duplicate_project(store, pid, now=None):
     src = store[pid]
     return new_project(store, src["name"] + COPY_SUFFIX, src["client"], src["date"],
                        src["std_height_cm"], src["elements"], now=now,
-                       stock_layout=src.get("stock_layout", False))
+                       stock_layout=src.get("stock_layout", False), corrections=src.get("corrections"))
 
 
 def delete_project(store, pid):
@@ -217,6 +226,24 @@ def _elements_from_rows(rows):
     return pd.DataFrame(records, columns=ELEMENT_COLUMNS)
 
 
+def _parse_corrections(value):
+    """Колоната „Корекции“ (JSON): {код: [брой, изчислен]}; празна или повредена - без корекции."""
+    try:
+        data = json.loads(value) if str(value).strip() else {}
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    result = {}
+    for code, pair in data.items():
+        try:
+            qty, calc = pair
+            result[str(code)] = [int(qty), int(calc)]
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
 def _parse_date(value):
     if isinstance(value, (int, float)):   # дата като число на Google (дни от 30.12.1899)
         return (pd.Timestamp("1899-12-30") + pd.Timedelta(days=value)).date()
@@ -235,7 +262,7 @@ def _parse_datetime(value):
 PROJECTS_SHEET = "Проекти"
 ELEMENTS_SHEET = "Елементи"
 PROJECT_HEADER = ["id", "Име", "Клиент", "Дата", "Създаден", "Последна промяна",
-                  "Стандартна височина", "Изтрит", "Редене по склада"]
+                  "Стандартна височина", "Изтрит", "Редене по склада", "Корекции"]
 ELEMENT_HEADER = ["project_id", "Ред №"] + ELEMENT_COLUMNS
 DELETED_MARK = "да"
 STOCK_LAYOUT_MARK = "да"   # „Редене по склада“ - отметката е включена
@@ -246,7 +273,7 @@ STOCK_HEADER = ["Ред №"] + STOCK_COLUMNS + ["Последна промян�
 # Резервно копие (потребителят, 20.11.2026): предишната наличност при всеки запис, с времето на замяната
 STOCK_HISTORY_SHEET = "Наличност - история"
 STOCK_HISTORY_HEADER = ["Заменена на"] + STOCK_HEADER
-# Единичните цени (потребителят, 20.11.2026) - от „💶 Цени от Excel“ в таб 2, не в кода
+# Единичните цени (потребителят, 20.11.2026) - от „💶 Цени от Excel“ в таб 3, не в кода
 PRICES_SHEET = "Цени"
 PRICE_COLUMNS = ["Елемент", "Ед. цена"]
 PRICES_HEADER = ["Ред №"] + PRICE_COLUMNS + ["Последна промяна"]
@@ -296,7 +323,8 @@ class GoogleSheetsArchive:
         store = {}
         for row in self._values(self.projects):
             row = list(row) + [""] * (len(PROJECT_HEADER) - len(row))
-            pid, name, client, day, created, modified, height, deleted, by_stock = row[:len(PROJECT_HEADER)]
+            pid, name, client, day, created, modified, height, deleted, by_stock, corrections = \
+                row[:len(PROJECT_HEADER)]
             if not pid or str(deleted).strip().lower() == DELETED_MARK:
                 continue
             rows = sorted(by_project.get(pid, []), key=lambda r: r[1])
@@ -307,6 +335,7 @@ class GoogleSheetsArchive:
                 "elements": _elements_from_rows([r[2:] for r in rows]),
                 "std_height_cm": int(height) if height != "" else 270,
                 "stock_layout": str(by_stock).strip().lower() == STOCK_LAYOUT_MARK,
+                "corrections": _parse_corrections(corrections),
             }
         return store
 
@@ -320,7 +349,8 @@ class GoogleSheetsArchive:
                   pd.Timestamp(project["date"]).strftime("%Y-%m-%d"),
                   project["created"].isoformat(timespec="seconds"),
                   project["modified"].isoformat(timespec="seconds"),
-                  project["std_height_cm"], "", STOCK_LAYOUT_MARK if project.get("stock_layout") else ""]
+                  project["std_height_cm"], "", STOCK_LAYOUT_MARK if project.get("stock_layout") else "",
+                  json.dumps(project["corrections"], ensure_ascii=False) if project.get("corrections") else ""]
         number = self._project_row_number(project["id"])
         if number is None:
             self.projects.append_rows([values], value_input_option="RAW")
