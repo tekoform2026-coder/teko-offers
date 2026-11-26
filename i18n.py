@@ -170,10 +170,10 @@ EN = {
     "📄 PDF Чертежи": "📄 PDF Drawings",
     "📄 Оферта": "📄 Offer",
     "📦 Складова наличност": "📦 Stock",
-    "🏗️ 3D план на етажа": "🏗️ 3D Floor Plan",
+    "🏗️ 3D план": "🏗️ 3D Plan",
 
-    # Таб 6 - 3D план на етажа (22.11.2026)
-    "6. 3D план на етажа": "6. 3D floor plan",
+    # Таб 2 - 3D план на етажа (22.11.2026)
+    "2. 3D план": "2. 3D plan",
     "Чертеж (етаж):": "Drawing (floor):",
     "🖼️ Чертежът като фон": "🖼️ The drawing as a background",
     "Друг файл за фон (PDF или картина) - само ако не е разчетеният в таб 1:":
@@ -522,8 +522,8 @@ EN = {
     "✅ Редене според складовата наличност: всички панели по алгоритъма са налични.":
         "✅ Layout by available stock: all panels of the algorithm layout are in stock.",
 
-    # Таб 2
-    "2. Спецификация на кофражните елементи и панели TEKO": "2. Specification of formwork elements and TEKO panels",
+    # Таб 3
+    "3. Спецификация на кофражните елементи и панели TEKO": "3. Specification of formwork elements and TEKO panels",
     "ℹ️ Въведете елементи в Таб 1 и натиснете 'Запази и Изчисли'.":
         "ℹ️ Enter elements in Tab 1 and click 'Save and Calculate'.",
     "Елемент": "Element",
@@ -533,6 +533,22 @@ EN = {
     "Панели TEKO (Вид и брой)": "TEKO panels (type and qty)",
     "Код на панела / коф. елемент": "Panel / formwork element code",
     "Общ брой (бр.)": "Total qty (pcs)",
+    "Изчислено (бр.)": "Calculated (pcs)",
+    "- **{item}**: изчислено {c} бр. → {q} бр.": "- **{item}**: calculated {c} pcs → {q} pcs",
+    " ⚠️ изчисленото се е сменило след корекцията (беше {old} бр.) - проверете":
+        " ⚠️ the calculated quantity changed after the correction (was {old} pcs) - please check",
+    "✏️ Коригирани бройки (влизат в теглото, Excel „Кол. сметка“, PDF и склада):":
+        "✏️ Corrected quantities (used in the weight, Excel “Bill of quantities”, PDF and stock):",
+    "✏️ Бройките могат да се коригират (напр. по-малко вертикализатори - клиентът вече ги има): "
+    "сменете „Общ брой“, изтрийте ред (кошчето) или добавете артикул („+“ под таблицата). "
+    "Реденето и сметките на елементите не се сменят.":
+        "✏️ Quantities can be corrected (e.g. fewer props - the client already has them): change “Total qty”, "
+        "delete a row (the bin) or add an item (“+” below the table). The panel layout and the element "
+        "quantities are not changed.",
+    "💾 Запази корекциите": "💾 Save corrections",
+    "↺ Върни изчислените бройки": "↺ Restore calculated quantities",
+    "Маха всички корекции - бройките стават пак изчислените.":
+        "Removes all corrections - the quantities return to the calculated ones.",
     "Ед. тегло (kg)": "Unit weight (kg)",
     "Общо тегло (kg)": "Total weight (kg)",
     "Аксесоар / Окомплектовка": "Accessory / Fittings",
@@ -557,10 +573,10 @@ EN = {
     "Езикът, на който се генерира файлът (екранът не се сменя).":
         "The language the file is generated in (the screen does not change).",
 
-    # Таб 3
-    "3. Генериране на PDF чертежи и спецификации": "3. PDF drawings and specifications",
+    # Таб 4
+    "4. Генериране на PDF чертежи и спецификации": "4. PDF drawings and specifications",
     "ℹ️ Въведете елементи в Таб 1, за да генерирате чертежи.": "ℹ️ Enter elements in Tab 1 to generate drawings.",
-    # различен от „Име на обект:“ в таб 4 - еднакъв надпис и стойност дават грешка в Streamlit
+    # различен от „Име на обект:“ в таб 5 - еднакъв надпис и стойност дават грешка в Streamlit
     "Наименование на обекта:": "Project / site name:",
     "Име на клиент / инвеститор:": "Client / investor name:",
     "📄 Генерирай PDF Чертежи на обект": "📄 Generate the site PDF drawings",
@@ -568,8 +584,8 @@ EN = {
     "✅ PDF чертежите бяха генерирани успешно!": "✅ The PDF drawings were generated successfully!",
     "📥 Изтегли пълен PDF с чертежи и спецификации": "📥 Download the full PDF with drawings and specifications",
 
-    # Таб 4
-    "4. Търговска оферта": "4. Commercial offer",
+    # Таб 5
+    "5. Търговска оферта": "5. Commercial offer",
     "ℹ️ Въведете елементи в Таб 1, за да генерирате оферта.": "ℹ️ Enter elements in Tab 1 to generate an offer.",
     "Клиент / Инвеститор:": "Client / Investor:",
     "Име на обект:": "Site name:",
@@ -583,8 +599,8 @@ EN = {
         "✅ The commercial offer was generated in Word format!",
     "📥 Изтегли оферта (Word .docx)": "📥 Download offer (Word .docx)",
 
-    # Таб 5
-    "5. Складова наличност": "5. Stock",
+    # Таб 6
+    "6. Складова наличност": "6. Stock",
     "Архивът в Google не е достъпен ({error}). Наличността се пази само докато страницата е отворена.":
         "The Google archive is not available ({error}). The stock is kept only while the page is open.",
     "Имената, мярката и наличността се редактират в таблицата; ред се добавя с „+“ под таблицата, изтрива се с "
