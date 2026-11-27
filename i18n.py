@@ -644,6 +644,42 @@ EN = {
     "Файлът не може да се прочете: {error}": "The file cannot be read: {error}",
     "Във файла няма редове под „Елемент“.": "The file has no rows under “Елемент”.",
     "✅ Заредени {n} реда от Excel.": "✅ Loaded {n} rows from Excel.",
+    # обединени елементи (27.11.2026)
+    "🔗 Обединен елемент": "🔗 Combined element",
+    "Частите на един обединен елемент (от таб 2 - „🔗 Обедини“) - в сметките, PDF, Excel и офертата излизат като "
+    "един елемент. Изтрито име - частта става отделен елемент.":
+        "The parts of one combined element (from tab 2 - “🔗 Combine”) - shown as one element in the bill of "
+        "quantities, PDF, Excel and the offer. Delete the name to make the part a separate element again.",
+    "край 1": "end 1",
+    "край 2": "end 2",
+    "край 3": "end 3",
+    "**Части ({n}):** {names}": "**Parts ({n}):** {names}",
+    "Име на обединения елемент": "Name of the combined element",
+    "В сметките, PDF, Excel и офертата излиза като „Обединен елемент {name}“; частите се редят както досега.":
+        "Shown as “Combined element {name}” in the bill of quantities, PDF, Excel and the offer; the parts are laid "
+        "out as before.",
+    "**Краища, които опират в друга част** - отварят се (без чело и 2 x EX):":
+        "**Ends that touch another part** - they are opened (no end panel and no 2 x EX):",
+    "{part}: {end} опира в {other}": "{part}: {end} touches {other}",
+    "{label} - вече е отворен.": "{label} - already open.",
+    "Няма краища, които опират в друга част - затворените краища остават затворени.":
+        "No ends touch another part - closed ends stay closed.",
+    "🔗 Обедини": "🔗 Combine",
+    "Напишете име, което го няма в проекта.": "Enter a name that is not used in the project yet.",
+    "🔗 Обединяване на елементи": "🔗 Combine elements",
+    "Ctrl + клик (или Shift + клик) върху елементите в плана, после „🔗 Обедини“ - един обединен елемент с ново име в "
+    "сметките, PDF, Excel и офертата.":
+        "Ctrl + click (or Shift + click) the elements in the plan, then “🔗 Combine” - one combined element with a new "
+        "name in the bill of quantities, PDF, Excel and the offer.",
+    "✂️ Раздели": "✂️ Split",
+    "Частите на „{name}“ стават отделни елементи (отворените краища остават отворени - сложете отметките в таблица 1, "
+    "ако трябва).":
+        "The parts of “{name}” become separate elements (open ends stay open - tick them in table 1 if needed).",
+    "🔗 Част от „{name}“.": "🔗 Part of “{name}”.",
+    "Ctrl + клик - избор на няколко елемента за „🔗 Обедини“.": "Ctrl + click - select several elements to “🔗 Combine”.",
+    "Избрани {n} - „🔗 Обедини“ вдясно ги обединява (Ctrl + клик - добави / махни).":
+        "{n} selected - “🔗 Combine” on the right combines them (Ctrl + click - add / remove).",
+    "🔗 Обединен елемент {name}": "🔗 Combined element {name}",
 }
 
 # Инструкцията за ръчно въвеждане (таб 1)
