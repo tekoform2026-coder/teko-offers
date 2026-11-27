@@ -22,7 +22,7 @@ from accessories_calculator import waler_levels_cm, NARROW_LIMIT_CM
 from teko_calculator import (IN_CORNER_CM, is_compensator_row, thickness_label, t_wall_offset_label, face_row_pieces,
                              shaft_inside_label,
                              panel_height_cm)
-from doc_lang import dt, dt_item, dt_face
+from doc_lang import dt, dt_item, dt_face, dt_num
 
 # Висока резолюция за чисти линии и четливи надписи
 DPI_RESOLUTION = 300
@@ -263,17 +263,17 @@ def _dims_label(layout):
     d = layout["dims"]
     typ = layout["type"]
     if typ == "column":
-        return f"{int(d['a'])}x{int(d['b'])} cm"
+        return f"{dt_num(d['a'])}x{dt_num(d['b'])} cm"
     if typ == "wall":
-        return f"L={int(d['length'])} cm, B={int(d['t'])} cm"
+        return f"L={dt_num(d['length'])} cm, B={dt_num(d['t'])} cm"
     if typ == "l_wall":
-        return f"A={int(d['l1'])}, B={int(d['l2'])}, {thickness_label(layout, ' cm')}"
+        return f"A={dt_num(d['l1'])}, B={dt_num(d['l2'])}, {thickness_label(layout, ' cm')}"
     if typ == "t_wall":
         offset = t_wall_offset_label(layout, " cm")
-        return f"A={int(d['l1'])}, B={int(d['l2'])}, {offset + ', ' if offset else ''}{thickness_label(layout, ' cm')}"
+        return f"A={dt_num(d['l1'])}, B={dt_num(d['l2'])}, {offset + ', ' if offset else ''}{thickness_label(layout, ' cm')}"
     if typ == "shaft":
-        return f"A={int(d['l1'])}, B={int(d['l2'])}, {thickness_label(layout, ' cm')}, {shaft_inside_label(layout, ' cm')}"
-    return f"A={int(d['l1'])}, B={int(d['l2'])}, C={int(d['l3'])}, {thickness_label(layout, ' cm')}"
+        return f"A={dt_num(d['l1'])}, B={dt_num(d['l2'])}, {thickness_label(layout, ' cm')}, {shaft_inside_label(layout, ' cm')}"
+    return f"A={dt_num(d['l1'])}, B={dt_num(d['l2'])}, C={dt_num(d['l3'])}, {thickness_label(layout, ' cm')}"
 
 # ==========================================
 # 3. ИЗГЛЕД ОТГОРЕ (TOP VIEW)
@@ -311,7 +311,7 @@ def _top_view_title(layout, name):
         raw = str(name).strip()
         if raw.lower().startswith("колона"):
             raw = raw[len("колона"):].strip()
-        return f"{raw} {dt('колона')} A={int(d['a'])}, B={int(d['b'])} cm".strip()
+        return f"{raw} {dt('колона')} A={dt_num(d['a'])}, B={dt_num(d['b'])} cm".strip()
     return str(name)
 
 
@@ -497,7 +497,7 @@ def _column_a_dim(layout, strips, walers, props, pt_per_cm):
     от вертикализаторите. Връща (надпис, x, y, половината ширина на надписа в cm).
     """
     _axis, a0, a1, c_lo, _c_hi, _normal = strips["A"]
-    text = f"{int(layout['dims']['a'])} cm"
+    text = f"{dt_num(layout['dims']['a'])} cm"
     half_w = TOP_DIM_FS * _text_width_per_pt(text) / 2 / pt_per_cm
     has_waler = any(x - 0.5 <= (a0 + a1) / 2 <= x + w + 0.5 and y - 0.5 <= c_lo - TOP_WALER_T / 2 <= y + h + 0.5
                     for x, y, w, h in walers)
@@ -598,7 +598,7 @@ def _board_labels(layout, place, strips, walers, props, side_labels, pt_per_cm):
         s = 0
         for w, is_board, _panel_w in (pieces[::-1] if rev and rev[0] else pieces):
             if is_board:
-                text = dt("ДЪСКА {w} см", w=f"{w:g}").replace(".", ",")
+                text = dt("ДЪСКА {w} см", w=dt_num(w))
                 half_w = TOP_BOARD_FS * _text_width_per_pt(text) / pt_per_cm / 2 + 1
                 half_h = TOP_BOARD_FS * 0.7 / pt_per_cm + 1
                 bx, by = (x0 + s + w / 2, y0 + T / 2) if axis == 'x' else (x0 + T / 2, y0 + s + w / 2)
@@ -656,7 +656,7 @@ def generate_top_view_buf(layout, name="Елемент"):
         xs += [a_dim[1] - a_dim[3], a_dim[1] + a_dim[3]]
         ys += [a_dim[2] - 5]
         b_dim = _column_b_dim(side_labels, label_pt_per_cm)
-        b_text = f"{int(layout['dims']['b'])} cm"
+        b_text = f"{dt_num(layout['dims']['b'])} cm"
         ys += [b_dim[1] - TOP_DIM_FS * _text_width_per_pt(b_text) / label_pt_per_cm - 3]
     x_min, x_max = min(xs) - TOP_MARGIN_CM, max(xs) + TOP_MARGIN_CM
     y_min, y_max = min(ys) - TOP_MARGIN_CM, max(ys) + TOP_MARGIN_CM + 8  # място за надписите отгоре
@@ -875,7 +875,7 @@ def _front_view_buf(layout, faces, title=True):
         ax.text(dim_line_x - 4, 0, "0", ha='right', va='center', fontsize=5, fontweight='bold', color='#333333')
 
         ax.plot([dim_line_x - 2, dim_line_x + 2], [h_cm, h_cm], color='#333333', linewidth=0.8)
-        ax.text(dim_line_x - 4, h_cm, f"{h_cm:g}", ha='right', va='center', fontsize=5, fontweight='bold', color='#333333')
+        ax.text(dim_line_x - 4, h_cm, dt_num(h_cm), ha='right', va='center', fontsize=5, fontweight='bold', color='#333333')
 
         for w_y in waler_positions:
             if 0 < w_y < h_cm:
@@ -886,7 +886,7 @@ def _front_view_buf(layout, faces, title=True):
         ax.set_ylim(-10, top_y)
         ax.set_aspect('equal', adjustable='box')
         ax.axis('off')
-        ax.set_title(f"{dt('Страна')} {dt_face(face['name'])} ({round(side_len, 2):g}x{h_cm:g} cm)".replace(".", ","),
+        ax.set_title(f"{dt('Страна')} {dt_face(face['name'])} ({dt_num(side_len)}x{dt_num(h_cm)} cm)",
                      fontsize=8, fontweight='bold')
 
     flat_axes = axes.flatten()
@@ -1148,6 +1148,46 @@ def generate_3d_axonometry_buf(layout, name="Елемент"):
 # ==========================================
 # 6. ГЕНЕРИРАНЕ НА ЦЕЛИЯ ДОКУМЕНТ
 # ==========================================
+def _group_head_page(story, head, title_style, subtitle_style, section_style, cell_style, cell_bold_style, corrected):
+    """
+    Обединен елемент (потребителят, 27.11.2026): страница преди частите му - името, частите, изгледът отгоре и 3D
+    изгледът на частите на местата им от 3D плана и сметката на целия елемент (сборът от частите).
+    """
+    from floor_plan import group_view_pngs   # floor_plan внася този модул
+    story.append(Paragraph(f"<b>{dt('Чертеж и Спецификация: {name}', name=head['name'])}</b>", title_style))
+    story.append(Paragraph(f"{dt('Тип:')} {dt('Обединен елемент')} | {' + '.join(head['parts'])} | {dt('Брой:')} 1",
+                           subtitle_style))
+    story.append(Spacer(1, 4))
+    imgs = []
+    for buf, box in zip(group_view_pngs(head["pieces"], head["positions"]), (260, 285)):
+        w, h = ImageReader(buf).getSize()
+        buf.seek(0)
+        k = min(box / w, 330 / h)
+        imgs.append(RLImage(buf, width=w * k, height=h * k))
+    views = Table([[Paragraph(dt("TOP VIEW / ИЗГЛЕД ОТГОРЕ"), section_style),
+                    Paragraph(dt("3D VIEW / 3D ИЗГЛЕД"), section_style)], imgs], colWidths=[260, 285])
+    views.setStyle(TableStyle([('VALIGN', (0, 0), (-1, 0), 'BOTTOM'), ('VALIGN', (0, 1), (-1, 1), 'MIDDLE'),
+                               ('ALIGN', (0, 1), (-1, 1), 'CENTER'),
+                               ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0)]))
+    story.append(views)
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(f"<b>{dt('Необходим артикул за елемента')}</b>",
+                           ParagraphStyle('GroupHeading', parent=title_style, fontSize=10, leading=12)))
+    story.append(Spacer(1, 2))
+    data = [[Paragraph(f"<b>{dt('Артикул / Код')}</b>", cell_bold_style),
+             Paragraph(f"<b>{dt('Общо за {n} бр.', n=1)}</b>", cell_bold_style)]]
+    for code, qty in sorted(head["bom"].items()):
+        if code not in corrected:
+            data.append([Paragraph(dt_item(code), cell_style), Paragraph(str(qty), cell_style)])
+    table = Table(data, colWidths=[260, 110])
+    table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#003366')),
+                               ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                               ('BOTTOMPADDING', (0, 0), (-1, -1), 3), ('TOPPADDING', (0, 0), (-1, -1), 3),
+                               ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC'))]))
+    story.append(table)
+    story.append(PageBreak())
+
+
 def generate_pdf_drawings(pdf_elements, bom_summary, proj_info, corrected=()):
     """
     corrected - кодовете, коригирани на ръка в таб 3 (потребителят, 26.11.2026): не са в таблицата на елемента,
@@ -1230,6 +1270,9 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info, corrected=()):
 
     # --- ИНДИВИДУАЛНИ ЧЕРТЕЖИ И СПЕЦИФИКАЦИИ ---
     for idx, elem in enumerate(pdf_elements):
+        if elem.get('group_head'):
+            _group_head_page(story, elem['group_head'], title_style, subtitle_style, section_style, cell_style,
+                             cell_bold_style, corrected)
         w_type = str(elem.get('wall_type') or 'Стена')
         e_name = str(elem.get('name', dt('Елемент {i}', i=idx + 1)))
         layout = elem['layout']
@@ -1237,7 +1280,7 @@ def generate_pdf_drawings(pdf_elements, bom_summary, proj_info, corrected=()):
 
         story.append(Paragraph(f"<b>{dt('Чертеж и Спецификация: {name}', name=e_name)}</b>", title_style))
         story.append(Paragraph(f"{dt('Тип:')} {w_type} | {dt('Размери:')} {_dims_label(layout)} | "
-                               f"{dt('Височина:')} {panel_height_cm(layout):g} cm | "
+                               f"{dt('Височина:')} {dt_num(panel_height_cm(layout))} cm | "
                                f"{dt('Затворени краища:')} {_closed_label(layout)} | {dt('Брой:')} {e_count}",
                                subtitle_style))
         story.append(Spacer(1, 4))
