@@ -21,7 +21,7 @@ from drawing_generator import PANEL_T, _face_strips, _plan_geometry
 from teko_calculator import (format_panel_code, is_compensator_row, thickness_label, t_wall_offset_label, shaft_inside_label,
                              face_row_pieces, panel_height_cm)
 from weights_db import WEIGHTS_DB
-from doc_lang import TR, dt, dt_face, dt_item
+from doc_lang import TR, dt, dt_face, dt_item, dt_num
 
 CELL_CM = 5          # една клетка = 5 см
 FIRST_COL = 3        # чертежите започват от колона C
@@ -311,7 +311,7 @@ def _top_view(sheet, layout, top_row):
         s = 0
         for w, is_board, panel_w in (pieces[::-1] if rev and rev[0] else pieces):
             # надписът на дъската - само на външните страни (A1, B1 ... са срещу тях)
-            note = dt("ДЪСКА {w} см", w=f"{w:g}").replace(".", ",") if face["name"][1:2] != "1" else None
+            note = dt("ДЪСКА {w} см", w=dt_num(w)) if face["name"][1:2] != "1" else None
             if is_board:
                 normal = strips[face["name"]][5]
                 boards.append((x0 + s, y0, w, T, axis, normal, note) if axis == 'x'
@@ -475,16 +475,16 @@ def _element_title(index, element):
     typ = layout["type"]
     parts = [str(element.get("name") or "").strip(), dt(TYPE_WORDS.get(typ, typ))]
     if typ == "column":
-        parts.append(f"{d['a']:g}x{d['b']:g}")
+        parts.append(f"{dt_num(d['a'])}x{dt_num(d['b'])}")
     elif typ == "wall":
-        parts.append(f"{dt('дължина')} {d['length']:g}")
+        parts.append(f"{dt('дължина')} {dt_num(d['length'])}")
     elif typ == "u_wall":
-        parts += [f"A {d['l1']:g}", f"B {d['l2']:g}", f"C {d['l3']:g}"]
+        parts += [f"A {dt_num(d['l1'])}", f"B {dt_num(d['l2'])}", f"C {dt_num(d['l3'])}"]
     elif typ == "shaft":
-        parts += [f"A {d['l1']:g}", f"B {d['l2']:g}", shaft_inside_label(layout, "")]
+        parts += [f"A {dt_num(d['l1'])}", f"B {dt_num(d['l2'])}", shaft_inside_label(layout, "")]
     else:
-        parts += [f"A {d['l1']:g}", f"B {d['l2']:g}", t_wall_offset_label(layout, "")]
-    parts.append(f"{dt('височина')} {panel_height_cm(layout):g}")   # височината на панелите (262 -> 265)
+        parts += [f"A {dt_num(d['l1'])}", f"B {dt_num(d['l2'])}", t_wall_offset_label(layout, "")]
+    parts.append(f"{dt('височина')} {dt_num(panel_height_cm(layout))}")   # височината на панелите (262 -> 265)
     if typ != "column":
         parts.append(thickness_label(layout, ""))
     parts.append(f"{dt('бр.')} {element.get('count', 1)}")
