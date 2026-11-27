@@ -27,9 +27,9 @@ from stock_layout import plan_project
 from weights_db import get_item_weight
 from i18n import t, t_item, init_language, language_switch, lang as ui_lang, MANUAL_HELP_BG
 from doc_lang import DOC_FLAGS, DOC_LANGUAGES, document_language, dt, dt_num
-from floor_plan import (ROW_WIDTH_CM, apply_floor_edit, apply_floor_group, default_positions, drawing_places,
-                        floor_component, gemini_outlines, generate_floor_pdf, group_of, keep_concrete, pdf_shapes,
-                        piece_boxes, piece_plan, touching_ends)
+from floor_plan import (ROW_WIDTH_CM, apply_floor_edit, apply_floor_group, close_gaps, default_positions,
+                        drawing_places, floor_component, gemini_outlines, generate_floor_pdf, group_layouts, group_of,
+                        keep_concrete, pdf_shapes, piece_boxes, piece_plan, touching_ends)
 
 init_language()
 st.set_page_config(
@@ -474,11 +474,87 @@ def row_layout_key(elem_type, row):
 
 def element_layout(elem_type, row):
     """
-    Разположението на реда: при „Редене според складовата наличност“ - от плана (stock_layout.py),
-    иначе - алгоритъмът (row_to_layout).
+    Разположението на реда: част на обединен елемент - общото редене на частите (update_group_plan); при „Редене
+    според складовата наличност“ - от плана (stock_layout.py), иначе - алгоритъмът (row_to_layout).
     """
+    if group_of(row):
+        grouped = st.session_state.get("group_plan", {}).get(group_layout_key(elem_type, row))
+        if grouped:
+            return grouped
+    return base_layout(elem_type, row)
+
+def base_layout(elem_type, row):
+    """Разположението на реда без общото редене на обединен елемент (склад или алгоритъм)."""
     planned = st.session_state.get("stock_plan", {}).get(row_layout_key(elem_type, row))
     return planned["layout"] if planned else row_to_layout(elem_type, row)
+
+def group_layout_key(elem_type, row):
+    """Частта на обединен елемент: групата, мястото ѝ в плана и размерите."""
+    pos = row.get("group_pos")
+    return (group_of(row), pos if isinstance(pos, str) else "", row_layout_key(elem_type, row))
+
+def group_position(row):
+    """Мястото на частта на обединен елемент в 3D плана (колона group_pos, JSON) или None."""
+    try:
+        pos = json.loads(row.get("group_pos") or "")
+        return {"x": float(pos["x"]), "y": float(pos["y"]), "rot": float(pos.get("rot", 0) or 0),
+                "mir": bool(pos.get("mir"))}
+    except (TypeError, ValueError, KeyError):
+        return None
+
+def calc_units(df):
+    """
+    Единиците за сметките, PDF и офертата: [(група или „“, [(индекс, ред)])] по реда на таблицата - всеки ред
+    отделно, частите на обединен елемент - заедно (на мястото на първата си част).
+    """
+    units, at = [], {}
+    for idx, row in df.iterrows():
+        g = group_of(row)
+        if g and g in at:
+            units[at[g]][1].append((idx, row))
+            continue
+        if g:
+            at[g] = len(units)
+        units.append((g, [(idx, row)]))
+    return units
+
+def update_group_plan(df_calc):
+    """
+    Обединени елементи - общото редене (потребителят, 27.11.2026, за проверка; floor_plan.group_layouts): край в
+    страната на друга част - 2 x IN; страни една след друга по една линия - една страна. В
+    st.session_state["group_plan"] по group_layout_key; смята се наново при промяна на таблицата или склада.
+    """
+    signature = (df_calc.to_json(), repr(st.session_state.get("stock_plan_signature")))
+    if st.session_state.get("group_plan_signature") == signature and "group_plan" in st.session_state:
+        return
+    st.session_state.pop("excel_bytes", None)
+    plan = {}
+    for group, items in calc_units(df_calc):
+        if not group or len(items) < 2:
+            continue
+        parts = []
+        for _, row in items:
+            elem_type = str(row.get("type", "wall"))
+            try:
+                layout = base_layout(elem_type, row)
+            except Exception:
+                layout = None
+            pos = group_position(row)
+            if layout is None or pos is None:
+                parts = []
+                break
+            parts.append((group_layout_key(elem_type, row), layout, pos))
+        if not parts:
+            continue
+        try:
+            layouts = group_layouts([(layout, pos) for _key, layout, pos in parts])
+        except Exception as exc:   # за проверка - частите остават по алгоритъма
+            st.warning(t("⚠️ Обединен елемент {name}: общото редене не стана ({err}) - частите са редени поотделно.",
+                         name=group, err=exc))
+            continue
+        plan.update({key: lay for (key, _l, _p), lay in zip(parts, layouts)})
+    st.session_state["group_plan"] = plan
+    st.session_state["group_plan_signature"] = signature
 
 def get_element_teko_panels(elem_type, row):
     cnt = int(_row_float(row, "count", 1))
@@ -508,7 +584,8 @@ def get_element_accessories(elem_type, row):
         acc = calculate_accessories("L-образна стена", dims["l1"], dims["l2"], h_cm, widths_a, h_levels, layout=layout)
     elif elem_type == "t_wall":
         dims = layout["dims"]
-        stem = next(f for f in layout["faces"] if f["name"] == "B")["length_cm"]
+        # обединен елемент - реброто може да е продължено от страна на друга част
+        stem = next((f["length_cm"] for f in layout["faces"] if f["name"] == "B"), dims["l2"])
         acc = calculate_accessories("T-образна стена", dims["l1"], stem, h_cm, widths_a, h_levels, layout=layout)
     elif elem_type == "shaft":
         dims = layout["dims"]
@@ -693,7 +770,11 @@ def update_stock_plan(df_calc):
     st.session_state["stock_plan_signature"] = signature
 
 def stock_plan_signature(elem_type, row):
-    """Разположението на реда според склада като текст - за кеша на прегледа; без промяна - празно."""
+    """Разположението на реда според склада (или обединения елемент) като текст - за кеша на прегледа; без промяна -
+    празно."""
+    if group_of(row) and st.session_state.get("group_plan", {}).get(group_layout_key(elem_type, row)):
+        layout = element_layout(elem_type, row)
+        return repr(([f["name"] for f in layout["faces"]], [f["rows"] for f in layout["faces"]]))
     planned = st.session_state.get("stock_plan", {}).get(row_layout_key(elem_type, row))
     if not planned or not (planned["replaced"] or planned["levels_changed"]):
         return ""
@@ -1911,6 +1992,7 @@ with tab1:
     df_saved = fill_default_height(st.session_state["edited_df"],
                                    st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM))
     update_stock_plan(df_saved)
+    update_group_plan(df_saved)
     show_stock_layout_notes(df_saved)
     show_stock_warnings(df_saved)
 
@@ -2384,36 +2466,9 @@ def floor_pieces(df_part):
     return pieces
 
 
-def group_position(row):
-    """Мястото на частта на обединен елемент в 3D плана (колона group_pos, JSON) или None."""
-    try:
-        pos = json.loads(row.get("group_pos") or "")
-        return {"x": float(pos["x"]), "y": float(pos["y"]), "rot": float(pos.get("rot", 0) or 0),
-                "mir": bool(pos.get("mir"))}
-    except (TypeError, ValueError, KeyError):
-        return None
-
-
 def group_label(name):
     """„Обединен елемент Е1“ - на езика на документа."""
     return f"{dt('Обединен елемент')} {name}".strip()
-
-
-def calc_units(df):
-    """
-    Единиците за сметките, PDF и офертата: [(група или „“, [(индекс, ред)])] по реда на таблицата - всеки ред
-    отделно, частите на обединен елемент - заедно (на мястото на първата си част).
-    """
-    units, at = [], {}
-    for idx, row in df.iterrows():
-        g = group_of(row)
-        if g and g in at:
-            units[at[g]][1].append((idx, row))
-            continue
-        if g:
-            at[g] = len(units)
-        units.append((g, [(idx, row)]))
-    return units
 
 
 # Промени от плана (потребителят, 24.11.2026, вариант А): нов елемент, промяна на име и размери, копирай / постави,
@@ -2685,8 +2740,9 @@ def floor_merge_dialog(store, pieces, drawing, fkey, row_width_cm, pid=None):
     st.markdown(t("**Части ({n}):** {names}", n=len(parts), names=", ".join(p["label"] for p in parts)))
     with st.form(f"floor_{fkey}_merge_form", border=False):
         name = st.text_input(t("Име на обединения елемент"), value=default, key=f"floor_{fkey}_merge_name")
-        st.caption(t("В сметките, PDF, Excel и офертата излиза като „Обединен елемент {name}“; частите се редят "
-                     "както досега.", name=name or default))
+        st.caption(t("В сметките, PDF, Excel и офертата излиза като „Обединен елемент {name}“. Допрените части се "
+                     "доближават до бетона, страните по една линия се редят като една, край в страната на друга част "
+                     "- 2 x IN.", name=name or default))
         opens = []
         if touching:
             st.markdown(t("**Краища, които опират в друга част** - отварят се (без чело и 2 x EX):"))
@@ -2711,8 +2767,13 @@ def floor_merge_dialog(store, pieces, drawing, fkey, row_width_cm, pid=None):
         for p, col, on in opens:
             if on:
                 changes[(p["row"], p["k"])][col] = False
+        # отворените допрени краища - частите се доближават, докато бетонът опре (без празнината от челата)
+        kept = {(p["id"], col) for p, col, on in opens if not on}
+        shift = close_gaps(parts, store["positions"], [x for x in touching if (x[0], x[1]) not in kept])
         for p in parts:
             pos = store["positions"][p["id"]]
+            dx, dy = shift.get(p["id"], (0.0, 0.0))
+            pos = {**pos, "x": pos["x"] + dx, "y": pos["y"] + dy}
             values = changes[(p["row"], p["k"])]
             if len(values) > 1:   # отворен край - бетонът остава на мястото си (центърът е с кофража)
                 row = {**df.iloc[p["row"]].to_dict(), **values}
@@ -3047,12 +3108,13 @@ def render_floor_tab(df_calc, current):
             store["pdf"] = generate_floor_pdf(doc_pieces, store["positions"], info, background)
     if store.get("pdf"):
         st.download_button(t("📥 Изтегли 3D плана (PDF)"), data=store["pdf"],
-                           file_name="Teko_3D_Floor_Plan.pdf", mime="application/pdf", use_container_width=True)
+                           file_name="Teko_3D_Plan.pdf", mime="application/pdf", use_container_width=True)
 
 
 df_calc = fill_default_height(st.session_state["edited_df"],
                               st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM))
 update_stock_plan(df_calc)
+update_group_plan(df_calc)
 with tab2:
     render_floor_tab(df_calc, current)
 with tab3:
