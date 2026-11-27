@@ -52,6 +52,15 @@ def dt(text, **values):
     return text.format(**values) if values else text
 
 
+def dt_num(value):
+    """
+    Размер в см за надпис (потребителят, 27.11.2026 - навсякъде както е въведен): до 1 десетичен знак, без
+    излишни нули (250, 262,5); десетична запетая, на английски - точка (262.5).
+    """
+    text = f"{round(float(value), 1):g}"
+    return text if _current.get() == "en" else text.replace(".", ",")
+
+
 def dt_cm(unit):
     """Мерната единица от параметъра unit (" см", " cm", "") на езика на документа."""
     return " " + dt("см") if unit.strip() == "см" else unit
@@ -187,6 +196,9 @@ TR = {
     "T-стена": ("T-wall", "T-Wand", "Voile en T", "Muro en T", "Τοίχος Τ", "T-zid", "Perete T", "Ściana T", "Т-стіна",
                 "Т-стена", "Т-зид", "T-duvar"),
     # Шахта (25.11.2026): асансьорна / стълбищна / инсталационна - затворен правоъгълник от 4 стени
+    "Обединен елемент": ("Combined element", "Kombiniertes Element", "Élément combiné", "Elemento combinado",
+                         "Συνδυασμένο στοιχείο", "Spojeni element", "Element combinat", "Element połączony",
+                         "Об'єднаний елемент", "Объединённый элемент", "Спојени елемент", "Birleşik eleman"),
     "Шахта": ("Shaft", "Schacht", "Gaine", "Hueco", "Φρεάτιο", "Okno", "Puț", "Szyb", "Шахта", "Шахта", "Окно",
               "Şaft"),
     "шахта": ("shaft", "Schacht", "gaine", "hueco", "φρεάτιο", "okno", "puț", "szyb", "шахта", "шахта", "окно",
