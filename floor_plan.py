@@ -200,6 +200,8 @@ def apply_floor_edit(df, action, signature):
         rows.append({"data": row, "tokens": [(r, k) for k in range(int(n) if pd.notna(n) else 1)]})
 
     def same_as(data, skip):
+        if group_of(data):   # частите на обединен елемент - всяка на свой ред (свое място в плана)
+            return None
         key = signature(data)
         return next((x for x in rows if x is not skip and signature(x["data"]) == key), None)
 
@@ -236,6 +238,12 @@ def apply_floor_edit(df, action, signature):
             drawing = signature(data)[0]
             last = max((i for i, x in enumerate(rows) if signature(x["data"])[0] == drawing), default=len(rows) - 1)
             rows.insert(last + 1, {"data": data, "tokens": new})
+    return _rows_to_df(df, rows)
+
+
+def _rows_to_df(df, rows):
+    """Редовете с бройките -> (новата таблица, {(стар ред, k): (нов ред, k)}, [(нов ред, k) на новите бройки])."""
+    import pandas as pd
     rows = [x for x in rows if x["tokens"]]
     moves, added = {}, []
     for i, x in enumerate(rows):
@@ -248,6 +256,101 @@ def apply_floor_edit(df, action, signature):
     columns = list(df.columns) + [c for x in rows for c in x["data"] if c not in df.columns]
     new_df = pd.DataFrame([x["data"] for x in rows], columns=list(dict.fromkeys(columns)))
     return new_df, moves, added
+
+
+# ---------- Обединени елементи (потребителят, 27.11.2026) ----------
+# Няколко елемента от плана - един „Обединен елемент <име>“ навсякъде (табове 3-5, PDF, Excel). Частите остават
+# отделни редове (1 бр.) и се редят по алгоритъма; колоната group - името, group_pos - мястото в плана (JSON).
+GROUP_COLUMNS = ("group", "group_pos")
+# краищата на всеки тип: (колона, ръбът на бетона - poly[i] -> poly[i + 1] от _plan_geometry)
+END_EDGES = {"wall": (("closed_end_1", 1), ("closed_end_2", 3)),
+             "l_wall": (("closed_end_1", 1), ("closed_end_2", 4)),
+             "u_wall": (("closed_end_1", 6), ("closed_end_2", 2)),
+             "t_wall": (("closed_end_1", 5), ("closed_end_2", 7), ("closed_end_3", 2))}
+TOUCH_CM = 2 * PANEL_T + 5   # краят опира в друг елемент: бетонът му е до толкова пред челото (кофражът между тях)
+
+
+def group_of(data):
+    """Името на обединения елемент на реда („“ - не е обединен)."""
+    value = data.get("group") if hasattr(data, "get") else None
+    return value.strip() if isinstance(value, str) else ""
+
+
+def touching_ends(pieces, positions):
+    """
+    Краищата, които опират в друг от елементите (бетонът на другия е до TOUCH_CM пред челото):
+    [(id, колона на края, id на другия)]. Само по плана - затворен или отворен е краят, не се гледа.
+    """
+    shapes = {p["id"]: Path(np.array([to_world(x, y, p, positions[p["id"]]) for x, y in _outer(p)]))
+              for p in pieces}
+    found = []
+    for p in pieces:
+        poly = np.array(p["poly"], float)
+        own = Path(poly)
+        for col, i in END_EDGES.get(p.get("type"), ()):
+            a, b = poly[i], poly[(i + 1) % len(poly)]
+            mid, d = (a + b) / 2, (b - a) / max(np.hypot(*(b - a)), 1e-9)
+            n = np.array([d[1], -d[0]])
+            if own.contains_point(mid + n):   # навън - страната без бетон
+                n = -n
+            for q in pieces:
+                if q["id"] == p["id"]:
+                    continue
+                if any(shapes[q["id"]].contains_point(to_world(*(mid + n * s), p, positions[p["id"]]))
+                       for s in np.arange(1, TOUCH_CM + 1, 2)):
+                    found.append((p["id"], col, q["id"]))
+                    break
+    return found
+
+
+def keep_concrete(pos, old, new):
+    """
+    Мястото на елемента след смяна на кофража (отворен край - без чело и EX): центърът е на целия елемент с
+    кофража, затова се мести така, че бетонът да остане на същото място.
+    """
+    M, _t = _transform(old, pos)
+    d = M @ np.array([new["cx"] - old["cx"], new["cy"] - old["cy"]], float)
+    return {**pos, "x": float(pos["x"] + d[0]), "y": float(pos["y"] + d[1])}
+
+
+def apply_floor_group(df, changes, signature):
+    """
+    Обединяване / разделяне: changes {(ред, k): стойности} - всяка бройка става свой ред (1 бр.) с новите стойности
+    (group, group_pos, отворени краища). Частите на една група - една след друга, на мястото на първата; разделените
+    се сливат с еднакъв ред без група (както при промяна от плана). Връща същото като apply_floor_edit.
+    """
+    import pandas as pd
+    df = df.reset_index(drop=True)
+    rows = []
+    for r, row in enumerate(df.to_dict("records")):
+        n = pd.to_numeric(row.get("count"), errors="coerce")
+        rows.append({"data": row, "tokens": [(r, k) for k in range(int(n) if pd.notna(n) else 1)]})
+    first = list(rows)
+    for (r, k), values in changes.items():
+        own = first[r]
+        data = {**own["data"], **values}
+        if len(own["tokens"]) == 1:
+            own["data"], target = data, own
+        else:   # този брой - нов ред до стария
+            own["tokens"].remove((r, k))
+            target = {"data": data, "tokens": [(r, k)]}
+            rows.insert(rows.index(own) + 1, target)
+        if not group_of(data):
+            key = signature(data)
+            other = next((x for x in rows if x is not target and x["tokens"] and not group_of(x["data"])
+                          and signature(x["data"]) == key), None)
+            if other is not None:
+                other["tokens"] += target["tokens"]
+                target["tokens"] = []
+    ordered, seen = [], set()
+    for x in rows:   # частите на групата - след първата ѝ част
+        g = group_of(x["data"])
+        if id(x) in seen:
+            continue
+        for y in [x] if not g else [y for y in rows if group_of(y["data"]) == g]:
+            ordered.append(y)
+            seen.add(id(y))
+    return _rows_to_df(df, ordered)
 
 
 # ---------- Местата от чертежа (потребителят, 24.11.2026) ----------
@@ -714,6 +817,21 @@ def draw_floor_plan(ax, pieces, positions, label_size=6, background=None):
     ax.axis('off')
 
 
+def group_view_pngs(pieces, positions, dpi=200):
+    """Обединен елемент в PDF-а с чертежите: изгледът отгоре и 3D изгледът на частите на местата им (PNG буфери)."""
+    bufs = []
+    for draw in (lambda ax: draw_floor_plan(ax, pieces, positions, label_size=7),
+                 lambda ax: draw_floor_3d(ax, pieces, positions, VIEW_MAIN, label_size=7)):
+        fig, ax = plt.subplots(figsize=(6, 6))
+        draw(ax)
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png', dpi=dpi, bbox_inches='tight')
+        plt.close(fig)
+        buf.seek(0)
+        bufs.append(buf)
+    return bufs
+
+
 def generate_floor_pdf(pieces, positions, info, background=None):
     """
     PDF (А3, хоризонтално): 3D изглед и изглед отгоре.
@@ -779,6 +897,10 @@ FLOOR_CSS = """
 .fp-piece .EX { fill: #a0d784; stroke: #3a2e36; }
 .fp-piece .IN { fill: #4a8f42; stroke: #3a2e36; }
 .fp-piece.sel .c { fill: transparent; stroke: #1565c0; stroke-width: 2px; }
+/* обединен елемент (27.11.2026) - лилав контур; избраните с Ctrl / Shift + клик за обединяване - оранжево */
+.fp-piece.grp .c { stroke: #7b1fa2; stroke-dasharray: 6 3; stroke-width: 1.5px; }
+.fp-piece.multi .c { stroke: #ef6c00; stroke-width: 3px; stroke-dasharray: none; }
+.fp-label .g { fill: #7b1fa2; font-weight: bold; }
 /* докато се мести или върти - избраният елемент полупрозрачен, вижда се чертежът под панелите */
 .fp-root.busy .fp-piece.sel { opacity: 0.5; }
 .fp-label { fill: #111; font-family: "Arial Narrow", "Roboto Condensed", "Segoe UI", sans-serif;
@@ -843,7 +965,7 @@ function build(parent) {
   root.querySelector(".fp-wrap").appendChild(svg);
   parent.appendChild(root);
   const S = { pos: {}, token: null, sel: null, view: null, drag: null, pan: null, turn: null, calib: null, fs: 20,
-              mouse: null, inside: false };
+              mouse: null, inside: false, multi: [] };
   root.__s = S;
 
   const pt = (evt) => {
@@ -865,8 +987,7 @@ function build(parent) {
   angle.addEventListener("change", () => {
     const v = parseFloat(angle.value.replace(",", "."));
     if (!S.sel || !isFinite(v)) { updateBar(root); return; }
-    S.pos[S.sel].rot = norm(v);
-    place(root, S.sel);
+    turnGroup(root, groupBase(S, S.sel), v - (S.pos[S.sel].rot || 0));
     commit();
   });
   angle.addEventListener("keydown", (evt) => { if (evt.key === "Enter") angle.blur(); });
@@ -880,7 +1001,7 @@ function build(parent) {
     }
     if (evt.ctrlKey || evt.metaKey || evt.altKey) return;
     if (evt.key === "Delete") edit(root, "del", true);
-    else if (evt.key === "Escape") select(root, null);
+    else if (evt.key === "Escape") { setMulti(root, []); select(root, null); }
     else if (evt.key === "r" || evt.key === "R") act(root, evt.shiftKey ? "rotr" : "rotl");
     else if (evt.key === "m" || evt.key === "M") act(root, "mir");
   });
@@ -903,14 +1024,20 @@ function build(parent) {
     }
     svg.setPointerCapture(evt.pointerId);
     if (evt.target.classList.contains("fp-handle") && S.sel) {
-      S.turn = { id: S.sel, moved: false };
+      S.turn = { id: S.sel, moved: false, base: groupBase(S, S.sel) };
       return;
     }
     const g = evt.target.closest(".fp-piece");
     if (g) {
       const id = g.dataset.id;
+      // Ctrl / Shift + клик - избор на няколко елемента за „Обедини“ (27.11.2026)
+      if (evt.ctrlKey || evt.metaKey || evt.shiftKey) { toggleMulti(root, id); return; }
+      if (S.multi.length) setMulti(root, []);
       S.down = id;
-      S.drag = { id, p0: p, x: S.pos[id].x, y: S.pos[id].y, moved: false, sel: S.sel !== id };
+      // обединеният елемент се мести целият
+      const ids = members(S, id), base = {};
+      ids.forEach((i) => (base[i] = { x: S.pos[i].x, y: S.pos[i].y }));
+      S.drag = { id, ids, base, p0: p, moved: false, sel: S.sel !== id };
       select(root, id, false);
     } else {
       S.pan = { cx: evt.clientX, cy: evt.clientY, v: { ...S.view }, k: svg.getScreenCTM().a };
@@ -923,16 +1050,23 @@ function build(parent) {
       const p = pt(evt), pos = S.pos[S.turn.id];
       const deg = Math.atan2(-p.y - pos.y, p.x - pos.x) * 180 / Math.PI - 90;
       const step = evt.shiftKey ? 1 : SNAP_DEG;
-      pos.rot = norm(Math.round(deg / step) * step);
+      const base = S.turn.base, b = base.pos[S.turn.id];
+      let target = norm(Math.round(deg / step) * step);
+      if (base.ids.length > 1) {   // обединен елемент - около центъра му, с колкото се е завъртяла мишката
+        const dg = Math.atan2(-p.y - base.cy, p.x - base.cx) * 180 / Math.PI;
+        if (S.turn.a0 === undefined) S.turn.a0 = dg;
+        target = (b.rot || 0) + Math.round((dg - S.turn.a0) / step) * step;
+      }
+      turnGroup(root, base, target - (b.rot || 0));
       if (!S.turn.moved) { S.turn.moved = true; labelState(root); }
-      place(root, S.turn.id);
     } else if (S.drag) {
       const p = pt(evt);
-      const pos = S.pos[S.drag.id];
-      pos.x = S.drag.x + (p.x - S.drag.p0.x);
-      pos.y = S.drag.y - (p.y - S.drag.p0.y);
+      for (const i of S.drag.ids) {
+        S.pos[i].x = S.drag.base[i].x + (p.x - S.drag.p0.x);
+        S.pos[i].y = S.drag.base[i].y - (p.y - S.drag.p0.y);
+        place(root, i);
+      }
       if (!S.drag.moved) { S.drag.moved = true; labelState(root); }
-      place(root, S.drag.id);
     } else if (S.pan) {
       S.view.x = S.pan.v.x - (evt.clientX - S.pan.cx) / S.pan.k;
       S.view.y = S.pan.v.y - (evt.clientY - S.pan.cy) / S.pan.k;
@@ -942,10 +1076,10 @@ function build(parent) {
   const up = () => {
     if (S.turn && S.turn.moved) commit();
     if (S.drag && S.drag.moved) {
+      // прилепва през 5 см - обединеният елемент с едно и също преместване (частите остават допрени)
       const pos = S.pos[S.drag.id];
-      pos.x = Math.round(pos.x / SNAP) * SNAP;
-      pos.y = Math.round(pos.y / SNAP) * SNAP;
-      place(root, S.drag.id);
+      const dx = Math.round(pos.x / SNAP) * SNAP - pos.x, dy = Math.round(pos.y / SNAP) * SNAP - pos.y;
+      for (const i of S.drag.ids) { S.pos[i].x += dx; S.pos[i].y += dy; place(root, i); }
       commit();
     }
     // изборът - към Python (полетата на избрания елемент под плана), след пускането - не по време на влаченето
@@ -975,6 +1109,46 @@ function build(parent) {
 function keep(S) {
   const all = (globalThis.__tekoFloor = globalThis.__tekoFloor || {});
   return (all[S.data.view_key] = all[S.data.view_key] || {});
+}
+
+// частите на обединения елемент (или само елементът)
+function members(S, id) {
+  const g = S.byId[id] && S.byId[id].group;
+  return g ? S.data.pieces.filter((p) => p.group === g).map((p) => p.id) : [id];
+}
+
+// местата преди завъртането и центърът на обединения елемент - въртят се заедно около него
+function groupBase(S, id) {
+  const ids = members(S, id), pos = {};
+  let cx = 0, cy = 0;
+  for (const i of ids) { pos[i] = { ...S.pos[i] }; cx += pos[i].x / ids.length; cy += pos[i].y / ids.length; }
+  return { ids, pos, cx, cy };
+}
+
+function turnGroup(root, base, delta) {
+  const S = root.__s, a = delta * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+  for (const i of base.ids) {
+    const b = base.pos[i], dx = b.x - base.cx, dy = b.y - base.cy;
+    const pos = S.pos[i];
+    pos.rot = norm((b.rot || 0) + delta);
+    if (base.ids.length > 1) { pos.x = base.cx + dx * c - dy * s; pos.y = base.cy + dx * s + dy * c; }
+    place(root, i);
+  }
+}
+
+function setMulti(root, ids) {
+  const S = root.__s;
+  S.multi = ids;
+  root.querySelectorAll(".fp-piece").forEach((n) => n.classList.toggle("multi", ids.includes(n.dataset.id)));
+  updateBar(root);
+  S.api.setStateValue("multi", ids);
+}
+
+function toggleMulti(root, id) {
+  const S = root.__s;
+  let ids = S.multi.length ? [...S.multi] : (S.sel && S.sel !== id ? [S.sel] : []);
+  ids = ids.includes(id) ? ids.filter((i) => i !== id) : [...ids, id];
+  setMulti(root, ids);
 }
 
 function select(root, id, send = true) {
@@ -1014,10 +1188,9 @@ function act(root, a) {
   const S = root.__s;
   if (!S.sel || !S.pos[S.sel]) return;
   const pos = S.pos[S.sel];
-  if (a === "rotl") pos.rot = norm((pos.rot || 0) + 90);
-  else if (a === "rotr") pos.rot = norm((pos.rot || 0) - 90);
-  else pos.mir = !pos.mir;
-  place(root, S.sel);
+  if (a === "rotl" || a === "rotr") turnGroup(root, groupBase(S, S.sel), a === "rotl" ? 90 : -90);
+  else if (!S.byId[S.sel].group) { pos.mir = !pos.mir; place(root, S.sel); }
+  else return;   // обединен елемент - без огледално (частите ще се разместят)
   root.__commit();
 }
 
@@ -1058,8 +1231,18 @@ function labelSize(root, S) {
 function setLabel(t, p, fs, x) {
   const parts = p.label.split(" "), kind = parts.shift(), name = parts.join(" ");
   t.replaceChildren();
-  if (!name) { t.textContent = p.label; return; }
-  const a = el("tspan", { x, dy: "-0.5em", class: "k", "font-size": fs * 0.8 });
+  if (p.group) {   // обединен елемент - името му над частта
+    const g = el("tspan", { x, dy: name ? "-1.5em" : "-0.5em", class: "g", "font-size": fs * 0.8 });
+    g.textContent = "🔗 " + p.group;
+    t.append(g);
+  }
+  if (!name) {
+    const n = el("tspan", { x, dy: p.group ? "1.05em" : "0" });
+    n.textContent = p.label;
+    t.append(n);
+    return;
+  }
+  const a = el("tspan", { x, dy: p.group ? "1.05em" : "-0.5em", class: "k", "font-size": fs * 0.8 });
   a.textContent = kind;
   const b = el("tspan", { x, dy: "1.05em" });
   b.textContent = name;
@@ -1099,11 +1282,13 @@ function updateBar(root) {
   root.querySelector(".fp-angle-label").textContent = T.angle;
   const angle = root.querySelector(".fp-angle");
   b("rotl").disabled = b("rotr").disabled = b("mir").disabled = angle.disabled = !S.sel;
+  if (S.sel && S.byId[S.sel] && S.byId[S.sel].group) b("mir").disabled = true;
   if (!S.sel) angle.value = "";
   b("calib").style.display = S.data.bg ? "" : "none";
   b("calib").classList.toggle("on", !!S.calib);
   root.querySelector(".fp-hint").textContent = S.calib
     ? (S.calib.length ? T.calib2 : T.calib1)
+    : S.multi.length ? (T.multi || "").replace("{n}", S.multi.length)
     : K.clip ? T.copied.replace("{name}", S.byId[K.clip]?.label || "")
     : (S.sel ? T.selected.replace("{name}", S.byId[S.sel]?.label || "") : T.hint);
   if (!S.sel) {
@@ -1134,6 +1319,7 @@ function draw(root) {
   S.byId = {};
   D.pieces.forEach((p) => (S.byId[p.id] = p));
   if (S.sel && !S.byId[S.sel]) S.sel = null;
+  S.multi = S.multi.filter((i) => S.byId[i]);
   if (!S.view) S.view = fitView(S);
   keep(S).view = S.view;
   svg.setAttribute("viewBox", `${S.view.x} ${S.view.y} ${S.view.w} ${S.view.h}`);
@@ -1158,7 +1344,8 @@ function draw(root) {
   }
   const gp = el("g", {}), gl = el("g", {});
   for (const p of D.pieces) {
-    const g = el("g", { class: "fp-piece" + (p.id === S.sel ? " sel" : "") });
+    const g = el("g", { class: "fp-piece" + (p.id === S.sel ? " sel" : "") + (p.group ? " grp" : "") +
+                          (S.multi.includes(p.id) ? " multi" : "") });
     g.dataset.id = p.id;
     // бетонът - контурите (шахта - пръстен: външният и вътрешният, дупката не се хваща)
     const rings = p.rings || [p.poly];
@@ -1204,6 +1391,7 @@ export default function (component) {
     // след промяна в таблицата - същият изглед и изборът (новият или копираният елемент)
     S.view = data.keep_view && keep(S).view ? { ...keep(S).view } : null;
     S.sel = data.select || null;
+    S.multi = [];
   } else {
     for (const id in data.positions) if (!(id in S.pos)) S.pos[id] = { ...data.positions[id] };
   }
