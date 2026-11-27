@@ -24,9 +24,10 @@ COPY_SUFFIX = " (копие)"
 # Колоните на таблицата с елементите, които се пазят в архива (като TABLE_COLUMNS в app.py).
 # Дебелините на рамената и чертежът са накрая, за да се четат правилно и редовете, записани преди тях.
 # drawing - от кой чертеж е елементът (името на файла, разчетен с Gemini; 18.11.2026); празно - без чертеж
+# group / group_pos - обединен елемент: името и мястото на частта в 3D плана (JSON; 27.11.2026)
 ELEMENT_COLUMNS = ["type", "name", "count", "thickness_cm", "l1_cm", "l2_cm", "l3_cm", "height_cm",
                    "closed_end_1", "closed_end_2", "closed_end_3",
-                   "thickness1_cm", "thickness2_cm", "thickness3_cm", "drawing"]
+                   "thickness1_cm", "thickness2_cm", "thickness3_cm", "drawing", "group", "group_pos"]
 
 _archive = None
 
