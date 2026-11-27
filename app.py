@@ -1,4 +1,5 @@
 import io
+import json
 import math
 import re
 import hmac
@@ -24,10 +25,11 @@ from teko_calculator import (solve_height_cm, layout_element, count_panels, is_c
                              t_wall_offset_label, shaft_inside_label)
 from stock_layout import plan_project
 from weights_db import get_item_weight
-from i18n import t, t_item, init_language, language_switch, MANUAL_HELP_BG
-from doc_lang import DOC_FLAGS, DOC_LANGUAGES, document_language, dt
-from floor_plan import (ROW_WIDTH_CM, apply_floor_edit, default_positions, drawing_places, floor_component,
-                        gemini_outlines, generate_floor_pdf, pdf_shapes, piece_boxes, piece_plan)
+from i18n import t, t_item, init_language, language_switch, lang as ui_lang, MANUAL_HELP_BG
+from doc_lang import DOC_FLAGS, DOC_LANGUAGES, document_language, dt, dt_num
+from floor_plan import (ROW_WIDTH_CM, apply_floor_edit, apply_floor_group, default_positions, drawing_places,
+                        floor_component, gemini_outlines, generate_floor_pdf, group_of, keep_concrete, pdf_shapes,
+                        piece_boxes, piece_plan, touching_ends)
 
 init_language()
 st.set_page_config(
@@ -121,6 +123,12 @@ def format_height_breakdown_text(height_cm, layout=None):
     return " | ".join(parts)
 
 # === СТЪПКА 4: Проверка за нестандартни размери ===
+def ui_num(value):
+    """Размер в см за надпис на екрана - както в документите (262,5), на английски екран - с точка (262.5)."""
+    with document_language("en" if ui_lang() == "en" else "bg"):
+        return dt_num(value)
+
+
 def check_element_dimensions(row):
     """
     Проверява дали въведените размери са кратни на стандартните модули на TEKO (5 cm за ширина и височина).
@@ -152,7 +160,7 @@ def check_element_dimensions(row):
         if board > 0:
             warnings.append(t("• **{name}**: {label} {value} cm не е кратна на 5 cm - панели до {panels} cm + "
                               "дървена дъска {board} cm (само на чертежа, не влиза в сметката и площта).",
-                              name=name, label=t(label), value=f"{value:g}", panels=f"{panels:g}", board=f"{board:g}"))
+                              name=name, label=t(label), value=ui_num(value), panels=ui_num(panels), board=ui_num(board)))
 
     if elem_type == "column":
         board_warning("Стена A", "l1_cm", 50)
@@ -178,25 +186,25 @@ def check_element_dimensions(row):
                               "четирите стени, празна Стена B = квадратна шахта.", name=name,
                               fields=", ".join(t(u) for u in unused)))
     elif elem_type == "t_wall":
-        l1_cm = round(_row_float(row, "l1_cm", 200))
-        l2_cm = round(_row_float(row, "l2_cm", 200))
+        l1_cm = _row_float(row, "l1_cm", 200)
+        l2_cm = _row_float(row, "l2_cm", 200)
         # реброто: „Дебелина стена B“, празна = дебелина стена A
-        t_cm = round(_row_float(row, "thickness2_cm", None) or _row_float(row, "thickness_cm", 25))
+        t_cm = _row_float(row, "thickness2_cm", None) or _row_float(row, "thickness_cm", 25)
         # Стена C: от левия край на полката до лявото лице на реброто; празно = реброто е в средата
-        l3_cm = round(_row_float(row, "l3_cm", 0))
+        l3_cm = _row_float(row, "l3_cm", 0)
         board_warning("Стена A", "l1_cm", 200)
         board_warning("Стена B", "l2_cm", 200)
-        if l3_cm % 5 != 0:
+        if round(l3_cm, 6) % 5 != 0:
             warnings.append(t("• **{name}**: Мястото на реброто (Стена C = {l3} cm) не е кратно на 5 cm.",
-                              name=name, l3=l3_cm))
+                              name=name, l3=ui_num(l3_cm)))
         # от всяка страна на реброто трябва да остане място за IN (10 cm) и поне 5 cm панел
         if l3_cm and (l3_cm - 10 < 5 or l1_cm - l3_cm - t_cm - 10 < 5):
             warnings.append(t("• **{name}**: Реброто на {l3} cm от левия край не оставя място за ъгъл IN (10 cm) и "
                               "поне 5 cm панел от двете страни на полката ({l1} cm) - проверете Стена C.",
-                              name=name, l3=l3_cm, l1=l1_cm))
+                              name=name, l3=ui_num(l3_cm), l1=ui_num(l1_cm)))
         if (not l3_cm and (l1_cm - t_cm) / 2 <= 10) or l2_cm <= 10:
             warnings.append(t("• **{name}**: Страна A ({l1} cm) или B ({l2} cm) е твърде къса за T-стена с дебелина "
-                              "{t} cm - проверете Стена A и Стена B.", name=name, l1=l1_cm, l2=l2_cm, t=t_cm))
+                              "{t} cm - проверете Стена A и Стена B.", name=name, l1=ui_num(l1_cm), l2=ui_num(l2_cm), t=ui_num(t_cm)))
 
     # Правдоподобност (потребителят, 20.11.2026) - само предупреждение, размерите не се сменят:
     # необичайна дебелина или височина, права стена по-къса от дебелината, стена без място за панела до EX
@@ -207,24 +215,24 @@ def check_element_dimensions(row):
             value = _row_float(row, col, None)
             if value and not 10 <= value <= 100:
                 warnings.append(t("• **{name}**: {label} {value} cm е необичайна (обикновено 10-100 cm) - проверете "
-                                  "размера.", name=name, label=t(label), value=f"{value:g}"))
+                                  "размера.", name=name, label=t(label), value=ui_num(value)))
     h_raw = _row_float(row, "height_cm", None)
     if h_raw and not 20 <= h_raw <= 1200:
         warnings.append(t("• **{name}**: Височина {h} cm е необичайна (обикновено 20-1200 cm) - проверете размера.",
-                          name=name, h=f"{h_raw:g}"))
+                          name=name, h=ui_num(h_raw)))
     t1 = _row_float(row, "thickness_cm", None) or _row_float(row, "thickness1_cm", None)
     if elem_type == "wall" and t1:
         length = _row_float(row, "l1_cm", 0)
         if 0 < length < t1:
             warnings.append(t("• **{name}**: Дължината ({l} cm) е по-малка от дебелината ({t} cm) - разменени ли са?",
-                              name=name, l=f"{length:g}", t=f"{t1:g}"))
+                              name=name, l=ui_num(length), t=ui_num(t1)))
     if elem_type == "shaft" and t1:   # всяка стена - между два ъгъла: 2 x (дебелина + 10) + поне 5 см панел
         for label, col in (("Стена A", "l1_cm"), ("Стена B", "l2_cm")):
             length = _row_float(row, col, 0)
             if 0 < length < 2 * (t1 + 10) + 5:
                 warnings.append(t("• **{name}**: {label} ({l} cm) е твърде къса - до ъглите са нужни {k} cm и поне "
-                                  "5 cm панел. Проверете размерите.", name=name, label=t(label), l=f"{length:g}",
-                                  k=f"{2 * (t1 + 10):g}"))
+                                  "5 cm панел. Проверете размерите.", name=name, label=t(label), l=ui_num(length),
+                                  k=ui_num(2 * (t1 + 10))))
     if elem_type in ("l_wall", "u_wall") and t1:
         t2 = _row_float(row, "thickness2_cm", None) or t1
         t3 = _row_float(row, "thickness3_cm", None) or t1
@@ -236,8 +244,8 @@ def check_element_dimensions(row):
             length = _row_float(row, col, 0)
             if 0 < length < need + 5:
                 warnings.append(t("• **{name}**: {label} ({l} cm) е твърде къса - до ъглите са нужни {k} cm и поне "
-                                  "5 cm панел. Проверете размерите.", name=name, label=t(label), l=f"{length:g}",
-                                  k=f"{need:g}"))
+                                  "5 cm панел. Проверете размерите.", name=name, label=t(label), l=ui_num(length),
+                                  k=ui_num(need)))
 
     # Размерите са в см - стойност под 10 най-вероятно е въведена в метри (напр. 2.5 вместо 250)
     small = [f"{col} = {row.get(col):g}" for col in LENGTH_COLUMNS
@@ -283,8 +291,9 @@ WALL_THICKNESS_COLUMNS = {"column": 1, "wall": 1, "l_wall": 2, "t_wall": 2, "u_w
 TYPE_LABELS = {"column": "Колона", "wall": "Права стена", "l_wall": "L-стена", "u_wall": "П-стена", "t_wall": "T-стена",
                "shaft": "Шахта"}
 TABLE_COLUMNS = ["type", "name", "count", "l1_cm", "thickness1_cm", "l2_cm", "thickness2_cm", "l3_cm",
-                 "thickness3_cm", "height_cm", "closed_end_1", "closed_end_2", "closed_end_3"]
-DATA_COLUMNS = TABLE_COLUMNS + ["thickness_cm", "drawing"]
+                 "thickness3_cm", "height_cm", "closed_end_1", "closed_end_2", "closed_end_3", "group"]
+# group - „Обединен елемент“ (името; потребителят, 27.11.2026), group_pos - мястото на частта в 3D плана (JSON)
+DATA_COLUMNS = TABLE_COLUMNS + ["thickness_cm", "drawing", "group_pos"]
 
 # Чертежи (потребителят, 18.11.2026): всеки разчетен чертеж добавя своите елементи в отделна таблица под
 # заглавие „Чертеж N: име на файла“; drawing е името на чертежа, празно - без чертеж (ръчно, стари проекти).
@@ -870,32 +879,32 @@ def element_dims_and_area(elem_type, row):
         # с „Дебелина стена A / B / C“: една дебелина (B=30 см) или по стени (стена A дебелина 30 см, ...)
         layout = element_layout(elem_type, row)
         t = layout["dims"]["t1"]
-        b_str = f"B={t:g} см" if thickness_label(layout).startswith(dt("дебелина")) else thickness_label(layout)
+        b_str = f"B={dt_num(t)} см" if thickness_label(layout).startswith(dt("дебелина")) else thickness_label(layout)
     if elem_type == "column":
         w, l = t, _row_float(row, "l1_cm", 50)
         perimeter = 2 * (w + l)
-        dim_str = f"{l:g}x{w:g} см, H={hp:g} см"   # A x B, както на чертежа
+        dim_str = f"{dt_num(l)}x{dt_num(w)} см, H={dt_num(hp)} см"   # A x B, както на чертежа
     elif elem_type == "wall":
         l = _row_float(row, "l1_cm", 500)
         perimeter = 2 * l
-        dim_str = f"L={l:g} см, B={t:g} см, H={hp:g} см"
+        dim_str = f"L={dt_num(l)} см, B={dt_num(t)} см, H={dt_num(hp)} см"
     elif elem_type == "l_wall":
         l1, l2 = _row_float(row, "l1_cm", 200), _row_float(row, "l2_cm", 200)
         perimeter = 2 * (l1 + l2)
-        dim_str = f"L={l1:g}+{l2:g} см, {b_str}, H={hp:g} см"
+        dim_str = f"L={dt_num(l1)}+{dt_num(l2)} см, {b_str}, H={dt_num(hp)} см"
     elif elem_type == "u_wall":
         l1, l2, l3 = _row_float(row, "l1_cm", 200), _row_float(row, "l2_cm", 200), _row_float(row, "l3_cm", 200)
         perimeter = 2 * (l1 + l2 + l3)
-        dim_str = f"L={l1:g}+{l2:g}+{l3:g} см, {b_str}, H={hp:g} см"
+        dim_str = f"L={dt_num(l1)}+{dt_num(l2)}+{dt_num(l3)} см, {b_str}, H={dt_num(hp)} см"
     elif elem_type == "t_wall":
         l1, l2 = _row_float(row, "l1_cm", 200), _row_float(row, "l2_cm", 200)
         perimeter = 2 * (l1 + l2)
         offset = t_wall_offset_label(layout)
-        dim_str = f"T: A={l1:g} см, B={l2:g} см, {offset + ', ' if offset else ''}{thickness_label(layout)}, H={hp:g} см"
+        dim_str = f"T: A={dt_num(l1)} см, B={dt_num(l2)} см, {offset + ', ' if offset else ''}{thickness_label(layout)}, H={dt_num(hp)} см"
     elif elem_type == "shaft":
         d = panels["dims"]
         perimeter = 2 * (d["l1"] + d["l2"])
-        dim_str = f"A={d['l1']:g} см, B={d['l2']:g} см, {thickness_label(panels)}, {shaft_inside_label(panels)}, H={hp:g} см"
+        dim_str = f"A={dt_num(d['l1'])} см, B={dt_num(d['l2'])} см, {thickness_label(panels)}, {shaft_inside_label(panels)}, H={dt_num(hp)} см"
     else:
         return "", 0.0
     return dim_str.replace(" см", " " + dt("см")), panel_area * cnt   # мерната единица на езика на документа
@@ -910,24 +919,42 @@ DISPLAY_TYPES = {
 }
 
 def build_drawing_elements(df):
-    """Елементите за чертежите (PDF и Excel): наименование, тип, брой, разположение и сметка."""
+    """
+    Елементите за чертежите (PDF и Excel): наименование, тип, брой, разположение и сметка. Частите на обединен
+    елемент (27.11.2026) - една след друга, с името му („Обединен елемент Е1 - П-стена“); първата носи group_head:
+    името, частите, общата сметка и местата им в 3D плана (общ изглед в PDF).
+    """
     elements = []
-    for _, row in df.iterrows():
-        elem_type = str(row.get("type", "wall"))
-        name = str(row.get("name", "Елемент"))
-        layout = element_layout(elem_type, row)
-        if layout is None:
-            continue
-        elem_bom = dict(get_element_teko_panels(elem_type, row))
-        for acc_code, acc_qty in get_element_accessories(elem_type, row).items():
-            elem_bom[acc_code] = elem_bom.get(acc_code, 0) + acc_qty
-        elements.append({
-            "name": format_element_label(elem_type, name),
-            "wall_type": dt(DISPLAY_TYPES[elem_type]),
-            "count": int(_row_float(row, "count", 1)),
-            "layout": layout,
-            "bom": elem_bom
-        })
+    for group, items in calc_units(df):
+        start = len(elements)
+        for _, row in items:
+            elem_type = str(row.get("type", "wall"))
+            name = str(row.get("name", "Елемент"))
+            layout = element_layout(elem_type, row)
+            if layout is None:
+                continue
+            elem_bom = dict(get_element_teko_panels(elem_type, row))
+            for acc_code, acc_qty in get_element_accessories(elem_type, row).items():
+                elem_bom[acc_code] = elem_bom.get(acc_code, 0) + acc_qty
+            label = format_element_label(elem_type, name)
+            elements.append({
+                "name": f"{group_label(group)} - {label}" if group else label,
+                "wall_type": dt(DISPLAY_TYPES[elem_type]),
+                "count": int(_row_float(row, "count", 1)),
+                "layout": layout,
+                "bom": elem_bom
+            })
+        if group and len(elements) > start:
+            bom = {}
+            for elem in elements[start:]:
+                for code, qty in elem["bom"].items():
+                    bom[code] = bom.get(code, 0) + qty
+            part_df = pd.DataFrame([row for _, row in items]).reset_index(drop=True)
+            pieces = floor_pieces(part_df)
+            positions = {p["id"]: p["group_pos"] for p in pieces if p["group_pos"]}
+            elements[start]["group_head"] = {
+                "name": group_label(group), "parts": [p["label"] for p in pieces], "bom": bom,
+                "pieces": pieces, "positions": default_positions(pieces, positions)}
     return elements
 
 # === Преглед на елементите под таблицата ===
@@ -1477,7 +1504,11 @@ def element_column_config():
         "height_cm": st.column_config.NumberColumn(t("Височина (см)"), format="%g", width="auto"),
         "closed_end_1": st.column_config.CheckboxColumn(t("Затворен край 1"), default=True, width="auto"),
         "closed_end_2": st.column_config.CheckboxColumn(t("Затворен край 2"), default=True, width="auto"),
-        "closed_end_3": st.column_config.CheckboxColumn(t("Затворен край 3 (само T-стена)"), default=True, width="auto")
+        "closed_end_3": st.column_config.CheckboxColumn(t("Затворен край 3 (само T-стена)"), default=True, width="auto"),
+        "group": st.column_config.TextColumn(t("🔗 Обединен елемент"), width="auto",
+                                             help=t("Частите на един обединен елемент (от таб 2 - „🔗 Обедини“) - "
+                                                    "в сметките, PDF, Excel и офертата излизат като един елемент. "
+                                                    "Изтрито име - частта става отделен елемент."))
     }
 
 SOURCE_NOTE_PREFIX = "📍 "   # бележка „откъде е елементът“ (source от Gemini) - отделно от забележките
@@ -1805,6 +1836,10 @@ with tab1:
                          else t("📄 Без чертеж (въведени ръчно)"))
                 st.markdown(f"#### {title}")
                 st.caption(t("{n} елемента", n=len(part)))
+            # „Обединен елемент“ - текст (празната колона pandas я пази като число и редакторът не я пуска)
+            # (и при празна таблица - празен списък pandas го прави float, затова изрично текст)
+            part = part.assign(group=pd.Series([group_of({"group": v}) for v in part.get("group", [None] * len(part))],
+                                               index=part.index, dtype="string"))
             edited = st.data_editor(
                 part,
                 num_rows="delete",  # нов ред - само с „➕ Добави елемент“, без „+“ под всяка колона
@@ -2036,38 +2071,48 @@ def render_specification_tab(df_calc):
         project_panels_summary = {}
         project_accessories_summary = {}
 
-        for _, row in df_calc.iterrows():
-            cnt = int(_row_float(row, "count", 1))
-            h = _row_float(row, "height_cm", 300)
-            elem_type = str(row.get("type", "wall"))
-            name = str(row.get("name", "Елемент"))
+        # обединен елемент (27.11.2026) - един ред: частите с размерите си, сборът от панелите и площта
+        for group, items in calc_units(df_calc):
+            unit = {"labels": [], "dims": [], "area": 0.0, "heights": [], "panels": {}, "count": 1}
+            for _, row in items:
+                cnt = int(_row_float(row, "count", 1))
+                h = _row_float(row, "height_cm", 300)
+                elem_type = str(row.get("type", "wall"))
+                name = str(row.get("name", "Елемент"))
 
-            row_warns = check_element_dimensions(row)
-            all_warnings.extend(row_warns)
+                row_warns = check_element_dimensions(row)
+                all_warnings.extend(row_warns)
 
-            elem_label = format_element_label(elem_type, name)
-            dim_str, area = element_dims_and_area(elem_type, row)
+                elem_label = format_element_label(elem_type, name)
+                dim_str, area = element_dims_and_area(elem_type, row)
 
-            total_a += area
-            
-            h_breakdown_str = format_height_breakdown_text(h, element_layout(elem_type, row))
+                total_a += area
 
-            panels_dict = get_element_teko_panels(elem_type, row)
-            for p_name, p_qty in panels_dict.items():
-                project_panels_summary[p_name] = project_panels_summary.get(p_name, 0) + p_qty
+                h_breakdown_str = format_height_breakdown_text(h, element_layout(elem_type, row))
 
-            panels_str = ", ".join([f"{t_item(k)} ({v} {t('бр.')})" for k, v in panels_dict.items()])
+                panels_dict = get_element_teko_panels(elem_type, row)
+                for p_name, p_qty in panels_dict.items():
+                    project_panels_summary[p_name] = project_panels_summary.get(p_name, 0) + p_qty
+                    unit["panels"][p_name] = unit["panels"].get(p_name, 0) + p_qty
 
-            acc_dict = get_element_accessories(elem_type, row)
-            for acc_name, acc_qty in acc_dict.items():
-                project_accessories_summary[acc_name] = project_accessories_summary.get(acc_name, 0) + acc_qty
+                acc_dict = get_element_accessories(elem_type, row)
+                for acc_name, acc_qty in acc_dict.items():
+                    project_accessories_summary[acc_name] = project_accessories_summary.get(acc_name, 0) + acc_qty
 
+                unit["labels"].append(elem_label)
+                unit["dims"].append(t_item(dim_str))
+                unit["area"] += area
+                unit["heights"].append(h_breakdown_str)
+                unit["count"] = cnt
+
+            panels_str = ", ".join([f"{t_item(k)} ({v} {t('бр.')})" for k, v in unit["panels"].items()])
             detailed_rows.append({
-                t("Елемент"): elem_label,
-                t("Размери"): t_item(dim_str),
-                t("Брой"): cnt,
-                t("Площ (m²)"): round(area, 2),
-                t("Разпределение по височина"): h_breakdown_str,
+                t("Елемент"): t("🔗 Обединен елемент {name}", name=group) if group else unit["labels"][0],
+                t("Размери"): ("; ".join(f"{lb}: {d}" for lb, d in zip(unit["labels"], unit["dims"])) if group
+                               else unit["dims"][0]),
+                t("Брой"): 1 if group else unit["count"],
+                t("Площ (m²)"): round(unit["area"], 2),
+                t("Разпределение по височина"): " / ".join(dict.fromkeys(unit["heights"])),
                 t("Панели TEKO (Вид и брой)"): panels_str
             })
 
@@ -2188,16 +2233,21 @@ def render_offer_tab(df_calc, current):
                 grand_total_val = subtotal_val + vat_val
 
                 offer_table_rows = []
-                for _, row in df_calc.iterrows():
-                    cnt = int(_row_float(row, "count", 1))
-                    elem_type = str(row.get("type", "wall"))
-                    name = str(row.get("name", "Елемент"))
-                    dim_str, area = element_dims_and_area(elem_type, row)
+                for group, items in calc_units(df_calc):   # обединен елемент - един ред (27.11.2026)
+                    labels, dims, area, cnt = [], [], 0.0, 1
+                    for _, row in items:
+                        cnt = int(_row_float(row, "count", 1))
+                        elem_type = str(row.get("type", "wall"))
+                        name = str(row.get("name", "Елемент"))
+                        dim_str, row_area = element_dims_and_area(elem_type, row)
+                        labels.append(format_element_label(elem_type, name))
+                        dims.append(dim_str)
+                        area += row_area
 
                     offer_table_rows.append({
-                        "Елемент": format_element_label(elem_type, name),
-                        "Размери": dim_str,
-                        "Брой": cnt,
+                        "Елемент": group_label(group) if group else labels[0],
+                        "Размери": "; ".join(f"{lb}: {d}" for lb, d in zip(labels, dims)) if group else dims[0],
+                        "Брой": 1 if group else cnt,
                         "Площ (m²)": area,
                         "Обща сума (€)": area * price_m2
                     })
@@ -2326,10 +2376,44 @@ def floor_pieces(df_part):
         plan, boxes = piece_plan(layout), piece_boxes(layout)
         label = format_element_label(elem_type, name)
         cnt = int(_row_float(row, "count", 1))
+        group = group_of(row)
         for k in range(cnt):
             pieces.append({**plan, "boxes": boxes, "id": f"{base}|{seen[base]}|{k}", "type": elem_type, "name": name,
-                           "label": label + (f" ({k + 1})" if cnt > 1 else ""), "row": idx, "k": k, "count": cnt})
+                           "label": label + (f" ({k + 1})" if cnt > 1 else ""), "row": idx, "k": k, "count": cnt,
+                           "group": group, "group_pos": group_position(row) if group else None})
     return pieces
+
+
+def group_position(row):
+    """Мястото на частта на обединен елемент в 3D плана (колона group_pos, JSON) или None."""
+    try:
+        pos = json.loads(row.get("group_pos") or "")
+        return {"x": float(pos["x"]), "y": float(pos["y"]), "rot": float(pos.get("rot", 0) or 0),
+                "mir": bool(pos.get("mir"))}
+    except (TypeError, ValueError, KeyError):
+        return None
+
+
+def group_label(name):
+    """„Обединен елемент Е1“ - на езика на документа."""
+    return f"{dt('Обединен елемент')} {name}".strip()
+
+
+def calc_units(df):
+    """
+    Единиците за сметките, PDF и офертата: [(група или „“, [(индекс, ред)])] по реда на таблицата - всеки ред
+    отделно, частите на обединен елемент - заедно (на мястото на първата си част).
+    """
+    units, at = [], {}
+    for idx, row in df.iterrows():
+        g = group_of(row)
+        if g and g in at:
+            units[at[g]][1].append((idx, row))
+            continue
+        if g:
+            at[g] = len(units)
+        units.append((g, [(idx, row)]))
+    return units
 
 
 # Промени от плана (потребителят, 24.11.2026, вариант А): нов елемент, промяна на име и размери, копирай / постави,
@@ -2362,7 +2446,7 @@ def element_signature(row):
     return (drawing_name(row.get("drawing")), elem_type, name, tuple(num(c) or 0 for c in lengths),
             tuple([t1] + [num(c) or t1 for c in ARM_THICKNESS_COLUMNS[1:n_walls]]),
             num("height_cm") or st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM),
-            tuple(_closed_end(row, c) for c in CLOSED_END_COLUMNS[:FLOOR_ENDS.get(elem_type, 2)]))
+            tuple(_closed_end(row, c) for c in CLOSED_END_COLUMNS[:FLOOR_ENDS.get(elem_type, 2)]), group_of(row))
 
 
 def floor_element_fields(prefix, elem_type, row):
@@ -2399,14 +2483,14 @@ def floor_missing(elem_type, values):
             if col != "height_cm" and not (values.get(cols.get(col, col)) or 0) > 0]
 
 
-def floor_apply(store, pieces, drawing, action, place=None, row_width_cm=ROW_WIDTH_CM):
+def floor_apply(store, pieces, drawing, action, place=None, row_width_cm=ROW_WIDTH_CM, edit=None):
     """
     Промяна от 3D плана -> таблица 1 (записва проекта и презарежда цялата страница). Местата следват бройките:
     поставеното копие - на place, новите елементи - под чертежа; след промяна всички остават, където са.
     Избран след презареждането: новият / копираният / промененият брой.
     """
     df = st.session_state["edited_df"].reset_index(drop=True)
-    new_df, moves, added = apply_floor_edit(df, action, element_signature)
+    new_df, moves, added = edit or apply_floor_edit(df, action, element_signature)
     new_df = thickness_to_walls(new_df, migrate=False)
     std = st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM)
     part = next((g for name, g in drawing_groups(fill_default_height(new_df, std)) if name == drawing),
@@ -2427,7 +2511,7 @@ def floor_apply(store, pieces, drawing, action, place=None, row_width_cm=ROW_WID
     store["sel"] = added_ids[0] if added_ids else old_to_new.get(edited) if action["a"] == "edit" else None
     store["keep_view"] = True
     store["edit_n"] = store.get("edit_n", 0) + 1
-    for key in ("pdf", "dialog"):
+    for key in ("pdf", "dialog", "multi"):
         store.pop(key, None)
     if part.empty:   # изтрит е последният елемент на чертежа
         st.session_state.pop("floor_drawing", None)
@@ -2578,6 +2662,101 @@ def floor_delete_dialog(store, pieces, drawing, fkey, row_width_cm, pid=None):
         close_floor_dialog(store)
 
 
+END_NAMES = {"closed_end_1": "край 1", "closed_end_2": "край 2", "closed_end_3": "край 3"}
+
+
+def floor_merge_dialog(store, pieces, drawing, fkey, row_width_cm, pid=None):
+    """
+    Обединяване (потребителят, 27.11.2026): избраните с Ctrl / Shift + клик - един „Обединен елемент <име>“.
+    Краищата, които опират в друга част, се отварят (с отметка - потвърждение); всяка част става свой ред (1 бр.)
+    с групата и мястото си в плана (group_pos - пази се в архива).
+    """
+    by_id = {p["id"]: p for p in pieces}
+    ids = [i for i in store["dialog"].get("ids", []) if i in by_id]
+    old = list(dict.fromkeys(by_id[i]["group"] for i in ids if by_id[i]["group"]))   # обединен в избора - целият
+    ids = list(dict.fromkeys(ids + [p["id"] for p in pieces if p["group"] and p["group"] in old]))
+    if len(ids) < 2:
+        close_floor_dialog(store)
+    parts = [by_id[i] for i in ids]
+    df = st.session_state["edited_df"].reset_index(drop=True)
+    existing = {group_of(row) for _, row in df.iterrows()} - {""}
+    default = old[0] if old else next(f"Е{n}" for n in range(1, 1000) if f"Е{n}" not in existing)
+    touching = touching_ends(parts, store["positions"])
+    st.markdown(t("**Части ({n}):** {names}", n=len(parts), names=", ".join(p["label"] for p in parts)))
+    with st.form(f"floor_{fkey}_merge_form", border=False):
+        name = st.text_input(t("Име на обединения елемент"), value=default, key=f"floor_{fkey}_merge_name")
+        st.caption(t("В сметките, PDF, Excel и офертата излиза като „Обединен елемент {name}“; частите се редят "
+                     "както досега.", name=name or default))
+        opens = []
+        if touching:
+            st.markdown(t("**Краища, които опират в друга част** - отварят се (без чело и 2 x EX):"))
+        for part_id, col, other in touching:
+            p = by_id[part_id]
+            label = t("{part}: {end} опира в {other}", part=p["label"], end=t(END_NAMES[col]),
+                      other=by_id[other]["label"])
+            if _closed_end(df.iloc[p["row"]], col):
+                opens.append((p, col, st.checkbox(label, value=True, key=f"floor_{fkey}_open_{part_id}_{col}")))
+            else:
+                st.caption(t("{label} - вече е отворен.", label=label))
+        if not touching:
+            st.info(t("Няма краища, които опират в друга част - затворените краища остават затворени."))
+        col_ok, col_no = st.columns(2)
+        ok = col_ok.form_submit_button(t("🔗 Обедини"), type="primary", use_container_width=True)
+        cancel = col_no.form_submit_button(t("Отказ"), use_container_width=True)
+    name = (name or "").strip()
+    if ok and (not name or (name in existing and name not in old)):
+        st.error(t("Напишете име, което го няма в проекта."))
+    elif ok:
+        changes = {(p["row"], p["k"]): {"group": name} for p in parts}
+        for p, col, on in opens:
+            if on:
+                changes[(p["row"], p["k"])][col] = False
+        for p in parts:
+            pos = store["positions"][p["id"]]
+            values = changes[(p["row"], p["k"])]
+            if len(values) > 1:   # отворен край - бетонът остава на мястото си (центърът е с кофража)
+                row = {**df.iloc[p["row"]].to_dict(), **values}
+                row["height_cm"] = row.get("height_cm") or st.session_state.get("std_height_cm", DEFAULT_HEIGHT_CM)
+                layout = row_to_layout(p["type"], pd.Series(row))
+                if layout is not None:
+                    pos = keep_concrete(pos, p, piece_plan(layout))
+            values["group_pos"] = json.dumps({"x": round(pos["x"], 1), "y": round(pos["y"], 1),
+                                              "rot": round(pos.get("rot", 0) or 0, 1), "mir": bool(pos.get("mir"))})
+        for g in old:   # друго име на вече обединен - и останалите му части (ако не са в избора)
+            for p in pieces:
+                if p["group"] == g and (p["row"], p["k"]) not in changes:
+                    changes[(p["row"], p["k"])] = {"group": name}
+        floor_apply(store, pieces, drawing, {"a": "group"}, row_width_cm=row_width_cm,
+                    edit=apply_floor_group(df, changes, element_signature))
+    if cancel:
+        close_floor_dialog(store)
+
+
+def floor_ungroup(store, pieces, drawing, group, row_width_cm):
+    """„✂️ Раздели“: частите стават отделни елементи (отворените краища остават отворени)."""
+    df = st.session_state["edited_df"].reset_index(drop=True)
+    changes = {(p["row"], p["k"]): {"group": None, "group_pos": None} for p in pieces if p["group"] == group}
+    floor_apply(store, pieces, drawing, {"a": "group"}, row_width_cm=row_width_cm,
+                edit=apply_floor_group(df, changes, element_signature))
+
+
+def save_group_positions(pieces, positions, ids):
+    """Преместен / завъртян обединен елемент - мястото на частите му в таблицата (group_pos) и в архива."""
+    df = st.session_state["edited_df"].reset_index(drop=True)
+    if "group_pos" not in df.columns:
+        df["group_pos"] = None
+    df["group_pos"] = df["group_pos"].astype(object)
+    by_id = {p["id"]: p for p in pieces}
+    for pid in ids:
+        pos = positions[pid]
+        df.at[by_id[pid]["row"], "group_pos"] = json.dumps(
+            {"x": round(pos["x"], 1), "y": round(pos["y"], 1), "rot": round(pos.get("rot", 0) or 0, 1),
+             "mir": bool(pos.get("mir"))})
+    reset_table_editors()
+    st.session_state["edited_df"] = df
+    save_current_project()
+
+
 def close_floor_dialog(store):
     store.pop("dialog", None)
     st.rerun()
@@ -2591,6 +2770,7 @@ def show_floor_dialog(store, pieces, drawing, fkey, row_width_cm):
     kind, pid = store["dialog"]["kind"], store["dialog"].get("pid")
     title, body, width = {"add": (t("➕ Нов елемент"), floor_add_dialog, "large"),
                           "edit": (t("✏️ Размери на елемента"), floor_edit_dialog, "large"),
+                          "merge": (t("🔗 Обединяване на елементи"), floor_merge_dialog, "large"),
                           "delete": (t("🗑 Изтриване"), floor_delete_dialog, "small")}[kind]
     st.dialog(title, width=width, on_dismiss=lambda: store.pop("dialog", None))(body)(
         store, pieces, drawing, fkey, row_width_cm, pid)
@@ -2606,6 +2786,9 @@ def render_floor_edit(store, pieces, drawing, fkey, result, row_width_cm, side):
     sel = getattr(result, "sel", None)
     if sel is not None:   # "" - нищо не е избрано
         store["sel"] = sel or None
+    multi = getattr(result, "multi", None)
+    if multi is not None:
+        store["multi"] = [i for i in multi if i in by_id]
     action = getattr(result, "action", None) or {}
     if action.get("a") == "edit" and action.get("id") in by_id:   # двоен клик
         store["sel"] = action["id"]
@@ -2615,7 +2798,12 @@ def render_floor_edit(store, pieces, drawing, fkey, result, row_width_cm, side):
     elif action.get("a") == "paste" and action.get("id") in by_id:
         p = by_id[action["id"]]
         place = {"x": action["x"], "y": action["y"], "rot": action.get("rot", 0), "mir": bool(action.get("mir"))}
-        floor_apply(store, pieces, drawing, {"a": "copy", "row": p["row"], "k": p["k"]}, place, row_width_cm)
+        if p["group"]:   # копие на част от обединен елемент - отделен елемент
+            row = st.session_state["edited_df"].reset_index(drop=True).iloc[p["row"]].to_dict()
+            values = {k: v for k, v in row.items() if k not in ("group", "group_pos", "count")}
+            floor_apply(store, pieces, drawing, {"a": "add", "count": 1, "values": values}, place, row_width_cm)
+        else:
+            floor_apply(store, pieces, drawing, {"a": "copy", "row": p["row"], "k": p["k"]}, place, row_width_cm)
 
     sel_piece = by_id.get(store.get("sel"))
     with side:
@@ -2625,8 +2813,21 @@ def render_floor_edit(store, pieces, drawing, fkey, result, row_width_cm, side):
                      use_container_width=True,
                      help=t("Името и размерите на избрания елемент (или двоен клик върху него).")):
             store["dialog"] = {"kind": "edit", "pid": sel_piece["id"]}
+        multi = [i for i in store.get("multi", []) if i in by_id]
+        if st.button(t("🔗 Обедини"), key=f"floor_merge_{fkey}", disabled=len(multi) < 2, use_container_width=True,
+                     help=t("Ctrl + клик (или Shift + клик) върху елементите в плана, после „🔗 Обедини“ - един "
+                            "обединен елемент с ново име в сметките, PDF, Excel и офертата.")):
+            store["dialog"] = {"kind": "merge", "ids": multi}
+        if sel_piece and sel_piece["group"]:
+            if st.button(t("✂️ Раздели"), key=f"floor_split_{fkey}", use_container_width=True,
+                         help=t("Частите на „{name}“ стават отделни елементи (отворените краища остават отворени - "
+                                "сложете отметките в таблица 1, ако трябва).", name=sel_piece["group"])):
+                floor_ungroup(store, pieces, drawing, sel_piece["group"], row_width_cm)
         st.caption(t("Избран: {name}", name=sel_piece["label"]) if sel_piece
                    else t("Кликнете елемент в плана, за да го изберете."))
+        if sel_piece and sel_piece["group"]:
+            st.caption(t("🔗 Част от „{name}“.", name=group_label(sel_piece["group"])))
+        st.caption(t("Ctrl + клик - избор на няколко елемента за „🔗 Обедини“."))
     if store.get("dialog"):
         show_floor_dialog(store, pieces, drawing, fkey, row_width_cm)
 
@@ -2745,6 +2946,14 @@ def render_floor_tab(df_calc, current):
         store["auto_key"] = auto_key
         store["auto_n"] = store.get("auto_n", 0) + 1   # компонентът взима новите места
         store.pop("pdf", None)
+    # обединените елементи - на местата си от таблицата (group_pos, пази се в архива); веднъж за всяка стойност
+    # (фрагментът се презарежда със старата таблица - иначе ще ги върне назад)
+    seen = store.setdefault("group_seen", {})
+    for p in pieces:
+        if p["group_pos"] and seen.get(p["id"]) != p["group_pos"]:
+            store["positions"][p["id"]] = dict(p["group_pos"])
+            store.setdefault("fixed", set()).add(p["id"])
+            seen[p["id"]] = p["group_pos"]
     known = {pid: pos for pid, pos in store["positions"].items() if pid in ids}
     # новите елементи - на редове под чертежа (фонът е от y = 0 нагоре), оттам се влачат до мястото си
     store["positions"] = default_positions(pieces, known,
@@ -2771,7 +2980,8 @@ def render_floor_tab(df_calc, current):
     # нов ключ при ново поставяне по чертежа - иначе компонентът връща старите места и ги записва като преместени
     ckey = f"floor_{fkey}_{store['reset']}_{store.get('auto_n', 0)}_{store.get('edit_n', 0)}"
     data = {
-        "pieces": [{k: p[k] for k in ("id", "label", "poly", "rings", "forms", "cx", "cy", "w", "h")} for p in pieces],
+        "pieces": [{k: p[k] for k in ("id", "label", "poly", "rings", "forms", "cx", "cy", "w", "h", "group")}
+                   for p in pieces],
         "positions": store["positions"],
         "bg": bg_data,
         "token": f"{ckey}|{bg_data['w'] if bg_data else 0}",
@@ -2786,13 +2996,15 @@ def render_floor_tab(df_calc, current):
                   "hint": t("Влачете елементите; клик върху елемент го избира."),
                   "selected": t("Избран: {name} - кръгчето го върти.", name="{name}"),
                   "copy": t("⧉ Копирай"), "paste": t("📋 Постави"), "del": t("🗑 Изтрий"),
-                  "copied": t("Копиран: {name} - Ctrl+V го поставя там, където е мишката.", name="{name}")},
+                  "copied": t("Копиран: {name} - Ctrl+V го поставя там, където е мишката.", name="{name}"),
+                  "multi": t("Избрани {n} - „🔗 Обедини“ вдясно ги обединява (Ctrl + клик - добави / махни).",
+                             n="{n}")},
     }
     col_plan, col_side = st.columns([5, 1])   # вдясно - „➕ Нов елемент“ и „✏️ Размери“
     with col_plan:
         result = floor_component()(data=data, key=ckey, on_positions_change=lambda: None,
                                    on_calib_change=lambda: None, on_sel_change=lambda: None,
-                                   on_action_change=lambda: None)
+                                   on_action_change=lambda: None, on_multi_change=lambda: None)
     moved = getattr(result, "positions", None)
     if moved:
         moved = {pid: pos for pid, pos in moved.items() if pid in ids}
@@ -2801,6 +3013,11 @@ def render_floor_tab(df_calc, current):
             store.setdefault("moved", set()).update(changed)   # остават при ново поставяне по чертежа
             store["positions"].update(moved)
             store.pop("pdf", None)  # готовият PDF е със старите места
+            by_id = {p["id"]: p for p in pieces}
+            grouped = [pid for pid in changed if by_id[pid]["group"]]
+            if grouped:   # обединен елемент - мястото се записва (остава след F5)
+                save_group_positions(pieces, store["positions"], grouped)
+                seen.update({pid: dict(store["positions"][pid]) for pid in grouped})
     measured = getattr(result, "calib", None)
     if measured and bg:
         bg["cm_per_px"] *= st.session_state.get(f"floor_known_{fkey}", 1000.0) / measured
