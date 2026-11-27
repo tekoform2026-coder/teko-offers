@@ -251,7 +251,10 @@ def _plan_geometry(layout):
         if end_2:
             corners += [("EX", m - t3 - T, l3), ("EX", m, l3)]
 
-
+    # обединен елемент (floor_plan.group_layouts): страните, сменени при допира с друга част - свое място,
+    # и ъглите IN, където край на друга част опира в страната
+    place.update({name: tuple(v) for name, v in layout.get("face_place", {}).items()})
+    corners = corners + [tuple(c) for c in layout.get("extra_corners", [])]
     return poly, place, corners
 
 def _closed_label(layout):
@@ -341,14 +344,15 @@ def _face_strips(layout, place, poly):
         a0, c0 = (x0, y0) if axis == 'x' else (y0, x0)
         mid = a0 + length / 2
         probe = (lambda c: (mid, c)) if axis == 'x' else (lambda c: (c, mid))
-        normal = 1 if core.contains_point(probe(c0 - 1)) else -1
+        # обединен елемент - страната може да продължава отвъд бетона на частта (посоката е записана)
+        normal = face.get("normal") or (1 if core.contains_point(probe(c0 - 1)) else -1)
         strips[face["name"]] = (axis, a0, a0 + length, c0, c0 + T, normal)
     return strips
 
 
 def _prop_marks(layout, strips):
     """Местата на вертикализаторите в план: [(страна, координата по оста)], по calculate_push_pull_props."""
-    from accessories_calculator import _prop_positions, _props_on_sides
+    from accessories_calculator import _prop_positions, _props_on_sides, prop_face_names
     faces = {f["name"]: f for f in layout["faces"]}
 
     def covering(axis, coord, normal):
@@ -360,14 +364,12 @@ def _prop_marks(layout, strips):
         for name in ("A", "B"):
             marks.append((name, strips[name][1] + faces[name]["length_cm"] / 2))
     elif layout["type"] == "shaft":   # само отвън, на четирите страни (вътре няма място)
-        for name in ("A", "B", "C", "D"):
+        for name in prop_face_names(layout, ("A", "B", "C", "D")):
             length = faces[name]["length_cm"]
             outer, _opposite = _props_on_sides(length, layout["height_cm"])
             marks += [(name, strips[name][1] + pos) for pos in _prop_positions(length, outer)]
     else:
-        for name in ("A", "B", "C"):
-            if name not in faces:
-                continue
+        for name in prop_face_names(layout, ("A", "B", "C")):
             axis, a0, _a1, c_lo, _c_hi, normal = strips[name]
             length = faces[name]["length_cm"]
             outer, opposite = _props_on_sides(length, layout["height_cm"], layout["type"] == "wall")
