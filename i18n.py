@@ -655,9 +655,13 @@ EN = {
     "край 3": "end 3",
     "**Части ({n}):** {names}": "**Parts ({n}):** {names}",
     "Име на обединения елемент": "Name of the combined element",
-    "В сметките, PDF, Excel и офертата излиза като „Обединен елемент {name}“; частите се редят както досега.":
-        "Shown as “Combined element {name}” in the bill of quantities, PDF, Excel and the offer; the parts are laid "
-        "out as before.",
+    "В сметките, PDF, Excel и офертата излиза като „Обединен елемент {name}“. Допрените части се доближават до "
+    "бетона, страните по една линия се редят като една, край в страната на друга част - 2 x IN.":
+        "Shown as “Combined element {name}” in the bill of quantities, PDF, Excel and the offer. Touching parts are "
+        "moved together up to the concrete, faces on one line are laid out as one, an end against the side of another "
+        "part gets 2 x IN.",
+    "⚠️ Обединен елемент {name}: общото редене не стана ({err}) - частите са редени поотделно.":
+        "⚠️ Combined element {name}: the joint layout failed ({err}) - the parts are laid out separately.",
     "**Краища, които опират в друга част** - отварят се (без чело и 2 x EX):":
         "**Ends that touch another part** - they are opened (no end panel and no 2 x EX):",
     "{part}: {end} опира в {other}": "{part}: {end} touches {other}",
