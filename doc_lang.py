@@ -477,10 +477,9 @@ TR = {
         "Опалубка железобетонных элементов для объекта: «{project}»\n",
         "Оплата армиранобетонских елемената за објекат: „{project}”\n",
         "Betonarme elemanların kalıplanması, proje: “{project}”\n"),
-    # 3D план на етажа (таб 2, 22.11.2026)
-    "3D план на етажа": ("3D floor plan", "3D-Geschossplan", "Plan 3D de l'étage", "Plano 3D de la planta",
-                         "Τρισδιάστατη κάτοψη ορόφου", "3D tlocrt etaže", "Plan 3D al etajului", "Rzut 3D kondygnacji",
-                         "3D план поверху", "3D план этажа", "3D основа спрата", "3B kat planı"),
+    # 3D план (таб 2, 22.11.2026; заглавието на PDF-а - „3D план“ като таба, 27.11.2026)
+    "3D план": ("3D plan", "3D-Plan", "Plan 3D", "Plano 3D", "Τρισδιάστατο σχέδιο", "3D plan", "Plan 3D", "Plan 3D",
+                "3D план", "3D план", "3D план", "3B plan"),
     "Чертеж: {name}": ("Drawing: {name}", "Zeichnung: {name}", "Plan : {name}", "Plano: {name}", "Σχέδιο: {name}",
                        "Nacrt: {name}", "Plan: {name}", "Rysunek: {name}", "Креслення: {name}", "Чертёж: {name}",
                        "Цртеж: {name}", "Çizim: {name}"),
