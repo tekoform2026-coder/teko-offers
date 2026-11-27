@@ -20,7 +20,7 @@ from matplotlib.transforms import Affine2D
 from drawing_generator import (_plan_geometry, _face_strips, PANEL_T, COLOR_3D_PANEL, COLOR_3D_COMPENSATOR,
                                COLOR_3D_CORNER, COLOR_3D_CORNER_IN, COLOR_3D_CONCRETE, COLOR_3D_EDGE, COLOR_BOARD,
                                TOP_PANEL, TOP_PANEL_BORDER, TOP_EX, TOP_IN, TOP_CONCRETE_BORDER)
-from teko_calculator import face_row_pieces, is_compensator_row
+from teko_calculator import IN_CORNER_CM, _face_rows, board_cm, face_row_pieces, is_compensator_row
 from doc_lang import dt
 
 SNAP_CM = 5          # местата прилепват през 5 см
@@ -88,11 +88,13 @@ def piece_plan(layout):
         forms.append([x, y, x + T, y + T, kind])
     xs = [p[0] for p in poly] + [f[0] for f in forms] + [f[2] for f in forms]
     ys = [p[1] for p in poly] + [f[1] for f in forms] + [f[3] for f in forms]
+    box = {"cx": (min(xs) + max(xs)) / 2, "cy": (min(ys) + max(ys)) / 2,
+           "w": max(xs) - min(xs), "h": max(ys) - min(ys)}
+    if layout.get("plan_center"):   # част на обединен елемент - центърът е на частта сама (мястото ѝ е по него)
+        box = dict(zip(("cx", "cy", "w", "h"), layout["plan_center"]))
     return {"poly": [[float(x), float(y)] for x, y in poly],
             "rings": [[[float(x), float(y)] for x, y in ring] for ring in _rings(poly)],
-            "forms": [[float(v) for v in f[:4]] + [f[4]] for f in forms],
-            "cx": (min(xs) + max(xs)) / 2, "cy": (min(ys) + max(ys)) / 2,
-            "w": max(xs) - min(xs), "h": max(ys) - min(ys)}
+            "forms": [[float(v) for v in f[:4]] + [f[4]] for f in forms], **box}
 
 
 def piece_boxes(layout):
@@ -285,14 +287,7 @@ def touching_ends(pieces, positions):
               for p in pieces}
     found = []
     for p in pieces:
-        poly = np.array(p["poly"], float)
-        own = Path(poly)
-        for col, i in END_EDGES.get(p.get("type"), ()):
-            a, b = poly[i], poly[(i + 1) % len(poly)]
-            mid, d = (a + b) / 2, (b - a) / max(np.hypot(*(b - a)), 1e-9)
-            n = np.array([d[1], -d[0]])
-            if own.contains_point(mid + n):   # навън - страната без бетон
-                n = -n
+        for col, mid, n in _end_edges(p):
             for q in pieces:
                 if q["id"] == p["id"]:
                     continue
@@ -301,6 +296,66 @@ def touching_ends(pieces, positions):
                     found.append((p["id"], col, q["id"]))
                     break
     return found
+
+
+def _end_edges(p):
+    """Краищата на елемента (локално): [(колона на края, средата на ръба на бетона, посоката навън)]."""
+    poly = np.array(p["poly"], float)
+    own = Path(poly)
+    ends = []
+    for col, i in END_EDGES.get(p.get("type"), ()):
+        a, b = poly[i], poly[(i + 1) % len(poly)]
+        mid, d = (a + b) / 2, (b - a) / max(np.hypot(*(b - a)), 1e-9)
+        n = np.array([d[1], -d[0]])
+        if own.contains_point(mid + n):   # навън - страната без бетон
+            n = -n
+        ends.append((col, mid, n))
+    return ends
+
+
+def close_gaps(pieces, positions, touching):
+    """
+    Обединяване (потребителят, 27.11.2026): частите се доближават, докато бетонът на допрения край опре в бетона на
+    другата част - празнината от кофража на челата (2 x 10 см) изчезва. Първата част стои, другите се местят по
+    веригата на допирите. Връща {id: (dx, dy)} - преместването на етажа (0 за първата и за недопрените).
+    """
+    by_id = {p["id"]: p for p in pieces}
+    links = []   # (част, друга част, преместване на частта към другата)
+    for pid, col, qid in touching:
+        p, q = by_id[pid], by_id[qid]
+        M, _t = _transform(p, positions[pid])
+        _c, mid, n = next(e for e in _end_edges(p) if e[0] == col)
+        start, d = np.array(to_world(*mid, p, positions[pid])), M @ n
+        outer = [np.array(to_world(x, y, q, positions[qid])) for x, y in _outer(q)]
+        hits = []
+        for a, b in zip(outer, outer[1:] + outer[:1]):   # лъчът start + s * d срещу ръба a -> b
+            e = b - a
+            den = d[0] * -e[1] + e[0] * d[1]
+            if abs(den) < 1e-9:
+                continue
+            w = a - start
+            s = (w[0] * -e[1] + e[0] * w[1]) / den
+            r = (d[0] * w[1] - d[1] * w[0]) / den
+            if -1e-6 <= r <= 1 + 1e-6 and -1 <= s <= TOUCH_CM + 1:
+                hits.append(s)
+        if hits:
+            links.append((pid, qid, d * max(0.0, min(hits))))
+    shift = {}
+    for p in pieces:   # всяка верига от допрени части - от първата си част
+        if p["id"] in shift:
+            continue
+        shift[p["id"]] = np.zeros(2)
+        changed = True
+        while changed:
+            changed = False
+            for pid, qid, v in links:
+                if qid in shift and pid not in shift:
+                    shift[pid] = shift[qid] + v
+                    changed = True
+                elif pid in shift and qid not in shift:
+                    shift[qid] = shift[pid] - v
+                    changed = True
+    return {p["id"]: tuple(float(c) for c in shift.get(p["id"], np.zeros(2))) for p in pieces}
 
 
 def keep_concrete(pos, old, new):
@@ -351,6 +406,258 @@ def apply_floor_group(df, changes, signature):
             ordered.append(y)
             seen.add(id(y))
     return _rows_to_df(df, ordered)
+
+
+# ---------- Обединен елемент - общото редене (потребителят, 27.11.2026 - за проверка) ----------
+# Частите се редят по алгоритъма (layout_element), после по местата си в плана (group_pos):
+#  - край на част, опрян в страната на друга (не в края ѝ): страната се дели при допира с 2 x IN (като при Т-стена),
+#    страните на частта спират при IN, срещуположната страна получава същите фуги (огледално - шпилките);
+#  - две страни една след друга по една линия (край срещу край, еднаква височина): една страна, редена по алгоритъма
+#    като една - в частта, която е по-напред в таблицата; в другата я няма.
+JOIN_TOL_CM = 3.0     # страни на една линия / допрени краища - до толкова
+
+
+def group_layouts(parts):
+    """
+    parts: [(разположение по алгоритъма, място в плана)] - частите на един обединен елемент.
+    Връща разположенията им (копия) за сметките и чертежите; plan_center пази центъра на частта сама (мястото е по него).
+    """
+    import copy
+    work = []
+    for layout, pos in parts:
+        piece = piece_plan(layout)
+        lay = copy.deepcopy(layout)
+        lay["plan_center"] = [piece["cx"], piece["cy"], piece["w"], piece["h"]]
+        lay["face_place"], lay["extra_corners"] = {}, []
+        poly, place, _corners = _plan_geometry(layout)
+        strips = _face_strips(layout, place, poly)
+        for face in lay["faces"]:
+            face["normal"] = strips[face["name"]][5]
+        work.append({"layout": lay, "piece": piece, "pos": pos})
+    _split_at_ends(work)
+    _join_straight(work)
+    return [w["layout"] for w in work]
+
+
+def _wall_faces(lay):
+    return [f for f in lay["faces"] if not f["name"].startswith("Край")]
+
+
+def _set_face(lay, face, segs, flip):
+    """Нови сегменти на страната - редовете наново по алгоритъма (и без замените по склада)."""
+    face["segments"] = [round(float(s), 4) for s in segs]
+    face["flip"] = tuple(sorted(flip))
+    face["boards"] = [board_cm(s) for s in face["segments"]]
+    face["length_cm"] = sum(max(0, s) for s in face["segments"])
+    face["rows"] = _face_rows(face["segments"], lay["height_levels"], face["flip"])
+    face.pop("seg_rows", None)
+
+
+def _move_face(lay, place, face, along):
+    """Началото на страната по оста ѝ (локално)."""
+    x0, y0, axis = place[face["name"]][:3]
+    lay["face_place"][face["name"]] = (along, y0, axis) if axis == 'x' else (x0, along, axis)
+
+
+def _face_line(piece, pos, face, place):
+    """Страната на етажа: началото и краят (по средата на лентата), посоката по нея и навън."""
+    x0, y0, axis = place[face["name"]][:3]
+    u = np.array([1.0, 0.0]) if axis == 'x' else np.array([0.0, 1.0])
+    v = np.array([0.0, 1.0]) if axis == 'x' else np.array([1.0, 0.0])
+    start = np.array([x0, y0], float) + v * PANEL_T / 2
+    M, t = _transform(piece, pos)
+    return M @ start + t, M @ (start + u * face["length_cm"]) + t, M @ u, M @ (v * face["normal"])
+
+
+def _cut(segs, flip, lo, hi):
+    """Сегментите между lo и hi (от началото на страната)."""
+    out, out_flip, at = [], [], 0.0
+    for i, s in enumerate(segs):
+        a, b = max(at, lo), min(at + s, hi)
+        if b - a > 0.01:
+            if i in flip:
+                out_flip.append(len(out))
+            out.append(b - a)
+        at += s
+    return out, out_flip
+
+
+def _breaks(segs, flip, cuts):
+    """Сегментите, разделени и на cuts (от началото на страната) - фугите срещу IN на другата страна."""
+    bounds = np.cumsum([0.0] + list(segs))
+    pts = sorted({round(float(b), 4) for b in bounds} |
+                 {round(float(c), 4) for c in cuts if bounds[0] + 0.01 < c < bounds[-1] - 0.01})
+    out, out_flip = [], []
+    for a, b in zip(pts, pts[1:]):
+        if b - a <= 0.01:
+            continue
+        i = int(np.searchsorted(bounds, (a + b) / 2)) - 1
+        if i in flip:
+            out_flip.append(len(out))
+        out.append(b - a)
+    return out, out_flip
+
+
+def _line_cuts(points, axis, c):
+    """Където линията по оста (на напречна координата c) минава през многоъгълника: [(от, до)]."""
+    k = 1 if axis == 'x' else 0
+    xs = []
+    for a, b in zip(points, points[1:] + points[:1]):
+        if (a[k] - c) * (b[k] - c) < 0:
+            r = (c - a[k]) / (b[k] - a[k])
+            xs.append(a[1 - k] + r * (b[1 - k] - a[1 - k]))
+    xs.sort()
+    return list(zip(xs[0::2], xs[1::2]))
+
+
+def _split_at_ends(work):
+    """Край на част в страната на друга: страната - на две с IN от двете страни на допира (повтаря се до края)."""
+    T = PANEL_T
+    for _ in range(100):
+        found = None
+        for j, wj in enumerate(work):
+            place = _plan_geometry(wj["layout"])[1]
+            M, t = _transform(wj["piece"], wj["pos"])
+            for g in _wall_faces(wj["layout"]):
+                x0, y0, axis = place[g["name"]][:3]
+                a0, c0 = (x0, y0) if axis == 'x' else (y0, x0)
+                a1 = a0 + g["length_cm"]
+                for i, wi in enumerate(work):
+                    if i == j:
+                        continue
+                    pts = [M.T @ (np.array(to_world(x, y, wi["piece"], wi["pos"])) - t) for x, y in _outer(wi["piece"])]
+                    for u0, u1 in _line_cuts(pts, axis, c0 + T / 2):
+                        # място за IN и поне 5 см панел от двете страни - иначе е ъгъл, не се пипа
+                        if u0 - IN_CORNER_CM >= a0 + 5 - 0.01 and u1 + IN_CORNER_CM <= a1 - 5 + 0.01:
+                            found = (j, g, axis, a0, c0, i, u0, u1)
+                            break
+                    if found:
+                        break
+                if found:
+                    break
+            if found:
+                break
+        if not found:
+            return
+        _split(work, *found)
+
+
+def _split(work, j, g, axis, a0, c0, i, u0, u1):
+    T = PANEL_T
+    lay = work[j]["layout"]
+    lo, hi = u0 - IN_CORNER_CM, u1 + IN_CORNER_CM
+    names = {f["name"] for f in lay["faces"]}
+    k = 2
+    while f"{g['name']} ({k})" in names:
+        k += 1
+    rest = {**g, "name": f"{g['name']} ({k})", "start": "IN"}
+    segs, flip = list(g["segments"]), set(g["flip"])
+    g["end"] = "IN"
+    _set_face(lay, g, *_cut(segs, flip, 0, lo - a0))
+    lay["faces"].insert(lay["faces"].index(g) + 1, rest)
+    lay["face_place"][rest["name"]] = (hi, c0, axis) if axis == 'x' else (c0, hi, axis)
+    _set_face(lay, rest, *_cut(segs, flip, hi - a0, sum(segs)))
+    lay["extra_corners"] += ([("IN", lo, c0), ("IN", u1, c0)] if axis == 'x' else [("IN", c0, lo), ("IN", c0, u1)])
+    lay["corners"]["IN"] += 2
+    # срещуположната страна - фуги точно срещу IN (огледално)
+    place = _plan_geometry(lay)[1]
+    across = []
+    for f in _wall_faces(lay):
+        fx, fy, f_axis = place[f["name"]][:3]
+        fa, fc = (fx, fy) if f_axis == 'x' else (fy, fx)
+        if f_axis == axis and f["normal"] == -g["normal"] and fa <= lo + 0.01 and fa + f["length_cm"] >= hi - 0.01:
+            across.append((abs(fc - c0), f, fa))
+    if across:
+        _d, f, fa = min(across, key=lambda x: x[0])
+        _set_face(lay, f, *_breaks(f["segments"], set(f["flip"]), [lo - fa, hi - fa]))
+    # страните на другата част до края ѝ - до IN (външния ръб на лентата)
+    wi, wj = work[i], work[j]
+    lay_i = wi["layout"]
+    place_i = _plan_geometry(lay_i)[1]
+    M, t = _transform(wj["piece"], wj["pos"])
+    outer_c = c0 + T if g["normal"] > 0 else c0
+    for f in _wall_faces(lay_i):
+        S, E, u, _n = _face_line(wi["piece"], wi["pos"], f, place_i)
+        u_j = M.T @ u
+        if abs(u_j[1 if axis == 'x' else 0]) < 0.9:   # само перпендикулярните на страната
+            continue
+        for end, P in (("start", S), ("end", E)):
+            pl = M.T @ (P - t)
+            along, cross = (pl[0], pl[1]) if axis == 'x' else (pl[1], pl[0])
+            if f[end] or not (lo - 1 <= along <= hi + 1 and c0 - T <= cross <= c0 + 2 * T):
+                continue
+            d = abs(cross - outer_c)
+            if (cross - outer_c) * g["normal"] >= 0 or d < 0.01:
+                continue
+            f[end] = "IN"
+            segs = list(f["segments"])
+            if end == "end":
+                segs[-1] -= d
+                _set_face(lay_i, f, segs, set(f["flip"]))
+            else:
+                segs[0] -= d
+                fx, fy, f_axis = place_i[f["name"]][:3]
+                _move_face(lay_i, place_i, f, (fx if f_axis == 'x' else fy) + d)
+                _set_face(lay_i, f, segs, set(f["flip"]))
+
+
+def _join_straight(work):
+    """Две страни една след друга по една линия (край срещу край) - една страна в частта по-напред в таблицата."""
+    for _ in range(100):
+        lines = []
+        for k, w in enumerate(work):
+            place = _plan_geometry(w["layout"])[1]
+            lines += [(k, f, place, *_face_line(w["piece"], w["pos"], f, place)) for f in _wall_faces(w["layout"])]
+        found = None
+        for i, f, place, Sf, Ef, uf, nf in lines:
+            for j, g, _pg, Sg, Eg, ug, ng in lines:
+                if j <= i or work[i]["layout"]["height_levels"] != work[j]["layout"]["height_levels"]:
+                    continue
+                if abs(uf @ ug) < 0.999 or nf @ ng < 0.99 or abs((Sg - Sf) @ nf) > JOIN_TOL_CM:
+                    continue
+                for ef, Pf in (("start", Sf), ("end", Ef)):
+                    away = uf if ef == "end" else -uf
+                    for eg, Pg, Pfar in (("start", Sg, Eg), ("end", Eg, Sg)):
+                        if f[ef] or g[eg] or np.hypot(*(Pf - Pg)) > JOIN_TOL_CM or (Pfar - Pf) @ away <= 0:
+                            continue
+                        found = (i, f, place, ef, uf, Pf, j, g, eg, ug, Pg)
+                        break
+                    if found:
+                        break
+                if found:
+                    break
+            if found:
+                break
+        if not found:
+            return
+        _join(work, *found)
+
+
+def _join(work, i, f, place, ef, uf, Pf, j, g, eg, ug, Pg):
+    lay = work[i]["layout"]
+    gs, n = list(g["segments"]), len(g["segments"])
+    if uf @ ug > 0:   # сегментите на g по посоката на f
+        g_seq, g_flip = gs, set(g["flip"])
+    else:             # обратно - и панелите 60 от другия край
+        g_seq, g_flip = gs[::-1], {n - 1 - k for k in range(n) if k not in g["flip"]}
+    fs, f_flip = list(f["segments"]), set(f["flip"])
+    if ef == "end":
+        gap = (Pg - Pf) @ uf
+        segs = fs[:-1] + [fs[-1] + gap + g_seq[0]] + g_seq[1:]
+        flip = f_flip | {len(fs) - 1 + k for k in g_flip if k > 0}
+        f["end"] = g["end"] if eg == "start" else g["start"]
+    else:
+        gap = (Pf - Pg) @ uf
+        m = len(g_seq)
+        segs = g_seq[:-1] + [g_seq[-1] + gap + fs[0]] + fs[1:]
+        flip = ({k for k in g_flip if k < m - 1} | ({m - 1} if 0 in f_flip else set())
+                | {m - 1 + k for k in f_flip if k > 0})
+        f["start"] = g["start"] if eg == "end" else g["end"]
+        fx, fy, f_axis = place[f["name"]][:3]
+        _move_face(lay, place, f, (fx if f_axis == 'x' else fy) - gap - sum(g_seq))
+    _set_face(lay, f, segs, flip)
+    work[j]["layout"]["faces"].remove(g)
+    work[j]["layout"]["face_place"].pop(g["name"], None)
 
 
 # ---------- Местата от чертежа (потребителят, 24.11.2026) ----------
@@ -839,7 +1146,7 @@ def generate_floor_pdf(pieces, positions, info, background=None):
     background: {"image": PIL картина, "cm_per_px"} - чертежът, бледо под елементите (по желание).
     """
     fig = plt.figure(figsize=(16.54, 11.69))
-    head = dt("3D план на етажа")
+    head = dt("3D план")
     if info.get("drawing"):
         head += " - " + dt("Чертеж: {name}", name=info["drawing"])
     fig.text(0.02, 0.965, head, fontsize=18, fontweight='bold', va='top')
