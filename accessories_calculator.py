@@ -133,10 +133,13 @@ def _tie_faces(layout: Dict[str, Any]) -> List[Dict[str, Any]]:
     челата).
     """
     faces = [f for f in layout["faces"] if f["length_cm"] > NARROW_LIMIT_CM]
+    # split()[0] - и разделената страна на обединен елемент („A (2)“)
     if layout["type"] == "column":
-        return [f for f in faces if f["name"] in ("A", "B")]
+        return [f for f in faces if f["name"].split()[0] in ("A", "B")]
     if layout["type"] == "wall":
-        return [f for f in faces if f["name"] == "A"]
+        # обединен елемент: страната, разделена от допира на друга част (A1 и „A1 (2)“) - срещу реброто няма шпилки
+        sides = {s: [f for f in faces if f["name"].split()[0] == s] for s in ("A", "A1")}
+        return sides["A1"] if len(sides["A1"]) > len(sides["A"]) else sides["A"]
     return [f for f in faces if f["name"].startswith(TIE_FACES_PREFIXES)]
 
 
@@ -328,6 +331,15 @@ def _prop_positions(length_cm: float, count: int) -> List[float]:
     return [round(edge + i * step, 1) for i in range(count)]
 
 
+def prop_face_names(layout: Dict[str, Any], letters: Tuple[str, ...]) -> List[str]:
+    """
+    Външните страни за вертикализаторите (A, B, C ...), по реда на буквите. При обединен елемент страната може да е
+    разделена от допира на друга част („A“ и „A (2)“) или да липсва (продължена от страна на друга част).
+    """
+    names = [f["name"] for f in layout["faces"]]
+    return [n for letter in letters for n in names if n.split()[0] == letter]
+
+
 def calculate_push_pull_props(layout: Dict[str, Any]) -> Dict[str, Any]:
     """
     Вертикализатори по Алгоритъма:
@@ -346,7 +358,7 @@ def calculate_push_pull_props(layout: Dict[str, Any]) -> Dict[str, Any]:
                         "positions_cm": [round(faces["A"]["length_cm"] / 2, 1), round(faces["B"]["length_cm"] / 2, 1)]})
     elif layout["type"] == "shaft":
         total = 0
-        for name in ("A", "B", "C", "D"):
+        for name in prop_face_names(layout, ("A", "B", "C", "D")):
             length = faces[name]["length_cm"]
             outer, _opposite = _props_on_sides(length, h)
             total += outer
@@ -354,9 +366,7 @@ def calculate_push_pull_props(layout: Dict[str, Any]) -> Dict[str, Any]:
                             "positions_cm": _prop_positions(length, outer)})
     else:
         total = 0
-        for name in ("A", "B", "C"):
-            if name not in faces:
-                continue
+        for name in prop_face_names(layout, ("A", "B", "C")):
             length = faces[name]["length_cm"]
             outer, opposite = _props_on_sides(length, h, layout["type"] == "wall")
             total += outer + opposite
